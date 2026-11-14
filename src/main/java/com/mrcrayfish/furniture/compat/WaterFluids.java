@@ -12,11 +12,12 @@ import java.util.Arrays;
 
 /**
  * 用水家具认哪些水（悠然服务器魔改）：配置 {@code water-fluids} 里列的流体名（Forge 流体注册名），默认原版水、
- * 悠然模组的矿泉水（fuild_mineral_water）、意志坚定的纯净水（purified_water）。没装对应模组的名字自动忽略。
+ * 悠然模组的矿泉水（fuild_mineral_water）、意志坚定的纯净水（purified_water）、工业时代 2 的蒸馏水（ic2distilled_water，服主 11-14）。
+ * 没装对应模组的名字自动忽略。
  */
 public final class WaterFluids
 {
-    public static final String[] DEFAULTS = {"water", "fuild_mineral_water", "purified_water"};
+    public static final String[] DEFAULTS = {"water", "fuild_mineral_water", "purified_water", "ic2distilled_water"};
 
     private WaterFluids() {}
 
