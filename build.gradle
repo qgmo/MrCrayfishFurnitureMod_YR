@@ -47,6 +47,13 @@ tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
 }
 
+processResources {
+    inputs.property 'mod_version', project.property('mod_version')
+    filesMatching('mcmod.info') {
+        expand('mod_version': project.property('mod_version'))
+    }
+}
+
 jar {
     manifest {
         attributes([
