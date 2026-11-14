@@ -497,7 +497,7 @@ cfm.desk_cabinet.info=這張書桌櫃可以連接其他書桌櫃以創建你想�
 cfm.mail_signed.info=來自%s
 cfm.present_unsigned.info=未署名
 cfm.digital_clock.info=會以24小時格式顯示世界的時間。需要裝一顆電池才會走：拿電池按右鍵放入（已有電池時與手上的交換），空手按右鍵取出。每2分鐘耗1 FE；SCP 的電池、IC2 的電池和其他提供 Forge Energy 的電池都可以。顯示器可以使用染料變更著色。
-cfm.tv_remote.info=允許你以無線的方式控制電視機。要變更電視機的頻道，只需要指向電視機並且右鍵點擊。要開關電視機，需要指向電視機、蹲下並且右鍵點擊。
+cfm.tv_remote.info=允許你以無線的方式控制電視機。要變更電視機的頻道，只需要指向電視機並且右鍵點擊。要開關電視機，需要指向電視機、蹲下並且右鍵點擊。需要電池：按一下耗 2 FE。合成時用的那顆電池會裝在遙控器裡。沒有指向電視機時蹲下並右鍵點擊，打開電池盒換電池。
 
 cfm.tv.success=成功下載GIF檔案
 cfm.tv.failed=無法下載檔案
@@ -660,3 +660,8 @@ advancements.cfm.whatdidyoueat=便秘
 advancements.cfm.whatdidyoueat.desc=也許我不會再吃它
 advancements.cfm.allclean=洗白白
 advancements.cfm.allclean.desc=洗澡
+cfm.tv_remote.no_battery=沒有電池
+cfm.tv_remote.charge=電池：%s / %s FE
+cfm.tv_remote.battery_compartment=電池盒
+cfm.message.remote_no_battery=遙控器裡沒有電池。沒有指向電視機時蹲下並右鍵點擊，打開電池盒裝電池。
+cfm.message.remote_empty=遙控器沒電了。

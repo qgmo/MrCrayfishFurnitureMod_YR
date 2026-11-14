@@ -8,7 +8,7 @@ import net.minecraft.item.ItemStack;
 /**
  * 工业时代 2 的电池（悠然服务器魔改）：用 IC2 的电器管理器取电，1 EU = 2 FE。
  * <p>
- * <b>引用了 IC2 的类，只能在装了 IC2 时加载</b>：调用前先 {@code Loader.isModLoaded("ic2")}（见 {@link ClockBatteries}）。
+ * <b>引用了 IC2 的类，只能在装了 IC2 时加载</b>：调用前先 {@code Loader.isModLoaded("ic2")}（见 {@link ItemBatteries}）。
  */
 final class Ic2Batteries
 {
@@ -22,9 +22,19 @@ final class Ic2Batteries
                 && ElectricItem.manager.getMaxCharge(stack) > 0;
     }
 
-    static boolean hasCharge(ItemStack stack)
+    static int chargeFe(ItemStack stack)
     {
-        return ClockPower.euToFe(ElectricItem.manager.getCharge(stack)) >= ClockPower.FE_PER_DRAIN;
+        return ClockPower.euToFe(ElectricItem.manager.getCharge(stack));
+    }
+
+    static int capacityFe(ItemStack stack)
+    {
+        return ClockPower.euToFe(ElectricItem.manager.getMaxCharge(stack));
+    }
+
+    static boolean hasCharge(ItemStack stack, int fe)
+    {
+        return chargeFe(stack) >= fe;
     }
 
     /** 取 fe 点电，够了才算成功；不够时不取（先试放，够再真放） */

@@ -5,9 +5,12 @@ import com.mrcrayfish.furniture.blocks.BlockCabinet;
 import com.mrcrayfish.furniture.gui.containers.ContainerEnvelope;
 import com.mrcrayfish.furniture.gui.containers.ContainerPackage;
 import com.mrcrayfish.furniture.gui.containers.ContainerPresent;
+import com.mrcrayfish.furniture.gui.containers.ContainerRemoteBattery;
 import com.mrcrayfish.furniture.gui.inventory.InventoryEnvelope;
 import com.mrcrayfish.furniture.gui.inventory.InventoryPackage;
 import com.mrcrayfish.furniture.gui.inventory.InventoryPresent;
+import com.mrcrayfish.furniture.gui.inventory.InventoryRemoteBattery;
+import com.mrcrayfish.furniture.items.ItemTVRemote;
 import com.mrcrayfish.furniture.init.FurnitureBlocks;
 import com.mrcrayfish.furniture.init.FurnitureItems;
 import com.mrcrayfish.furniture.tileentity.*;
@@ -25,6 +28,12 @@ public class GuiHandler implements IGuiHandler
     @Override
     public Object getServerGuiElement(int id, EntityPlayer player, World world, int x, int y, int z)
     {
+        // 电视遥控器的电池仓（悠然服务器魔改）：先按编号判断，不去看 0,0,0 处的方块实体
+        if(id == ItemTVRemote.GUI_ID)
+        {
+            ItemStack remote = player.getHeldItemMainhand();
+            return remote.getItem() == FurnitureItems.TV_REMOTE ? new ContainerRemoteBattery(player.inventory, new InventoryRemoteBattery(remote)) : null;
+        }
         TileEntity tileEntity = world.getTileEntity(new BlockPos(x, y, z));
         if(tileEntity instanceof TileEntityFurniture)
         {
@@ -70,6 +79,11 @@ public class GuiHandler implements IGuiHandler
     @Override
     public Object getClientGuiElement(int id, EntityPlayer player, World world, int x, int y, int z)
     {
+        if(id == ItemTVRemote.GUI_ID)
+        {
+            ItemStack remote = player.getHeldItemMainhand();
+            return remote.getItem() == FurnitureItems.TV_REMOTE ? new GuiRemoteBattery(player.inventory, new InventoryRemoteBattery(remote)) : null;
+        }
         TileEntity tileEntity = world.getTileEntity(new BlockPos(x, y, z));
         if(tileEntity instanceof IValueContainer && id == 1)
         {

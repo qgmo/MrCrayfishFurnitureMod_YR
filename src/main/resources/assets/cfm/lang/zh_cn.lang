@@ -481,7 +481,7 @@ cfm.desk_cabinet.info=书桌柜可以连接到其他书桌柜以设计出你想�
 cfm.mail_signed.info=来自%s
 cfm.present_unsigned.info=未签名的
 cfm.digital_clock.info=以24小时格式显示主世界的当前时间。需要装一节电池才会走：拿电池右键放入（已有电池时和手上的交换），空手右键取出。每2分钟耗1 FE；SCP 的电池、IC2 的电池和其他提供 Forge Energy 的电池都可以。显示器可以用你选择的染料来改变颜色。
-cfm.tv_remote.info=允许你无线控制电视。要切换频道，只需对准电视右击即可，你也可以通过潜行开启或关闭电视。
+cfm.tv_remote.info=允许你无线控制电视。要切换频道，只需对准电视右击即可，你也可以通过潜行开启或关闭电视。需要电池：按一下耗 2 FE。合成时用的那节电池会装在遥控器里。不对着电视时潜行右击，打开电池仓换电池。
 
 cfm.tv.success=成功下载 GIF 文件
 cfm.tv.failed=下载文件失败
@@ -640,3 +640,8 @@ advancements.cfm.whatdidyoueat=便秘
 advancements.cfm.whatdidyoueat.desc=也许我不会再吃一遍
 advancements.cfm.allclean=洗净
 advancements.cfm.allclean.desc=洗澡
+cfm.tv_remote.no_battery=没有电池
+cfm.tv_remote.charge=电池：%s / %s FE
+cfm.tv_remote.battery_compartment=电池仓
+cfm.message.remote_no_battery=遥控器里没有电池。不对着电视时潜行右击，打开电池仓装电池。
+cfm.message.remote_empty=遥控器没电了。
