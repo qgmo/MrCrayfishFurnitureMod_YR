@@ -289,7 +289,8 @@ public class GuiTVClientConfig extends GuiScreen
         int left = width / 2 - 150, right = width / 2 + 4;
         int top = top();
         drawCenteredString(fontRenderer, I18n.format("cfm.tv.config.title"), width / 2, top, 0xFFFFFF);
-        drawCenteredString(fontRenderer, libraryStatus(), width / 2, top + 12, 0xA0A0A0);
+        // 只有一行：太长（例如别的语言）就截掉，不压到两边
+        drawCenteredString(fontRenderer, fontRenderer.trimStringToWidth(libraryStatus(), width - 8), width / 2, top + 12, 0xA0A0A0);
         int y = top + ROW_FIELDS;
         fontRenderer.drawString(I18n.format("cfm.tv.config.start_range"), left, y + 4, 0xE0E0E0);
         fontRenderer.drawString(I18n.format("cfm.tv.config.hear_range"), right, y + 4, 0xE0E0E0);
@@ -322,7 +323,7 @@ public class GuiTVClientConfig extends GuiScreen
             case LOADING:
                 return I18n.format("cfm.tv.video.downloading", Math.round(NativeLibs.progress() * 100));
             case FAILED:
-                return I18n.format(NativeLibs.failedProxyAuth() ? "cfm.tv.video.download_failed_proxy_auth" : "cfm.tv.video.download_failed");
+                return I18n.format(NativeLibs.failedProxyAuth() ? "cfm.tv.config.lib_failed_proxy_auth" : "cfm.tv.config.lib_failed");
             case UNSUPPORTED:
                 return I18n.format("cfm.tv.video.unsupported");
             default:

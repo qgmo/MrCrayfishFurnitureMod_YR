@@ -739,6 +739,8 @@ cfm.tv.config.discarded=Changes discarded
 cfm.tv.config.draft=Unsaved changes restored
 cfm.tv.config.lib_ready=Video component: ready
 cfm.tv.config.lib_not_yet=Video component: downloaded on first use
+cfm.tv.config.lib_failed=Video component: download failed
+cfm.tv.config.lib_failed_proxy_auth=Video component: proxy login failed
 
 # Computer browser (Youran server fork)
 cfm.browser.power=Power

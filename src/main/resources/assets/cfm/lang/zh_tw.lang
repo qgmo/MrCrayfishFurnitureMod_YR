@@ -749,6 +749,8 @@ cfm.tv.config.discarded=已放棄修改
 cfm.tv.config.draft=上次沒儲存的修改還在
 cfm.tv.config.lib_ready=影片元件：已就緒
 cfm.tv.config.lib_not_yet=影片元件：第一次播放影片時下載
+cfm.tv.config.lib_failed=影片元件：下載失敗
+cfm.tv.config.lib_failed_proxy_auth=影片元件：代理認證失敗
 
 # 電腦瀏覽器（悠然伺服器魔改）
 cfm.browser.power=電源

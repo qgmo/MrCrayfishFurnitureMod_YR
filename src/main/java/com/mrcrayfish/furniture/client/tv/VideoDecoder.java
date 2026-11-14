@@ -80,6 +80,10 @@ final class VideoDecoder implements AutoCloseable
 
     void seek(long ms) throws Exception
     {
+        // 接口给的时长可能比流本身长：跳到流的末尾之后什么也解不出来（画面成噪点），改成从末尾前一点解，停在最后一帧
+        long length = lengthMs();
+        if(length > 0 && ms > length - 500)
+            ms = Math.max(0, length - 1500);
         if(video)
             grabber.setTimestamp(ms * 1000L);
         else

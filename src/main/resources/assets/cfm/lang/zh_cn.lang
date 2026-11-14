@@ -729,6 +729,8 @@ cfm.tv.config.discarded=已放弃修改
 cfm.tv.config.draft=上次没保存的修改还在
 cfm.tv.config.lib_ready=视频组件：已就绪
 cfm.tv.config.lib_not_yet=视频组件：第一次放视频时下载
+cfm.tv.config.lib_failed=视频组件：下载失败
+cfm.tv.config.lib_failed_proxy_auth=视频组件：代理认证失败
 
 # 电脑浏览器（悠然服务器魔改）
 cfm.browser.power=电源

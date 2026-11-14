@@ -126,6 +126,8 @@ public final class VideoSession
     private long syncPts = -1;
     private long lastSeekAt;
     private long lastStateAt;
+    /** 服务端状态变了、还没按新位置对齐过（一帧都没出时也要对齐） */
+    private boolean stateChanged;
     private final AudioOut audio = new AudioOut();
     private int seenGeneration;
     private final java.util.Map<Integer, List<Danmaku.Placed>> layouts = new java.util.HashMap<>();
@@ -553,6 +555,7 @@ public final class VideoSession
             // 服务端的状态变了（快进、后退、暂停…）：不等跳转的冷却，马上按新位置对齐
             lastStateAt = clock.getReceivedAtMs();
             lastSeekAt = 0;
+            stateChanged = true;
         }
         boolean atEnd = durationMs > 0 && target >= durationMs;
         if(atEnd && playing)
@@ -619,7 +622,14 @@ public final class VideoSession
         audio.pump(audioQueue, gen, target, playing, gain, x, y, z, fullscreen);
         // 对齐：偏差大就跳转
         long local = syncPts >= 0 ? syncPts : audio.position();
-        if(local >= 0 && nowMs - lastSeekAt > SEEK_COOLDOWN_MS && !(videoEof && videoQueue.isEmpty() && local <= target))
+        boolean resync = stateChanged;
+        stateChanged = false;
+        if(local < 0 && resync && videoEof && videoQueue.isEmpty())
+        {
+            // 解码线程停在读完处、一帧也没出（例如之前的位置在流的末尾之后），服务端又跳回前面了：照新位置重新解
+            requestSeek(target + (playing ? 300 : 0), nowMs);
+        }
+        else if(local >= 0 && nowMs - lastSeekAt > SEEK_COOLDOWN_MS && !(videoEof && videoQueue.isEmpty() && local <= target))
         {
             if(TvClock.decide(local, target) == TvClock.Action.SEEK)
             {
