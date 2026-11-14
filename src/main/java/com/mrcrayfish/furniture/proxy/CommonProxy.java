@@ -2,7 +2,6 @@ package com.mrcrayfish.furniture.proxy;
 
 import com.google.common.collect.ImmutableList;
 import com.mrcrayfish.furniture.Reference;
-import com.mrcrayfish.furniture.handler.CraftingHandler;
 import com.mrcrayfish.furniture.handler.SyncEvent;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.item.Item;
@@ -36,7 +35,6 @@ public class CommonProxy implements ProxyInterface
     @Override
     public void preInit()
     {
-        MinecraftForge.EVENT_BUS.register(new CraftingHandler());
         MinecraftForge.EVENT_BUS.register(new SyncEvent());
         MinecraftForge.EVENT_BUS.register(this);
     }

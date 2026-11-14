@@ -112,12 +112,20 @@ public class FurnitureCrafting
             super(group, input, result);
         }
 
+        /**
+         * 每切一次原木斧子掉的耐久（悠然服务器魔改）。CraftingHandler 从 2015 年起就是
+         * “切一次斧子 −16 还给玩家”；2018 年配方改成 JSON 时加的这个配方类型又把 −1 的斧子
+         * 留在合成格，两者叠加成了复制斧子。这里按 CraftingHandler 的原意：斧子留在合成格、
+         * 掉 16 点，不再另给。
+         */
+        static final int AXE_DAMAGE_PER_CUT = 16;
+
         private Random random = new Random();
 
         private ItemStack damageTool(ItemStack stack)
         {
             EntityPlayer craftingPlayer = ForgeHooks.getCraftingPlayer();
-            if(stack.attemptDamageItem(1, random, craftingPlayer instanceof EntityPlayerMP ? (EntityPlayerMP) craftingPlayer : null))
+            if(stack.attemptDamageItem(AXE_DAMAGE_PER_CUT, random, craftingPlayer instanceof EntityPlayerMP ? (EntityPlayerMP) craftingPlayer : null))
             {
                 ForgeEventFactory.onPlayerDestroyItem(craftingPlayer, stack, null);
                 return ItemStack.EMPTY;
