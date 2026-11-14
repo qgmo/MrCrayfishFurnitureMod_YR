@@ -1,7 +1,9 @@
 package com.mrcrayfish.furniture.network.message;
 
 import com.mrcrayfish.furniture.items.IAuthored;
+import com.mrcrayfish.furniture.network.ServerThread;
 import io.netty.buffer.ByteBuf;
+import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagString;
@@ -23,7 +25,12 @@ public class MessageSignItem implements IMessage, IMessageHandler<MessageSignIte
     @Override
     public IMessage onMessage(MessageSignItem message, MessageContext ctx)
     {
-        EntityPlayer player = ctx.getServerHandler().player;
+        ServerThread.run(ctx, player -> handle(message, player));
+        return null;
+    }
+
+    private static void handle(MessageSignItem message, EntityPlayerMP player)
+    {
         ItemStack stack = player.inventory.getCurrentItem();
         if(stack.getItem() instanceof IAuthored)
         {
@@ -36,6 +43,5 @@ public class MessageSignItem implements IMessage, IMessageHandler<MessageSignIte
             player.inventory.setInventorySlotContents(player.inventory.currentItem, signedItem);
             player.closeScreen();
         }
-        return null;
     }
 }

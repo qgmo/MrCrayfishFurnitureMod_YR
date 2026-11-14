@@ -2,7 +2,11 @@ package com.mrcrayfish.furniture.network.message;
 
 import com.mrcrayfish.furniture.tileentity.TileEntityDishwasher;
 import com.mrcrayfish.furniture.util.TileEntityUtil;
+import com.mrcrayfish.furniture.network.ServerThread;
+import com.mrcrayfish.furniture.gui.containers.ContainerDishwasher;
 import io.netty.buffer.ByteBuf;
+import net.minecraft.inventory.Container;
+import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.tileentity.TileEntity;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
@@ -46,14 +50,28 @@ public class MessageDishwasher implements IMessage, IMessageHandler<MessageDishw
     @Override
     public IMessage onMessage(MessageDishwasher message, MessageContext ctx)
     {
-        World world = ctx.getServerHandler().player.world;
+        ServerThread.run(ctx, player -> handle(message, player));
+        return null;
+    }
+
+    private static void handle(MessageDishwasher message, EntityPlayerMP player)
+    {
+        World world = player.world;
         BlockPos pos = new BlockPos(message.x, message.y, message.z);
         if(!world.isAreaLoaded(pos, 0))
-            return null;
+            return;
+
+        // 与其它机器一致：发包人必须开着这台洗碗机的界面
+        Container container = player.openContainer;
+        if(!(container instanceof ContainerDishwasher))
+            return;
+
         TileEntity tileEntity = world.getTileEntity(pos);
         if(tileEntity instanceof TileEntityDishwasher)
         {
             TileEntityDishwasher tileEntityDishwasher = (TileEntityDishwasher) tileEntity;
+            if(((ContainerDishwasher) container).getDishwasherInventory() != tileEntityDishwasher)
+                return;
             if(message.type == 0)
             {
                 tileEntityDishwasher.startWashing();
@@ -64,6 +82,5 @@ public class MessageDishwasher implements IMessage, IMessageHandler<MessageDishw
             }
             TileEntityUtil.markBlockForUpdate(world, pos);
         }
-        return null;
     }
 }

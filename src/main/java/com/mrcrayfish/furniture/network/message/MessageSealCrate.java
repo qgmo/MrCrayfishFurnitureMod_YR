@@ -3,7 +3,9 @@ package com.mrcrayfish.furniture.network.message;
 import com.mrcrayfish.furniture.gui.containers.ContainerComputer;
 import com.mrcrayfish.furniture.gui.containers.ContainerCrate;
 import com.mrcrayfish.furniture.tileentity.TileEntityCrate;
+import com.mrcrayfish.furniture.network.ServerThread;
 import io.netty.buffer.ByteBuf;
+import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.inventory.Container;
 import net.minecraft.tileentity.TileEntity;
 import net.minecraft.util.math.BlockPos;
@@ -44,23 +46,28 @@ public class MessageSealCrate implements IMessage, IMessageHandler<MessageSealCr
     @Override
     public IMessage onMessage(MessageSealCrate message, MessageContext ctx)
     {
-        World world = ctx.getServerHandler().player.world;
+        ServerThread.run(ctx, player -> handle(message, player));
+        return null;
+    }
+
+    private static void handle(MessageSealCrate message, EntityPlayerMP player)
+    {
+        World world = player.world;
         BlockPos pos = new BlockPos(message.x, message.y, message.z);
         if(!world.isAreaLoaded(pos, 0))
-            return null;
+            return;
 
-        Container container = ctx.getServerHandler().player.openContainer;
+        Container container = player.openContainer;
         if(!(container instanceof ContainerCrate))
-            return null;
+            return;
 
         TileEntity tileEntity = world.getTileEntity(pos);
         if(tileEntity instanceof TileEntityCrate)
         {
             TileEntityCrate crate = (TileEntityCrate) tileEntity;
             if(((ContainerCrate) container).getCrateInventory() != crate)
-                return null;
+                return;
             crate.seal();
         }
-        return null;
     }
 }

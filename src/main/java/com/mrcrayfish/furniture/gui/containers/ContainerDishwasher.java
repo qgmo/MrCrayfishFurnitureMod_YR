@@ -144,4 +144,9 @@ public class ContainerDishwasher extends Container
 
         return 5;
     }
+
+    public IInventory getDishwasherInventory()
+    {
+        return dishwasherInventory;
+    }
 }

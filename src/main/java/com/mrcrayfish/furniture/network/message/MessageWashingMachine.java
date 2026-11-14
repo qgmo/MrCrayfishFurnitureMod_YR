@@ -3,7 +3,9 @@ package com.mrcrayfish.furniture.network.message;
 import com.mrcrayfish.furniture.gui.containers.ContainerComputer;
 import com.mrcrayfish.furniture.gui.containers.ContainerWashingMachine;
 import com.mrcrayfish.furniture.tileentity.TileEntityWashingMachine;
+import com.mrcrayfish.furniture.network.ServerThread;
 import io.netty.buffer.ByteBuf;
+import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.inventory.Container;
 import net.minecraft.tileentity.TileEntity;
 import net.minecraft.util.math.BlockPos;
@@ -48,21 +50,27 @@ public class MessageWashingMachine implements IMessage, IMessageHandler<MessageW
     @Override
     public IMessage onMessage(MessageWashingMachine message, MessageContext ctx)
     {
-        World world = ctx.getServerHandler().player.world;
+        ServerThread.run(ctx, player -> handle(message, player));
+        return null;
+    }
+
+    private static void handle(MessageWashingMachine message, EntityPlayerMP player)
+    {
+        World world = player.world;
         BlockPos pos = new BlockPos(message.x, message.y, message.z);
         if(!world.isAreaLoaded(pos, 0))
-            return null;
+            return;
 
-        Container container = ctx.getServerHandler().player.openContainer;
+        Container container = player.openContainer;
         if(!(container instanceof ContainerWashingMachine))
-            return null;
+            return;
 
         TileEntity tileEntity = world.getTileEntity(pos);
         if(tileEntity instanceof TileEntityWashingMachine)
         {
             TileEntityWashingMachine tileEntityWashineMachine = (TileEntityWashingMachine) tileEntity;
             if(((ContainerWashingMachine) container).getWashingMachineInventory() != tileEntityWashineMachine)
-                return null;
+                return;
 
             if(message.type == 0)
             {
@@ -74,6 +82,5 @@ public class MessageWashingMachine implements IMessage, IMessageHandler<MessageW
             }
             world.notifyBlockUpdate(pos, world.getBlockState(pos), world.getBlockState(pos), 3);
         }
-        return null;
     }
 }

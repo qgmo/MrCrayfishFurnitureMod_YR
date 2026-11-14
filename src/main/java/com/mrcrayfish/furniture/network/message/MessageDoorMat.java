@@ -3,7 +3,9 @@ package com.mrcrayfish.furniture.network.message;
 import com.mrcrayfish.furniture.gui.containers.ContainerFreezer;
 import com.mrcrayfish.furniture.tileentity.TileEntityDoorMat;
 import com.mrcrayfish.furniture.util.TileEntityUtil;
+import com.mrcrayfish.furniture.network.ServerThread;
 import io.netty.buffer.ByteBuf;
+import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.tileentity.TileEntity;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
@@ -48,10 +50,16 @@ public class MessageDoorMat implements IMessage, IMessageHandler<MessageDoorMat,
     @Override
     public IMessage onMessage(MessageDoorMat message, MessageContext ctx)
     {
-        World world = ctx.getServerHandler().player.world;
+        ServerThread.run(ctx, player -> handle(message, player));
+        return null;
+    }
+
+    private static void handle(MessageDoorMat message, EntityPlayerMP player)
+    {
+        World world = player.world;
         BlockPos pos = new BlockPos(message.x, message.y, message.z);
         if(!world.isAreaLoaded(pos, 0))
-            return null;
+            return;
         TileEntity tileEntity = world.getTileEntity(pos);
         if(tileEntity instanceof TileEntityDoorMat)
         {
@@ -59,6 +67,5 @@ public class MessageDoorMat implements IMessage, IMessageHandler<MessageDoorMat,
             doorMat.setMessage(message.message);
             TileEntityUtil.markBlockForUpdate(world, pos);
         }
-        return null;
     }
 }

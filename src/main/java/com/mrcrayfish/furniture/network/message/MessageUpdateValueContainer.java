@@ -5,7 +5,9 @@ import com.mrcrayfish.furniture.MrCrayfishFurnitureMod;
 import com.mrcrayfish.furniture.gui.components.ValueComponent;
 import com.mrcrayfish.furniture.tileentity.IValueContainer;
 import com.mrcrayfish.furniture.util.TileEntityUtil;
+import com.mrcrayfish.furniture.network.ServerThread;
 import io.netty.buffer.ByteBuf;
+import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.tileentity.TileEntity;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
@@ -63,28 +65,33 @@ public class MessageUpdateValueContainer implements IMessage, IMessageHandler<Me
     @Override
     public IMessage onMessage(MessageUpdateValueContainer message, MessageContext ctx)
     {
-        //if(ctx.getServerHandler().player.isCreative()) //TODO make TV not use value container implementation
-        {
-            World world = ctx.getServerHandler().player.getServerWorld();
-            if(!world.isAreaLoaded(message.pos, 0))
-                return null;
+        ServerThread.run(ctx, player -> handle(message, player));
+        return null;
+    }
 
-            double distance = ctx.getServerHandler().player.getPosition().getDistance(message.pos.getX(), message.pos.getY(), message.pos.getZ());
+    private static void handle(MessageUpdateValueContainer message, EntityPlayerMP player)
+    {
+        //if(player.isCreative()) //TODO make TV not use value container implementation
+        {
+            World world = player.getServerWorld();
+            if(!world.isAreaLoaded(message.pos, 0))
+                return;
+
+            double distance = player.getPosition().getDistance(message.pos.getX(), message.pos.getY(), message.pos.getZ());
             if(distance > 8)
-                return null;
+                return;
 
             TileEntity tileEntity = world.getTileEntity(message.pos);
             if(tileEntity instanceof IValueContainer)
             {
-                String result = ((IValueContainer) tileEntity).updateEntries(message.entryMap, ctx.getServerHandler().player);
+                String result = ((IValueContainer) tileEntity).updateEntries(message.entryMap, player);
                 if(result != null)
                 {
                     MrCrayfishFurnitureMod.logger().warn(result);
-                    return null;
+                    return;
                 }
                 TileEntityUtil.syncToClient(tileEntity);
             }
         }
-        return null;
     }
 }

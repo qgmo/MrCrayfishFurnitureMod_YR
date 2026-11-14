@@ -4,6 +4,7 @@ import com.mrcrayfish.furniture.gui.containers.ContainerComputer;
 import com.mrcrayfish.furniture.gui.containers.ContainerMicrowave;
 import com.mrcrayfish.furniture.tileentity.TileEntityComputer;
 import com.mrcrayfish.furniture.util.TileEntityUtil;
+import com.mrcrayfish.furniture.network.ServerThread;
 import io.netty.buffer.ByteBuf;
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.inventory.Container;
@@ -49,26 +50,30 @@ public class MessageMineBayBrowse implements IMessage, IMessageHandler<MessageMi
     @Override
     public IMessage onMessage(MessageMineBayBrowse message, MessageContext ctx)
     {
-        EntityPlayerMP player = ctx.getServerHandler().player;
+        ServerThread.run(ctx, player -> handle(message, player));
+        return null;
+    }
+
+    private static void handle(MessageMineBayBrowse message, EntityPlayerMP player)
+    {
         World world = player.world;
         BlockPos pos = new BlockPos(message.x, message.y, message.z);
         if(!world.isAreaLoaded(pos, 0))
-            return null;
+            return;
 
-        Container container = ctx.getServerHandler().player.openContainer;
+        Container container = player.openContainer;
         if(!(container instanceof ContainerComputer))
-            return null;
+            return;
 
         TileEntity tile_entity = world.getTileEntity(pos);
         if(tile_entity instanceof TileEntityComputer)
         {
             TileEntityComputer tileEntityComputer = (TileEntityComputer) tile_entity;
             if(((ContainerComputer) container).getComputerInventory() != tileEntityComputer)
-                return null;
+                return;
 
             tileEntityComputer.setBrowsingInfo(message.itemNum);
-            TileEntityUtil.markBlockForUpdate(ctx.getServerHandler().player.world, pos);
+            TileEntityUtil.markBlockForUpdate(player.world, pos);
         }
-        return null;
     }
 }

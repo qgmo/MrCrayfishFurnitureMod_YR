@@ -4,7 +4,9 @@ import com.mrcrayfish.furniture.gui.containers.ContainerFreezer;
 import com.mrcrayfish.furniture.gui.containers.ContainerMicrowave;
 import com.mrcrayfish.furniture.tileentity.TileEntityMicrowave;
 import com.mrcrayfish.furniture.util.TileEntityUtil;
+import com.mrcrayfish.furniture.network.ServerThread;
 import io.netty.buffer.ByteBuf;
+import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.inventory.Container;
 import net.minecraft.tileentity.TileEntity;
 import net.minecraft.util.math.BlockPos;
@@ -49,21 +51,27 @@ public class MessageMicrowave implements IMessage, IMessageHandler<MessageMicrow
     @Override
     public IMessage onMessage(MessageMicrowave message, MessageContext ctx)
     {
-        World world = ctx.getServerHandler().player.world;
+        ServerThread.run(ctx, player -> handle(message, player));
+        return null;
+    }
+
+    private static void handle(MessageMicrowave message, EntityPlayerMP player)
+    {
+        World world = player.world;
         BlockPos pos = new BlockPos(message.x, message.y, message.z);
         if(!world.isAreaLoaded(pos, 0))
-            return null;
+            return;
 
-        Container container = ctx.getServerHandler().player.openContainer;
+        Container container = player.openContainer;
         if(!(container instanceof ContainerMicrowave))
-            return null;
+            return;
 
         TileEntity tileEntity = world.getTileEntity(pos);
         if(tileEntity instanceof TileEntityMicrowave)
         {
             TileEntityMicrowave tileEntityMicrowave = (TileEntityMicrowave) tileEntity;
             if(((ContainerMicrowave) container).getMicrowaveInventory() != tileEntityMicrowave)
-                return null;
+                return;
 
             if(message.type == 0)
             {
@@ -73,8 +81,7 @@ public class MessageMicrowave implements IMessage, IMessageHandler<MessageMicrow
             {
                 tileEntityMicrowave.stopCooking();
             }
-            TileEntityUtil.markBlockForUpdate(ctx.getServerHandler().player.world, pos);
+            TileEntityUtil.markBlockForUpdate(player.world, pos);
         }
-        return null;
     }
 }
