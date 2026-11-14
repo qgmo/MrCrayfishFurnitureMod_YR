@@ -23,6 +23,12 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 import com.mrcrayfish.furniture.blocks.BlockBath;
+import com.mrcrayfish.furniture.blocks.BlockBlender;
+import com.mrcrayfish.furniture.blocks.BlockCeilingLight;
+import com.mrcrayfish.furniture.blocks.BlockCup;
+import com.mrcrayfish.furniture.blocks.BlockEsky;
+import com.mrcrayfish.furniture.tileentity.TileEntityBlender;
+import com.mrcrayfish.furniture.tileentity.TileEntityCup;
 import com.mrcrayfish.furniture.blocks.BlockToilet;
 import com.mrcrayfish.furniture.init.FurnitureBlocks;
 import com.mrcrayfish.furniture.tileentity.TileEntityBath;
@@ -36,6 +42,7 @@ import com.mrcrayfish.furniture.water.WaterBasins;
  * <li>烤面包机：里面有面包片、没在烤时，空手潜行左键开始烤（原来是潜行 + 空手右键）；</li>
  * <li>马桶：潜行左键冲水（原来是潜行右键，服主 11-14 改）；</li>
  * <li>浴缸：潜行左键开 / 关放水（空手右键是坐下）；</li>
+ * <li>冰桶开盖 / 合盖、吸顶灯切换模式、喝放在地上的杯子、搅拌机开始搅拌：空手潜行左键（原来都是潜行 + 空手右键，服主 11-14 改）；</li>
  * <li>别的方块、或没有可做的操作时照常挖掘。</li>
  * </ul>
  * 做了操作就取消这次左键，方块不会被挖坏（两端都取消，客户端不会先把方块挖掉）。按住左键时客户端每 tick 都会再发一次，
@@ -70,6 +77,10 @@ public class SneakLeftClick
         HANDLERS.add(SneakLeftClick::toilet);
         HANDLERS.add(SneakLeftClick::bath);
         HANDLERS.add(SneakLeftClick::toaster);
+        HANDLERS.add(SneakLeftClick::esky);
+        HANDLERS.add(SneakLeftClick::ceilingLight);
+        HANDLERS.add(SneakLeftClick::cup);
+        HANDLERS.add(SneakLeftClick::blender);
         HANDLERS.add(SneakLeftClick::card);
     }
 
@@ -196,6 +207,38 @@ public class SneakLeftClick
             w.updateComparatorOutputLevel(p, w.getBlockState(p).getBlock());
             w.playSound(null, p.getX() + 0.5D, p.getY() + 0.5D, p.getZ() + 0.5D, FurnitureSounds.toaster_down, SoundCategory.BLOCKS, 0.75F, 1.0F);
         };
+    }
+
+    /** 冰桶：空手潜行左键开盖 / 合盖 */
+    private static Action esky(World world, BlockPos pos, TileEntity tileEntity, EntityPlayer player, ItemStack held)
+    {
+        if(!held.isEmpty() || !(world.getBlockState(pos).getBlock() instanceof BlockEsky))
+            return null;
+        return BlockEsky::toggleOpen;
+    }
+
+    /** 吸顶灯：空手潜行左键切换“右键开关 / 红石控制” */
+    private static Action ceilingLight(World world, BlockPos pos, TileEntity tileEntity, EntityPlayer player, ItemStack held)
+    {
+        if(!held.isEmpty() || !(world.getBlockState(pos).getBlock() instanceof BlockCeilingLight))
+            return null;
+        return BlockCeilingLight::toggleMode;
+    }
+
+    /** 放在地上的杯子：饿了、杯里有饮料时空手潜行左键喝掉 */
+    private static Action cup(World world, BlockPos pos, TileEntity tileEntity, EntityPlayer player, ItemStack held)
+    {
+        if(!held.isEmpty() || !(tileEntity instanceof TileEntityCup) || !BlockCup.canDrink(player, (TileEntityCup) tileEntity))
+            return null;
+        return BlockCup::drink;
+    }
+
+    /** 搅拌机：原料能做成饮料时空手潜行左键开始搅拌 */
+    private static Action blender(World world, BlockPos pos, TileEntity tileEntity, EntityPlayer player, ItemStack held)
+    {
+        if(!held.isEmpty() || !(tileEntity instanceof TileEntityBlender) || !BlockBlender.canStart((TileEntityBlender) tileEntity))
+            return null;
+        return BlockBlender::start;
     }
 
     private static void syncAppliance(TileEntity tileEntity)

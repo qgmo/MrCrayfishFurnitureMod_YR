@@ -31,6 +31,8 @@ public class TileEntityCup extends TileEntitySyncClient implements ISimpleInvent
     public void readFromNBT(NBTTagCompound tagCompound)
     {
         super.readFromNBT(tagCompound);
+        // 同步过来的是空杯时也要清掉（悠然服务器魔改：喝改在服务端做，客户端靠同步知道杯子空了）
+        this.item = null;
         if(tagCompound.hasKey("Item", 9))
         {
             NBTTagList tagList = (NBTTagList) tagCompound.getTag("Item");

@@ -47,6 +47,23 @@ public class BlockBlender extends BlockFurnitureTile
         super.onBlockPlacedBy(world, pos, state, placer, stack);
     }
 
+    /** 能不能开始搅拌（两端都调，判断一致）：没有做好的饮料、没在搅拌、原料能做成饮料 */
+    public static boolean canStart(TileEntityBlender blender)
+    {
+        return blender.drinkCount == 0 && !blender.isBlending() && blender.hasValidIngredients();
+    }
+
+    /** 开始搅拌（服务端，空手潜行 + 左键，见 {@code SneakLeftClick}；原来是潜行 + 空手右键） */
+    public static void start(World world, BlockPos pos, EntityPlayer player)
+    {
+        TileEntity tileEntity = world.getTileEntity(pos);
+        if(!(tileEntity instanceof TileEntityBlender) || !canStart((TileEntityBlender) tileEntity))
+            return;
+        ((TileEntityBlender) tileEntity).startBlending();
+        TileEntityUtil.markBlockForUpdate(world, pos);
+        world.updateComparatorOutputLevel(pos, world.getBlockState(pos).getBlock());
+    }
+
     @Override
     public boolean onBlockActivated(World worldIn, BlockPos pos, IBlockState state, EntityPlayer playerIn, EnumHand hand, EnumFacing facing, float hitX, float hitY, float hitZ)
     {
@@ -66,21 +83,10 @@ public class BlockBlender extends BlockFurnitureTile
                 }
                 else
                 {
-                    if(!tileEntityBlender.isBlending())
+                    // 开始搅拌改成空手潜行 + 左键（见 SneakLeftClick）：潜行 + 空手右键留给 Carry On（悠然服务器魔改）
+                    if(!tileEntityBlender.isBlending() && !playerIn.isSneaking())
                     {
-                        if(playerIn.isSneaking())
-                        {
-                            if(tileEntityBlender.hasValidIngredients())
-                            {
-                                tileEntityBlender.startBlending();
-                                TileEntityUtil.markBlockForUpdate(worldIn, pos);
-                                worldIn.updateComparatorOutputLevel(pos, this);
-                            }
-                        }
-                        else
-                        {
-                            tileEntityBlender.removeIngredient();
-                        }
+                        tileEntityBlender.removeIngredient();
                     }
                 }
             }

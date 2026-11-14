@@ -68,21 +68,8 @@ public class BlockCeilingLight extends Block implements IPowered
     {
         if(!worldIn.isRemote)
         {
-            if(playerIn.isSneaking())
-            {
-                Mode mode = (Mode) state.getValue(MODE);
-                if(mode == Mode.RIGHT_CLICK)
-                {
-                    worldIn.setBlockState(pos, state.withProperty(MODE, Mode.REDSTONE));
-                    playerIn.sendMessage(new TextComponentTranslation("cfm.message.ceiling_light.mode1"));
-                }
-                else
-                {
-                    worldIn.setBlockState(pos, state.withProperty(MODE, Mode.RIGHT_CLICK));
-                    playerIn.sendMessage(new TextComponentTranslation("cfm.message.ceiling_light.mode2"));
-                }
-            }
-            else if(state.getValue(MODE) == Mode.RIGHT_CLICK)
+            // 切换模式改成空手潜行 + 左键（见 SneakLeftClick）：潜行 + 空手右键留给 Carry On（悠然服务器魔改）
+            if(!playerIn.isSneaking() && state.getValue(MODE) == Mode.RIGHT_CLICK)
             {
                 if(this == FurnitureBlocks.CEILING_LIGHT_ON)
                 {
@@ -95,6 +82,24 @@ public class BlockCeilingLight extends Block implements IPowered
             }
         }
         return true;
+    }
+
+    /** 切换“右键开关 / 红石控制”（服务端，空手潜行 + 左键，见 {@code SneakLeftClick}；原来是潜行 + 空手右键） */
+    public static void toggleMode(World world, BlockPos pos, EntityPlayer player)
+    {
+        IBlockState state = world.getBlockState(pos);
+        if(!(state.getBlock() instanceof BlockCeilingLight))
+            return;
+        if(state.getValue(MODE) == Mode.RIGHT_CLICK)
+        {
+            world.setBlockState(pos, state.withProperty(MODE, Mode.REDSTONE));
+            player.sendMessage(new TextComponentTranslation("cfm.message.ceiling_light.mode1"));
+        }
+        else
+        {
+            world.setBlockState(pos, state.withProperty(MODE, Mode.RIGHT_CLICK));
+            player.sendMessage(new TextComponentTranslation("cfm.message.ceiling_light.mode2"));
+        }
     }
 
     @Override

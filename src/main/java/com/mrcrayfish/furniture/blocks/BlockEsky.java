@@ -73,25 +73,8 @@ public class BlockEsky extends BlockFurnitureTile
     @Override
     public boolean onBlockActivated(World worldIn, BlockPos pos, IBlockState state, EntityPlayer playerIn, EnumHand hand, EnumFacing facing, float hitX, float hitY, float hitZ)
     {
-        if(playerIn.isSneaking())
-        {
-            TileEntity tileEntity = worldIn.getTileEntity(pos);
-            if(state.getValue(OPENED))
-            {
-                worldIn.playSound(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5, FurnitureSounds.cabinet_close, SoundCategory.BLOCKS, 0.75F, 0.6F, false);
-            }
-            else
-            {
-                worldIn.playSound(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5, FurnitureSounds.cabinet_open, SoundCategory.BLOCKS, 0.75F, 0.7F, false);
-            }
-            worldIn.setBlockState(pos, state.withProperty(OPENED, !state.getValue(OPENED)));
-            if(tileEntity != null)
-            {
-                tileEntity.validate();
-                worldIn.setTileEntity(pos, tileEntity);
-            }
-        }
-        else
+        // 开盖、合盖改成空手潜行 + 左键（见 SneakLeftClick）：潜行 + 空手右键留给 Carry On（悠然服务器魔改）
+        if(!playerIn.isSneaking())
         {
             TileEntity tileEntity = worldIn.getTileEntity(pos);
             if(tileEntity instanceof TileEntityEsky)
@@ -122,6 +105,23 @@ public class BlockEsky extends BlockFurnitureTile
             }
         }
         return true;
+    }
+
+    /** 开盖 / 合盖（服务端，空手潜行 + 左键，见 {@code SneakLeftClick}；原来是潜行 + 空手右键） */
+    public static void toggleOpen(World world, BlockPos pos, EntityPlayer player)
+    {
+        IBlockState state = world.getBlockState(pos);
+        if(!(state.getBlock() instanceof BlockEsky))
+            return;
+        TileEntity tileEntity = world.getTileEntity(pos);
+        boolean opened = state.getValue(OPENED);
+        world.playSound(null, pos, opened ? FurnitureSounds.cabinet_close : FurnitureSounds.cabinet_open, SoundCategory.BLOCKS, 0.75F, opened ? 0.6F : 0.7F);
+        world.setBlockState(pos, state.withProperty(OPENED, !opened));
+        if(tileEntity != null)
+        {
+            tileEntity.validate();
+            world.setTileEntity(pos, tileEntity);
+        }
     }
 
     @Override

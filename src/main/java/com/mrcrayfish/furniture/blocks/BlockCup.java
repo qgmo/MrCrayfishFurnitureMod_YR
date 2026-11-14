@@ -18,7 +18,6 @@ import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.tileentity.TileEntity;
 import net.minecraft.util.BlockRenderLayer;
 import net.minecraft.util.EnumFacing;
-import net.minecraft.util.EnumHand;
 import net.minecraft.util.SoundCategory;
 import net.minecraft.util.math.AxisAlignedBB;
 import net.minecraft.util.math.BlockPos;
@@ -42,33 +41,35 @@ public class BlockCup extends Block implements ITileEntityProvider
         this.setDefaultState(this.blockState.getBaseState());
     }
 
-    @Override
-    public boolean onBlockActivated(World world, BlockPos pos, IBlockState state, EntityPlayer player, EnumHand hand, EnumFacing facing, float hitX, float hitY, float hitZ)
+    /**
+     * 放在地上的杯子能不能喝（两端都调，判断一致）：不是创造模式、饿了、杯里有饮料。
+     * 喝改成空手潜行 + 左键（见 {@code SneakLeftClick}）：原来的潜行 + 空手右键留给 Carry On（悠然服务器魔改）。
+     */
+    public static boolean canDrink(EntityPlayer player, TileEntityCup tileEntityCup)
     {
-        if(player.isSneaking() && !player.isCreative() && player.getFoodStats().needFood())
-        {
-            if(world.getTileEntity(pos) instanceof TileEntityCup)
-            {
-                TileEntityCup tileEntityCup = (TileEntityCup) world.getTileEntity(pos);
-                ItemStack cup = tileEntityCup.getDrink();
-                if(cup != null && cup.hasTagCompound())
-                {
-                    tileEntityCup.clear();
-                    if(!world.isRemote)
-                    {
-                        int heal = cup.getTagCompound().getInteger("HealAmount");
-                        player.getFoodStats().addStats(heal, 0.5F);
-                    }
-                    else
-                    {
-                        world.playSound(player, player.getPosition(), SoundEvents.ENTITY_GENERIC_DRINK, SoundCategory.PLAYERS, 1.0F, 1.0F);
-                        world.playSound(player, player.getPosition(), SoundEvents.ENTITY_PLAYER_BURP, SoundCategory.PLAYERS, 1.0F, 1.0F);
-                    }
-                    return true;
-                }
-            }
-        }
-        return false;
+        if(player.isCreative() || !player.getFoodStats().needFood())
+            return false;
+        ItemStack cup = tileEntityCup.getDrink();
+        return cup != null && cup.hasTagCompound();
+    }
+
+    /** 喝掉放在地上的杯子里的饮料（服务端） */
+    public static void drink(World world, BlockPos pos, EntityPlayer player)
+    {
+        TileEntity tileEntity = world.getTileEntity(pos);
+        if(!(tileEntity instanceof TileEntityCup))
+            return;
+        TileEntityCup tileEntityCup = (TileEntityCup) tileEntity;
+        if(!canDrink(player, tileEntityCup))
+            return;
+        ItemStack cup = tileEntityCup.getDrink();
+        tileEntityCup.clear();
+        tileEntityCup.markDirty();
+        tileEntityCup.sync();
+        int heal = cup.getTagCompound().getInteger("HealAmount");
+        player.getFoodStats().addStats(heal, 0.5F);
+        world.playSound(null, player.posX, player.posY, player.posZ, SoundEvents.ENTITY_GENERIC_DRINK, SoundCategory.PLAYERS, 1.0F, 1.0F);
+        world.playSound(null, player.posX, player.posY, player.posZ, SoundEvents.ENTITY_PLAYER_BURP, SoundCategory.PLAYERS, 1.0F, 1.0F);
     }
 
     @Override
