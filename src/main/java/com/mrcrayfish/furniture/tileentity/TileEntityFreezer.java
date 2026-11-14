@@ -15,9 +15,23 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.util.EnumFacing;
 import net.minecraft.util.ITickable;
+import com.mrcrayfish.furniture.power.ApplianceEnergy;
+import com.mrcrayfish.furniture.power.ApplianceFaces;
+import com.mrcrayfish.furniture.power.IAppliance;
+import com.mrcrayfish.furniture.util.AppliancePower;
+import com.mrcrayfish.furniture.util.TileEntityUtil;
+import net.minecraftforge.common.capabilities.Capability;
+import net.minecraftforge.energy.CapabilityEnergy;
+import javax.annotation.Nullable;
 
-public class TileEntityFreezer extends TileEntityFurniture implements ISidedInventory, ITickable
+/**
+ * 悠然服务器魔改：冰箱（冷冻柜 + 上面的冷藏室算一台）要用电。一直耗 1 FE/t，冷冻时再加 8 FE/t；没电时冷冻暂停，
+ * 冷藏室照样能存取。电从冷冻柜底面、背面或冷藏室背面进，能量单元卡插在冷冻柜界面里（见 {@link ApplianceEnergy}）。
+ */
+public class TileEntityFreezer extends TileEntityFurniture implements ISidedInventory, ITickable, IAppliance
 {
+    private final ApplianceEnergy energy = new ApplianceEnergy(this, AppliancePower.FRIDGE + AppliancePower.FREEZING, ApplianceFaces.bottomAndBack(this), () -> TileEntityUtil.markBlockForUpdate(world, pos));
+
     private static final int[] slots_bottom = new int[]{2};
     private static final int[] slots_sides = new int[]{0, 1};
 
@@ -157,12 +171,19 @@ public class TileEntityFreezer extends TileEntityFurniture implements ISidedInve
     @Override
     public void update()
     {
+        boolean freezePowered = this.payPower();
         if(freezing)
         {
             if(!canFreeze())
             {
                 freezing = false;
                 world.updateComparatorOutputLevel(pos, blockType);
+                return;
+            }
+
+            // 没电时冷冻暂停：进度、剩余冰量都不动
+            if(!freezePowered)
+            {
                 return;
             }
 
@@ -205,6 +226,27 @@ public class TileEntityFreezer extends TileEntityFurniture implements ISidedInve
     }
 
 
+    /**
+     * 付这一 tick 的电（服务端）：一直耗 1 FE/t，冷冻时一共 9 FE/t（付不起冷冻那份时，常耗的 1 FE 照付）。
+     * 返回这一 tick 冷冻有没有电；客户端返回同步来的状态。
+     */
+    private boolean payPower()
+    {
+        if(world.isRemote)
+            return energy.isRunning();
+        boolean freezeOk = false;
+        if(freezing && canFreeze())
+        {
+            freezeOk = energy.draw(AppliancePower.FRIDGE + AppliancePower.FREEZING);
+        }
+        if(!freezeOk)
+        {
+            energy.draw(AppliancePower.FRIDGE);
+        }
+        energy.setRunning(freezeOk);
+        return freezeOk;
+    }
+
     @Override
     public void readFromNBT(NBTTagCompound tagCompound)
     {
@@ -213,6 +255,7 @@ public class TileEntityFreezer extends TileEntityFurniture implements ISidedInve
         this.progress = tagCompound.getInteger("Progress");
         this.fuelTime = tagCompound.getInteger("FuelTime");
         this.timeRemaining = tagCompound.getInteger("Remaining");
+        this.energy.readFromNBT(tagCompound);
     }
 
     @Override
@@ -223,6 +266,7 @@ public class TileEntityFreezer extends TileEntityFurniture implements ISidedInve
         tagCompound.setInteger("Progress", progress);
         tagCompound.setInteger("FuelTime", fuelTime);
         tagCompound.setInteger("Remaining", timeRemaining);
+        this.energy.writeToNBT(tagCompound);
         return tagCompound;
     }
 
@@ -257,5 +301,28 @@ public class TileEntityFreezer extends TileEntityFurniture implements ISidedInve
     {
         this.fillWithLoot(playerIn);
         return new ContainerFreezer(playerInventory, this);
+    }
+
+    @Override
+    public boolean hasCapability(Capability<?> capability, @Nullable EnumFacing facing)
+    {
+        if(capability == CapabilityEnergy.ENERGY)
+            return energy.isInputFace(facing);
+        return super.hasCapability(capability, facing);
+    }
+
+    @Nullable
+    @Override
+    public <T> T getCapability(Capability<T> capability, @Nullable EnumFacing facing)
+    {
+        if(capability == CapabilityEnergy.ENERGY)
+            return energy.isInputFace(facing) ? CapabilityEnergy.ENERGY.cast(energy.port()) : null;
+        return super.getCapability(capability, facing);
+    }
+
+    @Override
+    public ApplianceEnergy getAppliance()
+    {
+        return energy;
     }
 }

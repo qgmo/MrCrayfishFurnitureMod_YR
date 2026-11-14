@@ -16,10 +16,24 @@ import net.minecraft.inventory.Slot;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemArmor;
 import net.minecraft.item.ItemStack;
+import com.mrcrayfish.furniture.power.ApplianceContainers;
+import com.mrcrayfish.furniture.power.IAppliance;
+import com.mrcrayfish.furniture.gui.slots.SlotPowerCard;
+import net.minecraft.inventory.IContainerListener;
+import javax.annotation.Nullable;
 
 public class ContainerWashingMachine extends Container
 {
     private IInventory washingMachineInventory;
+    /** 玩家背包槽位结束处（不含）；之后是能量单元卡槽（悠然服务器魔改） */
+    private int end;
+    private int cardIndex = -1;
+    @Nullable
+    private SlotPowerCard cardSlot;
+    private final ApplianceContainers.Sync sync = new ApplianceContainers.Sync();
+
+    /** 卡槽在界面上的位置 */
+    public static final int CARD_X = 34, CARD_Y = 102;
 
     public ContainerWashingMachine(IInventory playerInventory, IInventory washingMachineInventory)
     {
@@ -43,6 +57,47 @@ public class ContainerWashingMachine extends Container
         {
             this.addSlotToContainer(new Slot(playerInventory, i, i * 18 + 8, 204));
         }
+
+        this.end = this.inventorySlots.size();
+        if(washingMachineInventory instanceof IAppliance)
+        {
+            this.cardSlot = ApplianceContainers.cardSlot((IAppliance) washingMachineInventory, washingMachineInventory, CARD_X, CARD_Y);
+            if(this.cardSlot != null)
+            {
+                this.cardIndex = this.inventorySlots.size();
+                this.addSlotToContainer(this.cardSlot);
+            }
+        }
+    }
+
+    @Nullable
+    public SlotPowerCard getCardSlot()
+    {
+        return cardSlot;
+    }
+
+    @Override
+    public void addListener(IContainerListener listener)
+    {
+        super.addListener(listener);
+        if(washingMachineInventory instanceof IAppliance)
+            sync.addListener(this, listener, ((IAppliance) washingMachineInventory).getAppliance());
+    }
+
+    @Override
+    public void detectAndSendChanges()
+    {
+        super.detectAndSendChanges();
+        if(washingMachineInventory instanceof IAppliance)
+            sync.detect(this, this.listeners, ((IAppliance) washingMachineInventory).getAppliance());
+    }
+
+    @Override
+    public void updateProgressBar(int id, int data)
+    {
+        if(washingMachineInventory instanceof IAppliance && ApplianceContainers.Sync.update(id, data, ((IAppliance) washingMachineInventory).getAppliance()))
+            return;
+        super.updateProgressBar(id, data);
     }
 
     @Override
@@ -54,6 +109,11 @@ public class ContainerWashingMachine extends Container
     @Override
     public ItemStack transferStackInSlot(EntityPlayer player, int slotNum)
     {
+        ItemStack card = ApplianceContainers.transfer(this, slotNum, cardIndex, 5, end, this::mergeItemStack);
+        if(card != null)
+            return card;
+        if(slotNum >= end)
+            return ItemStack.EMPTY;
         ItemStack itemCopy = ItemStack.EMPTY;
         Slot slot = this.inventorySlots.get(slotNum);
 
@@ -64,7 +124,7 @@ public class ContainerWashingMachine extends Container
 
             if(slotNum < 5)
             {
-                if(!this.mergeItemStack(item, 5, this.inventorySlots.size(), false))
+                if(!this.mergeItemStack(item, 5, end, false))
                 {
                     return ItemStack.EMPTY;
                 }
@@ -78,16 +138,16 @@ public class ContainerWashingMachine extends Container
                     {
                         return ItemStack.EMPTY;
                     }
-                    else if(slotNum > 4 && slotNum < this.inventorySlots.size() - 9)
+                    else if(slotNum > 4 && slotNum < end - 9)
                     {
-                        if(!this.mergeItemStack(item, this.inventorySlots.size() - 9, this.inventorySlots.size(), false))
+                        if(!this.mergeItemStack(item, end - 9, end, false))
                         {
                             return ItemStack.EMPTY;
                         }
                     }
-                    else if(slotNum >= this.inventorySlots.size() - 9 && slotNum < this.inventorySlots.size())
+                    else if(slotNum >= end - 9 && slotNum < end)
                     {
-                        if(!this.mergeItemStack(item, 5, this.inventorySlots.size() - 9, false))
+                        if(!this.mergeItemStack(item, 5, end - 9, false))
                         {
                             return ItemStack.EMPTY;
                         }
@@ -100,16 +160,16 @@ public class ContainerWashingMachine extends Container
                         return ItemStack.EMPTY;
                     }
                 }
-                else if(slotNum > 4 && slotNum < this.inventorySlots.size() - 9)
+                else if(slotNum > 4 && slotNum < end - 9)
                 {
-                    if(!this.mergeItemStack(item, this.inventorySlots.size() - 9, this.inventorySlots.size(), false))
+                    if(!this.mergeItemStack(item, end - 9, end, false))
                     {
                         return ItemStack.EMPTY;
                     }
                 }
-                else if(slotNum >= this.inventorySlots.size() - 9 && slotNum < this.inventorySlots.size())
+                else if(slotNum >= end - 9 && slotNum < end)
                 {
-                    if(!this.mergeItemStack(item, 5, this.inventorySlots.size() - 9, false))
+                    if(!this.mergeItemStack(item, 5, end - 9, false))
                     {
                         return ItemStack.EMPTY;
                     }

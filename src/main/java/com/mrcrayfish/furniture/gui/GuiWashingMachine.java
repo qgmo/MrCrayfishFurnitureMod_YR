@@ -12,6 +12,7 @@ import net.minecraft.entity.player.InventoryPlayer;
 import net.minecraft.util.ResourceLocation;
 import org.lwjgl.input.Keyboard;
 import org.lwjgl.opengl.GL11;
+import java.util.List;
 
 public class GuiWashingMachine extends GuiContainer
 {
@@ -19,10 +20,12 @@ public class GuiWashingMachine extends GuiContainer
     private TileEntityWashingMachine tileEntityWashingMachine;
 
     private GuiButton button_start;
+    private final ContainerWashingMachine powerContainer;
 
     public GuiWashingMachine(InventoryPlayer inventoryPlayer, TileEntityWashingMachine tileEntityWashingMachine)
     {
         super(new ContainerWashingMachine(inventoryPlayer, tileEntityWashingMachine));
+        this.powerContainer = (ContainerWashingMachine) this.inventorySlots;
         this.tileEntityWashingMachine = tileEntityWashingMachine;
         this.xSize = 176;
         this.ySize = 228;
@@ -69,6 +72,11 @@ public class GuiWashingMachine extends GuiContainer
         this.drawDefaultBackground();
         super.drawScreen(mouseX, mouseY, partialTicks);
         this.renderHoveredToolTip(mouseX, mouseY);
+        List<String> power = ApplianceGui.tooltip(guiLeft, guiTop, ContainerWashingMachine.CARD_X, ContainerWashingMachine.CARD_Y, powerContainer.getCardSlot(), tileEntityWashingMachine.getAppliance(), mouseX, mouseY);
+        if(power != null)
+        {
+            drawHoveringText(power, mouseX, mouseY);
+        }
 
         if(isPointInRegion(37, 9, 11, 11, mouseX, mouseY))
         {
@@ -102,6 +110,7 @@ public class GuiWashingMachine extends GuiContainer
         int l = (width - xSize) / 2;
         int i1 = (height - ySize) / 2;
         this.drawTexturedModalRect(l, i1, 0, 0, xSize, ySize);
+        ApplianceGui.draw(l, i1, ContainerWashingMachine.CARD_X, ContainerWashingMachine.CARD_Y, powerContainer.getCardSlot(), tileEntityWashingMachine.getAppliance());
 
         if(tileEntityWashingMachine.isWashing())
         {

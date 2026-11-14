@@ -113,6 +113,15 @@ public class GuiComputer extends GuiContainer
     @Override
     protected void drawGuiContainerForegroundLayer(int par1, int par2)
     {
+        // 没电（悠然服务器魔改）：屏幕黑掉，按钮不能点；槽里的东西照旧留着
+        boolean on = tileEntityComputer.getAppliance().isRunning();
+        left.visible = right.visible = button_buy.visible = on;
+        if(!on)
+        {
+            this.fontRenderer.drawString(I18n.format("container.inventory"), 8, (ySize - 103), 4210752);
+            drawRect(37, -5, 139, 61, 0xFF000000);
+            return;
+        }
         this.fontRenderer.drawString(I18n.format("container.inventory"), 8, (ySize - 103), 4210752);
 
         GL11.glPushMatrix();

@@ -16,9 +16,22 @@ import net.minecraft.util.ITickable;
 import net.minecraft.util.SoundCategory;
 
 import java.util.Random;
+import com.mrcrayfish.furniture.power.ApplianceEnergy;
+import com.mrcrayfish.furniture.power.ApplianceFaces;
+import com.mrcrayfish.furniture.power.IAppliance;
+import com.mrcrayfish.furniture.util.AppliancePower;
+import com.mrcrayfish.furniture.util.TileEntityUtil;
+import net.minecraftforge.common.capabilities.Capability;
+import net.minecraftforge.energy.CapabilityEnergy;
+import javax.annotation.Nullable;
 
-public class TileEntityMicrowave extends TileEntityFurniture implements ISidedInventory, ITickable
+/**
+ * 悠然服务器魔改：要用电，加热时 12 FE/t，没电暂停；只从底面进电，可插能量单元卡（见 {@link ApplianceEnergy}）。
+ */
+public class TileEntityMicrowave extends TileEntityFurniture implements ISidedInventory, ITickable, IAppliance
 {
+    private final ApplianceEnergy energy = new ApplianceEnergy(this, AppliancePower.MICROWAVE, ApplianceFaces.bottom(), () -> TileEntityUtil.markBlockForUpdate(world, pos));
+
     private Random rand = new Random();
 
     private static final int[] slot = new int[]{0};
@@ -66,6 +79,11 @@ public class TileEntityMicrowave extends TileEntityFurniture implements ISidedIn
     @Override
     public void update()
     {
+        // 没电时暂停（进度不动、不响）
+        if(!energy.tick(cooking, AppliancePower.MICROWAVE) && cooking)
+        {
+            return;
+        }
         if(cooking)
         {
             if(this.world.isRemote)
@@ -116,6 +134,7 @@ public class TileEntityMicrowave extends TileEntityFurniture implements ISidedIn
         super.readFromNBT(tagCompound);
         this.cooking = tagCompound.getBoolean("Coooking");
         this.progress = tagCompound.getInteger("Progress");
+        this.energy.readFromNBT(tagCompound);
     }
 
     @Override
@@ -124,6 +143,7 @@ public class TileEntityMicrowave extends TileEntityFurniture implements ISidedIn
         super.writeToNBT(tagCompound);
         tagCompound.setBoolean("Coooking", cooking);
         tagCompound.setInteger("Progress", progress);
+        this.energy.writeToNBT(tagCompound);
         return tagCompound;
     }
 
@@ -162,5 +182,28 @@ public class TileEntityMicrowave extends TileEntityFurniture implements ISidedIn
     {
         this.fillWithLoot(playerIn);
         return new ContainerMicrowave(playerInventory, this);
+    }
+
+    @Override
+    public boolean hasCapability(Capability<?> capability, @Nullable EnumFacing facing)
+    {
+        if(capability == CapabilityEnergy.ENERGY)
+            return energy.isInputFace(facing);
+        return super.hasCapability(capability, facing);
+    }
+
+    @Nullable
+    @Override
+    public <T> T getCapability(Capability<T> capability, @Nullable EnumFacing facing)
+    {
+        if(capability == CapabilityEnergy.ENERGY)
+            return energy.isInputFace(facing) ? CapabilityEnergy.ENERGY.cast(energy.port()) : null;
+        return super.getCapability(capability, facing);
+    }
+
+    @Override
+    public ApplianceEnergy getAppliance()
+    {
+        return energy;
     }
 }

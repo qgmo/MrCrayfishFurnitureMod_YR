@@ -9,10 +9,24 @@ import net.minecraft.inventory.Container;
 import net.minecraft.inventory.IInventory;
 import net.minecraft.inventory.Slot;
 import net.minecraft.item.ItemStack;
+import com.mrcrayfish.furniture.power.ApplianceContainers;
+import com.mrcrayfish.furniture.power.IAppliance;
+import com.mrcrayfish.furniture.gui.slots.SlotPowerCard;
+import net.minecraft.inventory.IContainerListener;
+import javax.annotation.Nullable;
 
 public class ContainerFreezer extends Container
 {
     private IInventory freezerInventory;
+    /** 玩家背包槽位结束处（不含）；之后是能量单元卡槽（悠然服务器魔改） */
+    private int end;
+    private int cardIndex = -1;
+    @Nullable
+    private SlotPowerCard cardSlot;
+    private final ApplianceContainers.Sync sync = new ApplianceContainers.Sync();
+
+    /** 卡槽在界面上的位置 */
+    public static final int CARD_X = 84, CARD_Y = 6;
 
     public ContainerFreezer(IInventory playerInventory, IInventory freezerInventory)
     {
@@ -35,6 +49,47 @@ public class ContainerFreezer extends Container
         {
             this.addSlotToContainer(new Slot(playerInventory, i, i * 18 + 8, 135));
         }
+
+        this.end = this.inventorySlots.size();
+        if(freezerInventory instanceof IAppliance)
+        {
+            this.cardSlot = ApplianceContainers.cardSlot((IAppliance) freezerInventory, freezerInventory, CARD_X, CARD_Y);
+            if(this.cardSlot != null)
+            {
+                this.cardIndex = this.inventorySlots.size();
+                this.addSlotToContainer(this.cardSlot);
+            }
+        }
+    }
+
+    @Nullable
+    public SlotPowerCard getCardSlot()
+    {
+        return cardSlot;
+    }
+
+    @Override
+    public void addListener(IContainerListener listener)
+    {
+        super.addListener(listener);
+        if(freezerInventory instanceof IAppliance)
+            sync.addListener(this, listener, ((IAppliance) freezerInventory).getAppliance());
+    }
+
+    @Override
+    public void detectAndSendChanges()
+    {
+        super.detectAndSendChanges();
+        if(freezerInventory instanceof IAppliance)
+            sync.detect(this, this.listeners, ((IAppliance) freezerInventory).getAppliance());
+    }
+
+    @Override
+    public void updateProgressBar(int id, int data)
+    {
+        if(freezerInventory instanceof IAppliance && ApplianceContainers.Sync.update(id, data, ((IAppliance) freezerInventory).getAppliance()))
+            return;
+        super.updateProgressBar(id, data);
     }
 
     @Override
@@ -45,6 +100,11 @@ public class ContainerFreezer extends Container
 
     public ItemStack transferStackInSlot(EntityPlayer player, int slotNum)
     {
+        ItemStack card = ApplianceContainers.transfer(this, slotNum, cardIndex, 3, end, this::mergeItemStack);
+        if(card != null)
+            return card;
+        if(slotNum >= end)
+            return ItemStack.EMPTY;
         ItemStack itemCopy = ItemStack.EMPTY;
         Slot slot = this.inventorySlots.get(slotNum);
 

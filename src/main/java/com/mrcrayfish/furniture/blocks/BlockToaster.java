@@ -82,19 +82,8 @@ public class BlockToaster extends BlockFurnitureTile
             }
             else
             {
-                if(playerIn.isSneaking())
-                {
-                    if(!tileEntityToaster.isToasting())
-                    {
-                        tileEntityToaster.startToasting();
-                        worldIn.updateComparatorOutputLevel(pos, this);
-                        if(!worldIn.isRemote)
-                        {
-                            worldIn.playSound(pos.getX() + 0.5D, pos.getY() + 0.5D, pos.getZ() + 0.5D, FurnitureSounds.toaster_down, SoundCategory.BLOCKS, 0.75F, 1.0F, false);
-                        }
-                    }
-                }
-                else if(!tileEntityToaster.isToasting())
+                // 开始烤改成潜行 + 左键（见 SneakLeftClick）：潜行 + 空手右键留给 Carry On（悠然服务器魔改）
+                if(!playerIn.isSneaking() && !tileEntityToaster.isToasting())
                 {
                     tileEntityToaster.removeSlice();
                 }

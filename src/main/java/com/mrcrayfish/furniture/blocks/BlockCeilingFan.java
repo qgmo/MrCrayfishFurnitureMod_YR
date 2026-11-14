@@ -77,6 +77,14 @@ public class BlockCeilingFan extends Block implements IPowered
     }
 
     @Override
+    public void breakBlock(World worldIn, BlockPos pos, IBlockState state)
+    {
+        // 拆掉时能量单元卡掉出来（悠然服务器魔改）
+        BlockFurnitureTile.dropApplianceCard(worldIn, pos, worldIn.getTileEntity(pos));
+        super.breakBlock(worldIn, pos, state);
+    }
+
+    @Override
     public boolean hasTileEntity(IBlockState state)
     {
         return true;

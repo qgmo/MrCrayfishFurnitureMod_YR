@@ -11,9 +11,23 @@ import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.nbt.NBTTagList;
 import net.minecraft.util.ITickable;
 import net.minecraft.util.SoundCategory;
+import com.mrcrayfish.furniture.power.ApplianceEnergy;
+import com.mrcrayfish.furniture.power.ApplianceFaces;
+import com.mrcrayfish.furniture.power.IAppliance;
+import com.mrcrayfish.furniture.util.AppliancePower;
+import net.minecraft.util.EnumFacing;
+import net.minecraftforge.common.capabilities.Capability;
+import net.minecraftforge.energy.CapabilityEnergy;
+import javax.annotation.Nullable;
 
-public class TileEntityToaster extends TileEntitySyncClient implements ITickable, ISimpleInventory
+/**
+ * 悠然服务器魔改：要用电，烤时 8 FE/t，没电暂停；只从底面进电，可插能量单元卡（潜行 + 左键，见 {@link ApplianceEnergy}）。
+ * 开始烤改成潜行 + 左键（潜行 + 空手右键留给 Carry On）。
+ */
+public class TileEntityToaster extends TileEntitySyncClient implements ITickable, ISimpleInventory, IAppliance
 {
+    private final ApplianceEnergy energy = new ApplianceEnergy(this, AppliancePower.TOASTER, ApplianceFaces.bottom(), this::sync);
+
     public ItemStack[] slots = new ItemStack[2];
 
     private int toastingTime = 0;
@@ -56,6 +70,16 @@ public class TileEntityToaster extends TileEntitySyncClient implements ITickable
         TileEntityUtil.markBlockForUpdate(world, pos);
     }
 
+    public boolean hasSlices()
+    {
+        for(ItemStack slot : slots)
+        {
+            if(slot != null)
+                return true;
+        }
+        return false;
+    }
+
     public boolean isToasting()
     {
         return toasting;
@@ -69,6 +93,11 @@ public class TileEntityToaster extends TileEntitySyncClient implements ITickable
     @Override
     public void update()
     {
+        // 没电时暂停
+        if(!energy.tick(toasting, AppliancePower.TOASTER) && toasting)
+        {
+            return;
+        }
         if(toasting)
         {
             if(toastingTime == 200)
@@ -124,6 +153,7 @@ public class TileEntityToaster extends TileEntitySyncClient implements ITickable
         }
         this.toastingTime = tagCompound.getInteger("ToastTime");
         this.toasting = tagCompound.getBoolean("Toasting");
+        this.energy.readFromNBT(tagCompound);
     }
 
     @Override
@@ -145,6 +175,7 @@ public class TileEntityToaster extends TileEntitySyncClient implements ITickable
         tagCompound.setTag("Items", tagList);
         tagCompound.setInteger("ToastTime", this.toastingTime);
         tagCompound.setBoolean("Toasting", toasting);
+        this.energy.writeToNBT(tagCompound);
         return tagCompound;
     }
 
@@ -168,5 +199,28 @@ public class TileEntityToaster extends TileEntitySyncClient implements ITickable
             slots[i] = null;
         }
 
+    }
+
+    @Override
+    public boolean hasCapability(Capability<?> capability, @Nullable EnumFacing facing)
+    {
+        if(capability == CapabilityEnergy.ENERGY)
+            return energy.isInputFace(facing);
+        return super.hasCapability(capability, facing);
+    }
+
+    @Nullable
+    @Override
+    public <T> T getCapability(Capability<T> capability, @Nullable EnumFacing facing)
+    {
+        if(capability == CapabilityEnergy.ENERGY)
+            return energy.isInputFace(facing) ? CapabilityEnergy.ENERGY.cast(energy.port()) : null;
+        return super.getCapability(capability, facing);
+    }
+
+    @Override
+    public ApplianceEnergy getAppliance()
+    {
+        return energy;
     }
 }

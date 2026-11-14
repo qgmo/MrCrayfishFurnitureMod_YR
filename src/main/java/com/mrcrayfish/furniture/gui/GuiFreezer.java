@@ -11,10 +11,12 @@ import net.minecraft.client.resources.I18n;
 import net.minecraft.entity.player.InventoryPlayer;
 import net.minecraft.util.ResourceLocation;
 import org.lwjgl.input.Keyboard;
+import java.util.List;
 
 public class GuiFreezer extends GuiContainer
 {
     private TileEntityFreezer freezer;
+    private final ContainerFreezer powerContainer;
     private static final ResourceLocation GUI = new ResourceLocation("cfm:textures/gui/freezer.png");
 
     private GuiButton button_start;
@@ -22,6 +24,7 @@ public class GuiFreezer extends GuiContainer
     public GuiFreezer(InventoryPlayer playerInventory, TileEntityFreezer freezerInventory)
     {
         super(new ContainerFreezer(playerInventory, freezerInventory));
+        this.powerContainer = (ContainerFreezer) this.inventorySlots;
         this.freezer = freezerInventory;
         this.xSize = 176;
         this.ySize = 159;
@@ -68,6 +71,11 @@ public class GuiFreezer extends GuiContainer
         this.drawDefaultBackground();
         super.drawScreen(mouseX, mouseY, partialTicks);
         this.renderHoveredToolTip(mouseX, mouseY);
+        List<String> power = ApplianceGui.tooltip(guiLeft, guiTop, ContainerFreezer.CARD_X, ContainerFreezer.CARD_Y, powerContainer.getCardSlot(), freezer.getAppliance(), mouseX, mouseY);
+        if(power != null)
+        {
+            drawHoveringText(power, mouseX, mouseY);
+        }
 
         if(isPointInRegion(110, 6, 16, 16, mouseX, mouseY))
         {
@@ -118,6 +126,7 @@ public class GuiFreezer extends GuiContainer
         int guiLeft = (width - xSize) / 2;
         int guiTop = (height - ySize) / 2;
         this.drawTexturedModalRect(guiLeft, guiTop, 0, 0, xSize, ySize);
+        ApplianceGui.draw(guiLeft, guiTop, ContainerFreezer.CARD_X, ContainerFreezer.CARD_Y, powerContainer.getCardSlot(), freezer.getAppliance());
         int var7;
 
         if(freezer.isFreezing())

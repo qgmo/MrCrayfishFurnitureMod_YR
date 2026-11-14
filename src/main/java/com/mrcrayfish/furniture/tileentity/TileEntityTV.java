@@ -25,12 +25,25 @@ import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import com.mrcrayfish.furniture.power.ApplianceEnergy;
+import com.mrcrayfish.furniture.power.ApplianceFaces;
+import com.mrcrayfish.furniture.power.IAppliance;
+import com.mrcrayfish.furniture.util.AppliancePower;
+import net.minecraft.util.EnumFacing;
+import net.minecraftforge.common.capabilities.Capability;
+import net.minecraftforge.energy.CapabilityEnergy;
+import net.minecraft.util.ITickable;
 
 /**
  * Author: MrCrayfish
+ * <p>
+ * 悠然服务器魔改：要用电，开着放 GIF 时 2 FE/t（视频 4 FE/t，下一轮做）；没电时黑屏，GIF 照常在客户端往下走，来电接上。
+ * 只从底面进电，可插能量单元卡（潜行 + 左键，见 {@link ApplianceEnergy}）。
  */
-public class TileEntityTV extends TileEntitySyncClient implements IValueContainer
+public class TileEntityTV extends TileEntitySyncClient implements IValueContainer, ITickable, IAppliance
 {
+    private final ApplianceEnergy energy = new ApplianceEnergy(this, AppliancePower.TV_VIDEO, ApplianceFaces.bottom(), this::sync);
+
     private int width;
     private int height;
     private double screenYOffset;
@@ -70,6 +83,7 @@ public class TileEntityTV extends TileEntitySyncClient implements IValueContaine
         compound.setBoolean("Stretch", this.stretch);
         compound.setBoolean("Powered", this.powered);
         compound.setBoolean("DisableInteraction", this.disabled);
+        this.energy.writeToNBT(compound);
         return compound;
     }
 
@@ -110,10 +124,25 @@ public class TileEntityTV extends TileEntitySyncClient implements IValueContaine
         {
             this.disabled = compound.getBoolean("DisableInteraction");
         }
+        this.energy.readFromNBT(compound);
         if(world != null && world.isRemote && powered && channels.size() > 0 && currentChannel >= 0 && currentChannel < channels.size())
         {
             this.loadUrl(channels.get(currentChannel));
         }
+    }
+
+    @Override
+    public void update()
+    {
+        if(world == null || world.isRemote)
+            return;
+        energy.tick(powered, AppliancePower.TV_GIF);
+    }
+
+    /** 屏幕亮着：开着并且这一 tick 付上了电 */
+    public boolean isScreenOn()
+    {
+        return powered && energy.isRunning();
     }
 
     @Nullable
@@ -291,6 +320,7 @@ public class TileEntityTV extends TileEntitySyncClient implements IValueContaine
         if(!disabled)
         {
             this.powered = powered;
+            this.markDirty();
             TileEntityUtil.syncToClient(this);
         }
     }
@@ -309,6 +339,7 @@ public class TileEntityTV extends TileEntitySyncClient implements IValueContaine
             {
                 this.currentChannel = 0;
             }
+            this.markDirty();
             TileEntityUtil.syncToClient(this);
             return true;
         }
@@ -318,5 +349,28 @@ public class TileEntityTV extends TileEntitySyncClient implements IValueContaine
     public boolean isDisabled()
     {
         return disabled;
+    }
+
+    @Override
+    public boolean hasCapability(Capability<?> capability, @Nullable EnumFacing facing)
+    {
+        if(capability == CapabilityEnergy.ENERGY)
+            return energy.isInputFace(facing);
+        return super.hasCapability(capability, facing);
+    }
+
+    @Nullable
+    @Override
+    public <T> T getCapability(Capability<T> capability, @Nullable EnumFacing facing)
+    {
+        if(capability == CapabilityEnergy.ENERGY)
+            return energy.isInputFace(facing) ? CapabilityEnergy.ENERGY.cast(energy.port()) : null;
+        return super.getCapability(capability, facing);
+    }
+
+    @Override
+    public ApplianceEnergy getAppliance()
+    {
+        return energy;
     }
 }

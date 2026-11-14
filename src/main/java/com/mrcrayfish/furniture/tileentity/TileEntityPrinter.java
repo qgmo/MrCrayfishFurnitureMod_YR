@@ -16,9 +16,21 @@ import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.util.EnumFacing;
 import net.minecraft.util.ITickable;
 import net.minecraft.util.math.MathHelper;
+import com.mrcrayfish.furniture.power.ApplianceEnergy;
+import com.mrcrayfish.furniture.power.ApplianceFaces;
+import com.mrcrayfish.furniture.power.IAppliance;
+import com.mrcrayfish.furniture.util.AppliancePower;
+import net.minecraftforge.common.capabilities.Capability;
+import net.minecraftforge.energy.CapabilityEnergy;
+import javax.annotation.Nullable;
 
-public class TileEntityPrinter extends TileEntityFurniture implements ISidedInventory, ITickable
+/**
+ * 悠然服务器魔改：要用电，打印时 8 FE/t，没电暂停（进度、墨水都不动）；只从底面进电，可插能量单元卡（见 {@link ApplianceEnergy}）。
+ */
+public class TileEntityPrinter extends TileEntityFurniture implements ISidedInventory, ITickable, IAppliance
 {
+    private final ApplianceEnergy energy = new ApplianceEnergy(this, AppliancePower.PRINTER, ApplianceFaces.bottom(), () -> TileEntityUtil.markBlockForUpdate(world, pos));
+
     private static final int[] slots_top = new int[]{0};
     private static final int[] slots_bottom = new int[]{2, 1};
     private static final int[] slots_sides = new int[]{1};
@@ -41,6 +53,7 @@ public class TileEntityPrinter extends TileEntityFurniture implements ISidedInve
         this.printingTime = tagCompound.getShort("CookTime");
         this.totalCookTime = tagCompound.getShort("CookTimeTotal");
         this.currentItemPrintTime = tagCompound.getInteger("CurrentTimePrintTime");
+        this.energy.readFromNBT(tagCompound);
     }
 
     @Override
@@ -51,6 +64,7 @@ public class TileEntityPrinter extends TileEntityFurniture implements ISidedInve
         tagCompound.setShort("CookTime", (short) this.printingTime);
         tagCompound.setShort("CookTimeTotal", (short) this.totalCookTime);
         tagCompound.setInteger("CurrentTimePrintTime", currentItemPrintTime);
+        this.energy.writeToNBT(tagCompound);
         return tagCompound;
     }
 
@@ -62,6 +76,12 @@ public class TileEntityPrinter extends TileEntityFurniture implements ISidedInve
     @Override
     public void update()
     {
+        // 打印时（有东西可印、墨水在烧或还有墨水）才耗电；没电时暂停
+        boolean working = this.canPrint() && (this.isPrinting() || !getStackInSlot(1).isEmpty());
+        if(!energy.tick(working, AppliancePower.PRINTER) && working)
+        {
+            return;
+        }
         boolean flag = this.printingTime > 0;
 
         boolean flag1 = false;
@@ -266,5 +286,28 @@ public class TileEntityPrinter extends TileEntityFurniture implements ISidedInve
     {
         this.fillWithLoot(playerIn);
         return new ContainerPrinter(playerInventory, this);
+    }
+
+    @Override
+    public boolean hasCapability(Capability<?> capability, @Nullable EnumFacing facing)
+    {
+        if(capability == CapabilityEnergy.ENERGY)
+            return energy.isInputFace(facing);
+        return super.hasCapability(capability, facing);
+    }
+
+    @Nullable
+    @Override
+    public <T> T getCapability(Capability<T> capability, @Nullable EnumFacing facing)
+    {
+        if(capability == CapabilityEnergy.ENERGY)
+            return energy.isInputFace(facing) ? CapabilityEnergy.ENERGY.cast(energy.port()) : null;
+        return super.getCapability(capability, facing);
+    }
+
+    @Override
+    public ApplianceEnergy getAppliance()
+    {
+        return energy;
     }
 }

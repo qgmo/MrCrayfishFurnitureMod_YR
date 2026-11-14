@@ -10,10 +10,24 @@ import net.minecraft.inventory.Container;
 import net.minecraft.inventory.IInventory;
 import net.minecraft.inventory.Slot;
 import net.minecraft.item.ItemStack;
+import com.mrcrayfish.furniture.power.ApplianceContainers;
+import com.mrcrayfish.furniture.power.IAppliance;
+import com.mrcrayfish.furniture.gui.slots.SlotPowerCard;
+import net.minecraft.inventory.IContainerListener;
+import javax.annotation.Nullable;
 
 public class ContainerPrinter extends Container
 {
     private IInventory printerInventory;
+    /** 玩家背包槽位结束处（不含）；之后是能量单元卡槽（悠然服务器魔改） */
+    private int end;
+    private int cardIndex = -1;
+    @Nullable
+    private SlotPowerCard cardSlot;
+    private final ApplianceContainers.Sync sync = new ApplianceContainers.Sync();
+
+    /** 卡槽在界面上的位置 */
+    public static final int CARD_X = 24, CARD_Y = 30;
 
     public ContainerPrinter(IInventory playerInventory, IInventory printerInventory)
     {
@@ -34,6 +48,47 @@ public class ContainerPrinter extends Container
         {
             this.addSlotToContainer(new Slot(playerInventory, i, i * 18 + 8, 161));
         }
+
+        this.end = this.inventorySlots.size();
+        if(printerInventory instanceof IAppliance)
+        {
+            this.cardSlot = ApplianceContainers.cardSlot((IAppliance) printerInventory, printerInventory, CARD_X, CARD_Y);
+            if(this.cardSlot != null)
+            {
+                this.cardIndex = this.inventorySlots.size();
+                this.addSlotToContainer(this.cardSlot);
+            }
+        }
+    }
+
+    @Nullable
+    public SlotPowerCard getCardSlot()
+    {
+        return cardSlot;
+    }
+
+    @Override
+    public void addListener(IContainerListener listener)
+    {
+        super.addListener(listener);
+        if(printerInventory instanceof IAppliance)
+            sync.addListener(this, listener, ((IAppliance) printerInventory).getAppliance());
+    }
+
+    @Override
+    public void detectAndSendChanges()
+    {
+        super.detectAndSendChanges();
+        if(printerInventory instanceof IAppliance)
+            sync.detect(this, this.listeners, ((IAppliance) printerInventory).getAppliance());
+    }
+
+    @Override
+    public void updateProgressBar(int id, int data)
+    {
+        if(printerInventory instanceof IAppliance && ApplianceContainers.Sync.update(id, data, ((IAppliance) printerInventory).getAppliance()))
+            return;
+        super.updateProgressBar(id, data);
     }
 
     @Override
@@ -45,6 +100,11 @@ public class ContainerPrinter extends Container
     @Override
     public ItemStack transferStackInSlot(EntityPlayer player, int slotNum)
     {
+        ItemStack card = ApplianceContainers.transfer(this, slotNum, cardIndex, 3, end, this::mergeItemStack);
+        if(card != null)
+            return card;
+        if(slotNum >= end)
+            return ItemStack.EMPTY;
         ItemStack itemCopy = ItemStack.EMPTY;
         Slot slot = this.inventorySlots.get(slotNum);
 

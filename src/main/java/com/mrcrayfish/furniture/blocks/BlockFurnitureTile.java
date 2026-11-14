@@ -11,6 +11,8 @@ import net.minecraft.inventory.InventoryHelper;
 import net.minecraft.tileentity.TileEntity;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
+import com.mrcrayfish.furniture.power.IAppliance;
+import net.minecraft.item.ItemStack;
 
 public abstract class BlockFurnitureTile extends BlockFurniture implements ITileEntityProvider
 {
@@ -47,7 +49,21 @@ public abstract class BlockFurnitureTile extends BlockFurniture implements ITile
             ISimpleInventory inv = (ISimpleInventory) tileEntity;
             InventoryUtil.dropInventoryItems(world, pos, inv);
         }
+        dropApplianceCard(world, pos, tileEntity);
         super.breakBlock(world, pos, state);
+    }
+
+    /** 电器拆掉时能量单元卡掉出来（悠然服务器魔改） */
+    public static void dropApplianceCard(World world, BlockPos pos, TileEntity tileEntity)
+    {
+        if(!world.isRemote && tileEntity instanceof IAppliance)
+        {
+            ItemStack card = ((IAppliance) tileEntity).getAppliance().setCard(ItemStack.EMPTY);
+            if(!card.isEmpty())
+            {
+                spawnAsEntity(world, pos, card);
+            }
+        }
     }
 
     @Override

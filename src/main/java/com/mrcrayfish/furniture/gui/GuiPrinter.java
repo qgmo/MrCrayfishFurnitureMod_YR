@@ -7,15 +7,18 @@ import net.minecraft.client.resources.I18n;
 import net.minecraft.entity.player.InventoryPlayer;
 import net.minecraft.util.ResourceLocation;
 import org.lwjgl.opengl.GL11;
+import java.util.List;
 
 public class GuiPrinter extends GuiContainer
 {
     private TileEntityPrinter printer;
+    private final ContainerPrinter powerContainer;
     private static final ResourceLocation gui = new ResourceLocation("cfm:textures/gui/printer.png");
 
     public GuiPrinter(InventoryPlayer inventoryplayer, TileEntityPrinter tileentityprinter)
     {
         super(new ContainerPrinter(inventoryplayer, tileentityprinter));
+        this.powerContainer = (ContainerPrinter) this.inventorySlots;
         this.printer = tileentityprinter;
         this.xSize = 176;
         this.ySize = 185;
@@ -27,6 +30,11 @@ public class GuiPrinter extends GuiContainer
         this.drawDefaultBackground();
         super.drawScreen(mouseX, mouseY, partialTicks);
         this.renderHoveredToolTip(mouseX, mouseY);
+        List<String> power = ApplianceGui.tooltip(guiLeft, guiTop, ContainerPrinter.CARD_X, ContainerPrinter.CARD_Y, powerContainer.getCardSlot(), printer.getAppliance(), mouseX, mouseY);
+        if(power != null)
+        {
+            drawHoveringText(power, mouseX, mouseY);
+        }
 
         if(isPointInRegion(73, 30, 5, 18, mouseX, mouseY))
         {
@@ -53,6 +61,7 @@ public class GuiPrinter extends GuiContainer
         int l = (width - xSize) / 2;
         int i1 = (height - ySize) / 2;
         this.drawTexturedModalRect(l, i1, 0, 0, xSize, ySize + 21);
+        ApplianceGui.draw(l, i1, ContainerPrinter.CARD_X, ContainerPrinter.CARD_Y, powerContainer.getCardSlot(), printer.getAppliance());
         int var7;
 
         if(this.printer.isPrinting())

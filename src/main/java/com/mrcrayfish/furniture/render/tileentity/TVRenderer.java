@@ -34,7 +34,8 @@ public class TVRenderer extends TileEntitySpecialRenderer<TileEntityTV>
     @Override
     public void render(TileEntityTV te, double x, double y, double z, float partialTicks, int destroyStage, float alpha)
     {
-        if(!te.isPowered())
+        // 关着或没电（悠然服务器魔改）：黑屏
+        if(!te.isScreenOn())
             return;
 
         BlockPos pos = te.getPos();

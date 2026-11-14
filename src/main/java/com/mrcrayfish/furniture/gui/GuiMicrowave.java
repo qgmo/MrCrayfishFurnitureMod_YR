@@ -11,6 +11,7 @@ import net.minecraft.entity.player.InventoryPlayer;
 import net.minecraft.util.ResourceLocation;
 import org.lwjgl.input.Keyboard;
 import org.lwjgl.opengl.GL11;
+import java.util.List;
 
 public class GuiMicrowave extends GuiContainer
 {
@@ -18,10 +19,12 @@ public class GuiMicrowave extends GuiContainer
     private TileEntityMicrowave tileEntityMicrowave;
 
     private GuiButton button_start;
+    private final ContainerMicrowave powerContainer;
 
     public GuiMicrowave(InventoryPlayer inventoryPlayer, TileEntityMicrowave tileEntityMicrowave)
     {
         super(new ContainerMicrowave(inventoryPlayer, tileEntityMicrowave));
+        this.powerContainer = (ContainerMicrowave) this.inventorySlots;
         this.tileEntityMicrowave = tileEntityMicrowave;
         this.xSize = 176;
         this.ySize = 174;
@@ -68,6 +71,11 @@ public class GuiMicrowave extends GuiContainer
         this.drawDefaultBackground();
         super.drawScreen(mouseX, mouseY, partialTicks);
         this.renderHoveredToolTip(mouseX, mouseY);
+        List<String> power = ApplianceGui.tooltip(guiLeft, guiTop, ContainerMicrowave.CARD_X, ContainerMicrowave.CARD_Y, powerContainer.getCardSlot(), tileEntityMicrowave.getAppliance(), mouseX, mouseY);
+        if(power != null)
+        {
+            drawHoveringText(power, mouseX, mouseY);
+        }
 
         if(isPointInRegion(120, 26, 27, 5, mouseX, mouseY))
         {
@@ -89,6 +97,7 @@ public class GuiMicrowave extends GuiContainer
         int l = (width - xSize) / 2;
         int i1 = (height - ySize) / 2;
         this.drawTexturedModalRect(l, i1, 0, 0, xSize, ySize);
+        ApplianceGui.draw(l, i1, ContainerMicrowave.CARD_X, ContainerMicrowave.CARD_Y, powerContainer.getCardSlot(), tileEntityMicrowave.getAppliance());
 
         int percent = tileEntityMicrowave.progress * 27 / 40;
         drawTexturedModalRect(l + 120, i1 + 26, 176, 0, percent, 5);

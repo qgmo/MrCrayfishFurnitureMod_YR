@@ -14,6 +14,7 @@ import net.minecraft.world.World;
 import net.minecraftforge.fml.common.network.simpleimpl.IMessage;
 import net.minecraftforge.fml.common.network.simpleimpl.IMessageHandler;
 import net.minecraftforge.fml.common.network.simpleimpl.MessageContext;
+import com.mrcrayfish.furniture.util.RejectLog;
 
 public class MessageMineBayBrowse implements IMessage, IMessageHandler<MessageMineBayBrowse, IMessage>
 {
@@ -71,6 +72,12 @@ public class MessageMineBayBrowse implements IMessage, IMessageHandler<MessageMi
             TileEntityComputer tileEntityComputer = (TileEntityComputer) tile_entity;
             if(((ContainerComputer) container).getComputerInventory() != tileEntityComputer)
                 return;
+            if(!tileEntityComputer.getAppliance().isRunning())
+            {
+                // 没电时界面黑着、按钮点不了（悠然服务器魔改）
+                RejectLog.log(player, "MineBay request while the computer has no power at " + tileEntityComputer.getPos());
+                return;
+            }
 
             tileEntityComputer.setBrowsingInfo(message.itemNum);
             TileEntityUtil.markBlockForUpdate(player.world, pos);

@@ -7,15 +7,18 @@ import net.minecraft.client.resources.I18n;
 import net.minecraft.entity.player.InventoryPlayer;
 import net.minecraft.util.ResourceLocation;
 import org.lwjgl.opengl.GL11;
+import java.util.List;
 
 public class GuiOven extends GuiContainer
 {
     private TileEntityOven oven;
+    private final ContainerOven container;
     private static final ResourceLocation GUI = new ResourceLocation("cfm:textures/gui/oven.png");
 
     public GuiOven(InventoryPlayer inventoryplayer, TileEntityOven tileEntityFreezer)
     {
         super(new ContainerOven(inventoryplayer, tileEntityFreezer));
+        this.container = (ContainerOven) this.inventorySlots;
         this.oven = tileEntityFreezer;
         this.xSize = 176;
         this.ySize = 228;
@@ -27,6 +30,11 @@ public class GuiOven extends GuiContainer
         this.drawDefaultBackground();
         super.drawScreen(mouseX, mouseY, partialTicks);
         this.renderHoveredToolTip(mouseX, mouseY);
+        List<String> power = ApplianceGui.tooltip(guiLeft, guiTop, ContainerOven.CARD_X, ContainerOven.CARD_Y, container.getCardSlot(), oven.getAppliance(), mouseX, mouseY);
+        if(power != null)
+        {
+            drawHoveringText(power, mouseX, mouseY);
+        }
 
         if(isPointInRegion(37, 9, 11, 11, mouseX, mouseY))
         {
@@ -77,6 +85,7 @@ public class GuiOven extends GuiContainer
 
         var7 = this.oven.getCookProgressScaled(24);
         drawTexturedModalRect(l + 75, i1 + 20, 176, 14, var7 + 1, 16);
+        ApplianceGui.draw(l, i1, ContainerOven.CARD_X, ContainerOven.CARD_Y, container.getCardSlot(), oven.getAppliance());
 
     }
 

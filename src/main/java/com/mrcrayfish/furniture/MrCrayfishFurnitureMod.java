@@ -10,6 +10,7 @@ import com.mrcrayfish.furniture.entity.EntitySeat;
 import com.mrcrayfish.furniture.gui.GuiHandler;
 import com.mrcrayfish.furniture.handler.ConfigurationHandler;
 import com.mrcrayfish.furniture.handler.PlayerEvents;
+import com.mrcrayfish.furniture.handler.SneakLeftClick;
 import com.mrcrayfish.furniture.init.FurnitureTab;
 import com.mrcrayfish.furniture.init.FurnitureTileEntities;
 import com.mrcrayfish.furniture.init.RegistrationHandler;
@@ -75,6 +76,7 @@ public class MrCrayfishFurnitureMod
     public void init(FMLInitializationEvent event)
     {
         MinecraftForge.EVENT_BUS.register(new PlayerEvents());
+        MinecraftForge.EVENT_BUS.register(new SneakLeftClick());
 
         /* GUI Handler Registering */
         NetworkRegistry.INSTANCE.registerGuiHandler(this, new GuiHandler());

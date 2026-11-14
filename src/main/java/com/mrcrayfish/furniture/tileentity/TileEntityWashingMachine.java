@@ -20,9 +20,22 @@ import net.minecraft.util.SoundCategory;
 import net.minecraftforge.fml.common.network.NetworkRegistry.TargetPoint;
 
 import java.util.Random;
+import com.mrcrayfish.furniture.power.ApplianceEnergy;
+import com.mrcrayfish.furniture.power.ApplianceFaces;
+import com.mrcrayfish.furniture.power.IAppliance;
+import com.mrcrayfish.furniture.util.AppliancePower;
+import com.mrcrayfish.furniture.util.TileEntityUtil;
+import net.minecraftforge.common.capabilities.Capability;
+import net.minecraftforge.energy.CapabilityEnergy;
+import javax.annotation.Nullable;
 
-public class TileEntityWashingMachine extends TileEntityFurniture implements ISidedInventory, ITickable
+/**
+ * 悠然服务器魔改：要用电，洗时 6 FE/t，没电暂停；只从底面进电，可插能量单元卡（见 {@link ApplianceEnergy}）。修装备照旧。
+ */
+public class TileEntityWashingMachine extends TileEntityFurniture implements ISidedInventory, ITickable, IAppliance
 {
+    private final ApplianceEnergy energy = new ApplianceEnergy(this, AppliancePower.WASHING_MACHINE, ApplianceFaces.bottom(), () -> TileEntityUtil.markBlockForUpdate(world, pos));
+
     private static final int[] slots_top = new int[]{0, 1, 2, 3};
     private static final int[] slots_bottom = new int[]{0, 1, 2, 3, 4};
     private static final int[] slots_sides = new int[]{4};
@@ -110,6 +123,11 @@ public class TileEntityWashingMachine extends TileEntityFurniture implements ISi
     @Override
     public void update()
     {
+        // 没电时暂停（进度、剩余时间都不动）
+        if(!energy.tick(washing, AppliancePower.WASHING_MACHINE) && washing)
+        {
+            return;
+        }
         if(washing)
         {
             if(world.isRemote)
@@ -206,6 +224,7 @@ public class TileEntityWashingMachine extends TileEntityFurniture implements ISi
         this.superMode = tagCompound.getBoolean("SuperMode");
         this.progress = tagCompound.getInteger("Progress");
         this.timeRemaining = tagCompound.getInteger("Remaining");
+        this.energy.readFromNBT(tagCompound);
     }
 
     @Override
@@ -216,6 +235,7 @@ public class TileEntityWashingMachine extends TileEntityFurniture implements ISi
         tagCompound.setBoolean("SuperMode", superMode);
         tagCompound.setInteger("Progress", progress);
         tagCompound.setInteger("Remaining", timeRemaining);
+        this.energy.writeToNBT(tagCompound);
         return tagCompound;
     }
 
@@ -294,5 +314,28 @@ public class TileEntityWashingMachine extends TileEntityFurniture implements ISi
     {
         this.fillWithLoot(playerIn);
         return new ContainerWashingMachine(playerInventory, this);
+    }
+
+    @Override
+    public boolean hasCapability(Capability<?> capability, @Nullable EnumFacing facing)
+    {
+        if(capability == CapabilityEnergy.ENERGY)
+            return energy.isInputFace(facing);
+        return super.hasCapability(capability, facing);
+    }
+
+    @Nullable
+    @Override
+    public <T> T getCapability(Capability<T> capability, @Nullable EnumFacing facing)
+    {
+        if(capability == CapabilityEnergy.ENERGY)
+            return energy.isInputFace(facing) ? CapabilityEnergy.ENERGY.cast(energy.port()) : null;
+        return super.getCapability(capability, facing);
+    }
+
+    @Override
+    public ApplianceEnergy getAppliance()
+    {
+        return energy;
     }
 }
