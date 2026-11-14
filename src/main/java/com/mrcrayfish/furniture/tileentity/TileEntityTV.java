@@ -1,16 +1,19 @@
 package com.mrcrayfish.furniture.tileentity;
 
-import com.google.common.base.Strings;
-import com.google.common.collect.Lists;
 import com.mrcrayfish.furniture.blocks.BlockAbstractTV;
 import com.mrcrayfish.furniture.client.DownloadUtils;
 import com.mrcrayfish.furniture.client.GifCache;
 import com.mrcrayfish.furniture.client.GifDownloadThread;
-import com.mrcrayfish.furniture.util.TextLimits;
 import com.mrcrayfish.furniture.handler.ConfigurationHandler;
 import com.mrcrayfish.furniture.util.TileEntityUtil;
 import net.minecraft.block.state.IBlockState;
 import net.minecraft.entity.player.EntityPlayer;
+import com.mrcrayfish.furniture.init.FurnitureSounds;
+import com.mrcrayfish.furniture.tv.RemoteAction;
+import com.mrcrayfish.furniture.tv.TvChannel;
+import com.mrcrayfish.furniture.tv.TvClock;
+import com.mrcrayfish.furniture.tv.TvPlayback;
+import net.minecraft.util.SoundCategory;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.nbt.NBTTagList;
 import net.minecraft.nbt.NBTTagString;
@@ -21,10 +24,8 @@ import net.minecraftforge.fml.relauncher.SideOnly;
 
 import javax.annotation.Nullable;
 import java.net.URI;
-import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import com.mrcrayfish.furniture.power.ApplianceEnergy;
 import com.mrcrayfish.furniture.power.ApplianceFaces;
 import com.mrcrayfish.furniture.power.IAppliance;
@@ -37,11 +38,21 @@ import net.minecraft.util.ITickable;
 /**
  * Author: MrCrayfish
  * <p>
- * 悠然服务器魔改：要用电，开着放 GIF 时 2 FE/t（视频 4 FE/t，下一轮做）；没电时黑屏，GIF 照常在客户端往下走，来电接上。
- * 只从底面进电，可插能量单元卡（潜行 + 左键，见 {@link ApplianceEnergy}）。
+ * 悠然服务器魔改：
+ * <ul>
+ * <li>要用电，开着放 GIF 时 2 FE/t、放视频时 4 FE/t；没电时黑屏，服务端的进度照走，来电接上。
+ * 只从底面进电，能量单元卡插在频道设置界面里（{@link com.mrcrayfish.furniture.gui.containers.ContainerTVSettings}）。</li>
+ * <li>频道可以是 GIF 网址或 bilibili 视频（{@link TvChannel}），三个频道可以混用。服务端只存频道、播放 / 暂停、
+ * 基准位置与时刻（{@link TvPlayback}）、音量、开关机、弹幕开关；视频由每个客户端自己取、自己对齐，服务端不碰视频。</li>
+ * <li>遥控器的操作见 {@link #handleRemote}；频道设置只从大屏的“设置”按钮进（潜行 + 空手右键留给 Carry On）。</li>
+ * </ul>
  */
-public class TileEntityTV extends TileEntitySyncClient implements IValueContainer, ITickable, IAppliance
+public class TileEntityTV extends TileEntitySyncClient implements ITickable, IAppliance
 {
+    /** 音量 0–100，遥控器每步 ±{@value #VOLUME_STEP} */
+    public static final int VOLUME_STEP = 10;
+    public static final int DEFAULT_VOLUME = 50;
+
     private final ApplianceEnergy energy = new ApplianceEnergy(this, AppliancePower.TV_VIDEO, ApplianceFaces.bottom(), this::sync);
 
     private int width;
@@ -54,6 +65,20 @@ public class TileEntityTV extends TileEntitySyncClient implements IValueContaine
 
     private List<String> channels = new ArrayList<>();
     private int currentChannel;
+
+    private TvPlayback playback = new TvPlayback();
+    private boolean playbackStarted;
+    private int volume = DEFAULT_VOLUME;
+    private boolean danmaku = true;
+
+    /** 客户端：最近一次同步时服务端算好的位置、收到的本地时刻、进度条显示到什么时候、服务端是否关了视频 */
+    private long clientPosMs;
+    private long clientReceivedAt;
+    private long clientOsdUntil;
+    private boolean clientVideoOff;
+
+    private String parsedRaw;
+    private boolean parsedVideo;
 
     @SideOnly(Side.CLIENT)
     private boolean loading;
@@ -83,8 +108,25 @@ public class TileEntityTV extends TileEntitySyncClient implements IValueContaine
         compound.setBoolean("Stretch", this.stretch);
         compound.setBoolean("Powered", this.powered);
         compound.setBoolean("DisableInteraction", this.disabled);
+        compound.setBoolean("Playing", playback.isPlaying());
+        compound.setLong("BasePos", playback.getBasePosMs());
+        compound.setLong("BaseTime", playback.getBaseTimeMs());
+        compound.setInteger("Volume", this.volume);
+        compound.setBoolean("Danmaku", this.danmaku);
         this.energy.writeToNBT(compound);
         return compound;
+    }
+
+    /** 发给客户端的：存档内容 + 服务端此刻算好的位置、进度条剩余时间、视频功能是否关着 */
+    @Override
+    public NBTTagCompound getUpdateTag()
+    {
+        NBTTagCompound tag = super.getUpdateTag();
+        long now = System.currentTimeMillis();
+        tag.setLong("PosNow", playback.positionAt(now));
+        tag.setLong("OsdLeft", playback.osdLeftMs(now));
+        tag.setBoolean("VideoOff", !ConfigurationHandler.tvVideoEnabled);
+        return tag;
     }
 
     @Override
@@ -124,10 +166,30 @@ public class TileEntityTV extends TileEntitySyncClient implements IValueContaine
         {
             this.disabled = compound.getBoolean("DisableInteraction");
         }
-        this.energy.readFromNBT(compound);
-        if(world != null && world.isRemote && powered && channels.size() > 0 && currentChannel >= 0 && currentChannel < channels.size())
+        if(compound.hasKey("BaseTime", Constants.NBT.TAG_LONG))
         {
-            this.loadUrl(channels.get(currentChannel));
+            this.playback = new TvPlayback(compound.getBoolean("Playing"), compound.getLong("BasePos"), compound.getLong("BaseTime"));
+            this.playbackStarted = true;
+        }
+        this.volume = compound.hasKey("Volume", Constants.NBT.TAG_INT) ? Math.max(0, Math.min(100, compound.getInteger("Volume"))) : DEFAULT_VOLUME;
+        this.danmaku = !compound.hasKey("Danmaku", Constants.NBT.TAG_BYTE) || compound.getBoolean("Danmaku");
+        this.energy.readFromNBT(compound);
+        if(compound.hasKey("PosNow", Constants.NBT.TAG_LONG))
+        {
+            // 客户端收到同步：记下服务端的位置与收到的时刻（客户端的时钟和服务端对不上，不用 BaseTime）
+            long now = System.currentTimeMillis();
+            this.clientPosMs = compound.getLong("PosNow");
+            this.clientReceivedAt = now;
+            this.clientOsdUntil = now + Math.min(TvPlayback.OSD_MS, Math.max(0, compound.getLong("OsdLeft")));
+            this.clientVideoOff = compound.getBoolean("VideoOff");
+        }
+        if(world != null && world.isRemote && powered)
+        {
+            String channel = getCurrentChannel();
+            if(channel != null && TvChannel.parse(channel).getKind() == TvChannel.Kind.GIF)
+            {
+                this.loadUrl(channel);
+            }
         }
     }
 
@@ -136,7 +198,29 @@ public class TileEntityTV extends TileEntitySyncClient implements IValueContaine
     {
         if(world == null || world.isRemote)
             return;
-        energy.tick(powered, AppliancePower.TV_GIF);
+        if(!playbackStarted)
+        {
+            // 新放下的电视、改版前的存档：从现在开始算
+            playbackStarted = true;
+            playback.restart(System.currentTimeMillis());
+            markDirty();
+        }
+        energy.tick(powered, isVideoChannel() ? AppliancePower.TV_VIDEO : AppliancePower.TV_GIF);
+    }
+
+    /** 当前频道是视频，并且服务端没关视频功能（用电按视频算） */
+    public boolean isVideoChannel()
+    {
+        String channel = getCurrentChannel();
+        if(channel == null || !ConfigurationHandler.tvVideoEnabled)
+            return false;
+        // 每 tick 都要问：解析结果按频道原文缓存
+        if(!channel.equals(parsedRaw))
+        {
+            parsedRaw = channel;
+            parsedVideo = TvChannel.parse(channel).isVideo();
+        }
+        return parsedVideo;
     }
 
     /** 屏幕亮着：开着并且这一 tick 付上了电 */
@@ -255,53 +339,160 @@ public class TileEntityTV extends TileEntitySyncClient implements IValueContaine
         return screenZOffset;
     }
 
-    @Override
-    public List<Entry> getEntries()
+    public List<String> getChannels()
     {
-        List<Entry> entries = Lists.newArrayList();
-        for(int i = 0; i < 3; i++)
-        {
-            String url = "";
-            if(channels.size() > 0 && i < channels.size())
-            {
-                url = channels.get(i);
-            }
-            entries.add(new Entry("channel_" + i, "Channel #" + (i + 1), Entry.Type.TEXT_FIELD, url));
-        }
-        entries.add(new Entry("stretch", "Stretch to Screen", Entry.Type.TOGGLE, this.stretch));
-        entries.add(new Entry("powered", "Powered", Entry.Type.TOGGLE, this.powered));
-        return entries;
+        return java.util.Collections.unmodifiableList(channels);
     }
 
-    @Override
-    public String updateEntries(Map<String, String> entries, EntityPlayer player)
+    public int getCurrentChannelIndex()
     {
-        for(int i = 0; i < 3; i++)
-        {
-            if(!TextLimits.urlLengthOk(entries.get("channel_" + i)))
-            {
-                return "TV channel URL longer than " + TextLimits.MAX_URL_LENGTH;
-            }
-        }
+        return currentChannel;
+    }
+
+    /**
+     * 频道设置界面保存（服务端，调用方已核对过每个频道的写法）。当前频道的内容变了就从头播。
+     */
+    public void applySettings(List<String> newChannels, boolean stretch)
+    {
+        String before = getCurrentChannel();
         channels.clear();
-        for(int i = 0; i < 3; i++)
+        for(String channel : newChannels)
         {
-            String url = entries.get("channel_" + i);
-            if(!Strings.isNullOrEmpty(url))
+            String trimmed = channel == null ? "" : channel.trim();
+            if(!trimmed.isEmpty())
             {
-                channels.add(url);
+                channels.add(trimmed);
             }
         }
-        this.stretch = Boolean.valueOf(entries.get("stretch"));
-        this.powered = Boolean.valueOf(entries.get("powered"));
+        if(currentChannel >= channels.size())
+        {
+            currentChannel = 0;
+        }
+        String after = getCurrentChannel();
+        if(after == null ? before != null : !after.equals(before))
+        {
+            playback.restart(System.currentTimeMillis());
+        }
+        this.stretch = stretch;
         this.markDirty();
-        return null;
+        TileEntityUtil.syncToClient(this);
     }
 
-    @Override
-    public boolean requiresTool()
+    /**
+     * 遥控器的一次操作（服务端，调用方已核对玩家、距离、电池并扣过电）。关机时只有开关机管用。
+     *
+     * @return 这次操作有没有改动（没有改动也已经扣了电）
+     */
+    public boolean handleRemote(RemoteAction action)
     {
-        return false;
+        if(disabled)
+            return false;
+        long now = System.currentTimeMillis();
+        if(action == RemoteAction.POWER)
+        {
+            powered = !powered;
+            if(powered)
+            {
+                // 关机再开机从头播（服主 11-14）
+                playback.restart(now);
+            }
+        }
+        else if(!powered)
+        {
+            return false;
+        }
+        else
+        {
+            switch(action)
+            {
+                case TOGGLE_PLAY:
+                    playback.togglePlay(now);
+                    playback.showOsd(now);
+                    break;
+                case TOGGLE_OSD:
+                    playback.toggleOsd(now);
+                    break;
+                case SEEK_BACK:
+                    playback.seek(now, -TvPlayback.SEEK_STEP_MS);
+                    playback.showOsd(now);
+                    break;
+                case SEEK_FORWARD:
+                    playback.seek(now, TvPlayback.SEEK_STEP_MS);
+                    playback.showOsd(now);
+                    break;
+                case PREV_CHANNEL:
+                case NEXT_CHANNEL:
+                    if(channels.size() <= 1)
+                        return false;
+                    int step = action == RemoteAction.NEXT_CHANNEL ? 1 : channels.size() - 1;
+                    currentChannel = (Math.max(0, currentChannel) + step) % channels.size();
+                    playback.restart(now);
+                    world.playSound(null, pos, FurnitureSounds.white_noise, SoundCategory.BLOCKS, 0.5F, 1.0F);
+                    break;
+                case VOLUME_DOWN:
+                    volume = Math.max(0, volume - VOLUME_STEP);
+                    playback.showOsd(now);
+                    break;
+                case VOLUME_UP:
+                    volume = Math.min(100, volume + VOLUME_STEP);
+                    playback.showOsd(now);
+                    break;
+                case TOGGLE_DANMAKU:
+                    danmaku = !danmaku;
+                    playback.showOsd(now);
+                    break;
+                default:
+                    return false;
+            }
+        }
+        markDirty();
+        TileEntityUtil.syncToClient(this);
+        return true;
+    }
+
+    public int getVolume()
+    {
+        return volume;
+    }
+
+    public boolean isDanmakuOn()
+    {
+        return danmaku;
+    }
+
+    /** 服务端此刻的位置（毫秒） */
+    public long getServerPositionMs()
+    {
+        return playback.positionAt(System.currentTimeMillis());
+    }
+
+    public boolean isPlaying()
+    {
+        return playback.isPlaying();
+    }
+
+    /** 客户端：按最近一次同步算的时钟（latencyMs 是估计的单向延迟） */
+    public TvClock clientClock(long latencyMs)
+    {
+        return new TvClock(clientPosMs, playback.isPlaying(), clientReceivedAt, latencyMs);
+    }
+
+    /** 客户端：进度条是否显示着 */
+    public boolean isClientOsdShown()
+    {
+        return clientOsdUntil > System.currentTimeMillis();
+    }
+
+    /** 客户端：服务端关了视频功能（只放 GIF） */
+    public boolean isClientVideoOff()
+    {
+        return clientVideoOff;
+    }
+
+    /** 拆电视时卡掉出来；容器界面判断玩家还能不能用 */
+    public boolean isUsableByPlayer(EntityPlayer player)
+    {
+        return world != null && world.getTileEntity(pos) == this && player.getDistanceSq(pos.getX() + 0.5D, pos.getY() + 0.5D, pos.getZ() + 0.5D) <= 64.0D;
     }
 
     public boolean isStretched()
@@ -309,41 +500,9 @@ public class TileEntityTV extends TileEntitySyncClient implements IValueContaine
         return stretch;
     }
 
-    @Override
-    public BlockPos getContainerPos()
-    {
-        return this.pos;
-    }
-
-    public void setPowered(boolean powered)
-    {
-        if(!disabled)
-        {
-            this.powered = powered;
-            this.markDirty();
-            TileEntityUtil.syncToClient(this);
-        }
-    }
-
     public boolean isPowered()
     {
         return powered;
-    }
-
-    public boolean nextChannel()
-    {
-        if(!disabled && powered && channels.size() > 1)
-        {
-            this.currentChannel++;
-            if(this.currentChannel >= channels.size())
-            {
-                this.currentChannel = 0;
-            }
-            this.markDirty();
-            TileEntityUtil.syncToClient(this);
-            return true;
-        }
-        return false;
     }
 
     public boolean isDisabled()

@@ -1,7 +1,6 @@
 package com.mrcrayfish.furniture.blocks;
 
 import com.mrcrayfish.furniture.MrCrayfishFurnitureMod;
-import com.mrcrayfish.furniture.tileentity.IValueContainer;
 import com.mrcrayfish.furniture.tileentity.TileEntityTV;
 import net.minecraft.block.material.Material;
 import net.minecraft.block.state.IBlockState;
@@ -33,21 +32,26 @@ public abstract class BlockAbstractTV extends BlockFurnitureTile
         this.screenZOffset = screenZOffset;
     }
 
+    /**
+     * 右键屏幕正面进入大屏（悠然服务器魔改，服主 11-14）。潜行 + 空手右键留给 Carry On，这里不处理；
+     * 频道设置只从大屏右下角的“设置”按钮进。拿着遥控器时右键被遥控器截住，走不到这里。
+     */
     @Override
     public boolean onBlockActivated(World worldIn, BlockPos pos, IBlockState state, EntityPlayer playerIn, EnumHand hand, EnumFacing facing, float hitX, float hitY, float hitZ)
     {
+        if(playerIn.isSneaking() || hand != EnumHand.MAIN_HAND || !isScreenFace(state, facing))
+            return false;
         if(worldIn.isRemote)
         {
-            TileEntity tileEntity = worldIn.getTileEntity(pos);
-            if(tileEntity instanceof IValueContainer && tileEntity instanceof TileEntityTV)
-            {
-                if(!((TileEntityTV) tileEntity).isDisabled())
-                {
-                    playerIn.openGui(MrCrayfishFurnitureMod.instance, 1, worldIn, pos.getX(), pos.getY(), pos.getZ());
-                }
-            }
+            MrCrayfishFurnitureMod.proxy.openTvScreen(pos);
         }
         return true;
+    }
+
+    /** 屏幕在正面：家具的 FACING 指向背面 */
+    public static boolean isScreenFace(IBlockState state, EnumFacing face)
+    {
+        return state.getPropertyKeys().contains(FACING) && face == state.getValue(FACING).getOpposite();
     }
 
     public double getScreenZOffset(IBlockState state)

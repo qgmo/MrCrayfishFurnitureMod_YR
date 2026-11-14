@@ -32,6 +32,11 @@ public class PacketHandler
         registerMessage(MessageSealCrate.class, MessageSealCrate.class, Side.SERVER);
         registerMessage(MessageUpdateValueContainer.class, MessageUpdateValueContainer.class, Side.SERVER);
         registerMessage(MessageSignItem.class, MessageSignItem.class, Side.SERVER);
+        // 电视（悠然服务器魔改）
+        registerMessage(MessageTVRemote.class, MessageTVRemote.class, Side.SERVER);
+        registerMessage(MessageTVOpenSettings.class, MessageTVOpenSettings.class, Side.SERVER);
+        registerMessage(MessageTVChannels.class, MessageTVChannels.class, Side.SERVER);
+        registerMessage(MessageTVChannelsResult.class, MessageTVChannelsResult.class, Side.CLIENT);
     }
     
     private static <REQ extends IMessage, REPLY extends IMessage> void registerMessage(Class<? extends IMessageHandler<REQ, REPLY>> messageHandler, Class<REQ> requestMessageType, Side side)

@@ -20,6 +20,12 @@ public class CommonProxy implements ProxyInterface
         return null;
     }
 
+    /** 右键电视屏幕正面：打开大屏（只在客户端有用） */
+    public void openTvScreen(net.minecraft.util.math.BlockPos pos) {}
+
+    /** 收到保存频道的结果（只在客户端有用） */
+    public void onTvChannelsResult(com.mrcrayfish.furniture.network.message.MessageTVChannelsResult message) {}
+
     @Override
     public boolean isSinglePlayer()
     {

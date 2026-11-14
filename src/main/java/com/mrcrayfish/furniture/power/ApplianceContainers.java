@@ -38,6 +38,15 @@ public final class ApplianceContainers
         return new SlotPowerCard(new InventoryApplianceCard(appliance.getAppliance(), owner), x, y);
     }
 
+    /** 电器本身不是库存时（电视）的卡槽 */
+    @Nullable
+    public static SlotPowerCard cardSlot(InventoryApplianceCard inventory, int x, int y)
+    {
+        if(!RfToolsCards.isLoaded())
+            return null;
+        return new SlotPowerCard(inventory, x, y);
+    }
+
     /**
      * 卡槽相关的 Shift 点击。返回 null 表示不归卡槽管，交给界面原来的处理。
      *

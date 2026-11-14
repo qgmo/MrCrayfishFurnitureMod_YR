@@ -30,6 +30,9 @@ public class ConfigurationHandler
     public static int tvGifMaxFrames = 256;
     public static int tvGifMaxPixels = 16777216;
 
+    /** 电视的 bilibili 视频总开关（服务端，悠然服务器魔改）：关了只放 GIF */
+    public static boolean tvVideoEnabled = true;
+
     /** 用水家具认的水（Forge 流体注册名，悠然服务器魔改） */
     public static String[] waterFluids = WaterFluids.DEFAULTS.clone();
 
@@ -81,6 +84,7 @@ public class ConfigurationHandler
         tvGifMaxFrames = config.getInt("tv-gif-max-frames", CATEGORY_SETTINGS, 256, 1, 4096, "(Client) Maximum number of frames of a TV GIF. GIFs with more frames are not displayed.");
         tvGifMaxPixels = config.getInt("tv-gif-max-pixels", CATEGORY_SETTINGS, 16777216, 65536, 268435456, "(Client) Maximum width x height x frames of a TV GIF (16777216 is about 64 MB once decoded). Larger GIFs are not displayed.");
         waterFluids = config.getStringList("water-fluids", CATEGORY_SETTINGS, WaterFluids.DEFAULTS, "(Server) Forge fluid names the water furniture accepts as water: basin, kitchen sink, bath, toilet and shower draw these from the fluid container below / behind them. Defaults: vanilla water, YouranMod mineral water (fuild_mineral_water), Tough As Nails purified water (purified_water). Names of fluids that are not installed are ignored. The tap accepts any fluid and does not use this list.");
+        tvVideoEnabled = config.getBoolean("tv-video", CATEGORY_SETTINGS, true, "(Server) Whether TV channels may play bilibili videos (BV.../av... channels). When false, TVs only play GIFs and video channels show a notice. Each player's client fetches and decodes the video itself; the server only stores channel, play/pause, position and volume.");
         config.addCustomCategoryComment(CATEGORY_RECIPE_SETTINGS, "Enabled or disable the default recipes");
         config.addCustomCategoryComment(CATEGORY_API, "RecipeAPI Configuration. How to use: http://mrcrayfishs-furniture-mod.wikia.com/wiki/Configuration");
         updateEnabledRecipes();

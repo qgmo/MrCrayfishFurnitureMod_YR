@@ -7,7 +7,6 @@ import com.mrcrayfish.furniture.power.ApplianceEnergy;
 import com.mrcrayfish.furniture.power.IAppliance;
 import com.mrcrayfish.furniture.tileentity.TileEntityCeilingFan;
 import com.mrcrayfish.furniture.tileentity.TileEntityComputer;
-import com.mrcrayfish.furniture.tileentity.TileEntityTV;
 import com.mrcrayfish.furniture.tileentity.TileEntityToaster;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.item.ItemStack;
@@ -33,7 +32,8 @@ import com.mrcrayfish.furniture.water.WaterBasins;
 /**
  * 家具的“潜行 + 左键”操作（悠然服务器魔改）。潜行 + 空手右键留给 Carry On 搬方块，家具的新操作一律避开它：
  * <ul>
- * <li>没有界面的电器（吊扇、电视、电脑、烤面包机）：拿能量单元卡潜行左键放入（已有卡时交换），空手潜行左键取出；</li>
+ * <li>没有界面的电器（吊扇、电脑、烤面包机）：拿能量单元卡潜行左键放入（已有卡时交换），空手潜行左键取出；
+ * 电视的卡改为插在频道设置界面里（服主 11-14），这里不管电视；</li>
  * <li>烤面包机：里面有面包片、没在烤时，空手潜行左键开始烤（原来是潜行 + 空手右键）；</li>
  * <li>马桶：潜行左键冲水（原来是潜行右键，服主 11-14 改）；</li>
  * <li>浴缸：潜行左键开 / 关放水（空手右键是坐下）；</li>
@@ -117,10 +117,10 @@ public class SneakLeftClick
         return last == null || now - last > REPEAT_TICKS || now < last;
     }
 
-    /** 没有界面的电器：插拔能量单元卡 */
+    /** 没有界面的电器：插拔能量单元卡（电视不在其中，它的卡槽在频道设置界面里） */
     private static Action card(World world, BlockPos pos, TileEntity tileEntity, EntityPlayer player, ItemStack held)
     {
-        if(!(tileEntity instanceof TileEntityCeilingFan || tileEntity instanceof TileEntityTV || tileEntity instanceof TileEntityComputer || tileEntity instanceof TileEntityToaster))
+        if(!(tileEntity instanceof TileEntityCeilingFan || tileEntity instanceof TileEntityComputer || tileEntity instanceof TileEntityToaster))
             return null;
         ApplianceEnergy energy = ((IAppliance) tileEntity).getAppliance();
         if(RfToolsCards.isCard(held))

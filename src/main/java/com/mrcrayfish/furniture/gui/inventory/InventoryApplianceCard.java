@@ -8,6 +8,8 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.util.text.ITextComponent;
 import net.minecraft.util.text.TextComponentString;
 
+import java.util.function.Predicate;
+
 /**
  * 电器界面里的能量单元卡槽（一格，悠然服务器魔改）。卡存在电器的 {@link ApplianceEnergy} 里，不算电器本身的库存
  * （漏斗、比较器碰不到它）。能不能用跟着电器的库存走。
@@ -15,12 +17,20 @@ import net.minecraft.util.text.TextComponentString;
 public class InventoryApplianceCard implements IInventory
 {
     private final ApplianceEnergy energy;
-    private final IInventory owner;
+    private final Runnable dirty;
+    private final Predicate<EntityPlayer> usable;
 
     public InventoryApplianceCard(ApplianceEnergy energy, IInventory owner)
     {
+        this(energy, owner::markDirty, owner::isUsableByPlayer);
+    }
+
+    /** 电器本身不是库存时（电视）：标记改动、判断玩家还能不能用，由电器自己给 */
+    public InventoryApplianceCard(ApplianceEnergy energy, Runnable dirty, Predicate<EntityPlayer> usable)
+    {
         this.energy = energy;
-        this.owner = owner;
+        this.dirty = dirty;
+        this.usable = usable;
     }
 
     public ApplianceEnergy getEnergy()
@@ -78,13 +88,13 @@ public class InventoryApplianceCard implements IInventory
     @Override
     public void markDirty()
     {
-        owner.markDirty();
+        dirty.run();
     }
 
     @Override
     public boolean isUsableByPlayer(EntityPlayer player)
     {
-        return owner.isUsableByPlayer(player);
+        return usable.test(player);
     }
 
     @Override

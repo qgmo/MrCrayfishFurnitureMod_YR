@@ -4,7 +4,6 @@ import com.mrcrayfish.furniture.MrCrayfishFurnitureMod;
 import com.mrcrayfish.furniture.compat.CraftingBatteries;
 import com.mrcrayfish.furniture.compat.ItemBatteries;
 import com.mrcrayfish.furniture.gui.inventory.InventoryRemoteBattery;
-import com.mrcrayfish.furniture.init.FurnitureSounds;
 import com.mrcrayfish.furniture.tileentity.TileEntityTV;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiScreen;
@@ -32,6 +31,9 @@ import java.util.List;
  * <p>
  * 悠然服务器魔改：遥控器装一节电池（合成用的那节连同电量存进遥控器），按一下耗 {@value #FE_PER_PRESS} FE；
  * 没电时只提示。没对着电视时潜行右键打开一格的电池仓换电池。
+ * <p>
+ * 对着电视的按键（左、右、潜行 + 中键，含长按）由客户端截住，判断成操作后发 {@link com.mrcrayfish.furniture.network.message.MessageTVRemote}
+ * （按法见 {@link com.mrcrayfish.furniture.tv.RemoteInput}），所以这里对着电视的右键不再做事；没对着电视时潜行 + 左键打开本地配置界面（客户端）。
  */
 public class ItemTVRemote extends Item
 {
@@ -113,7 +115,7 @@ public class ItemTVRemote extends Item
     }
 
     @Nullable
-    private static TileEntityTV findTelevision(World worldIn, EntityPlayer playerIn)
+    public static TileEntityTV findTelevision(World worldIn, EntityPlayer playerIn)
     {
         Vec3d startVec = playerIn.getPositionEyes(0F);
         Vec3d endVec = startVec.add(playerIn.getLookVec().normalize().scale(16));
@@ -131,28 +133,14 @@ public class ItemTVRemote extends Item
 
     public EnumActionResult activateTelevision(World worldIn, EntityPlayer playerIn, EnumHand hand)
     {
-        TileEntityTV tileEntityTV = findTelevision(worldIn, playerIn);
-        if(tileEntityTV == null)
-            return EnumActionResult.PASS;
-        // 换台、开关都只在服务端做，结果同步给客户端
-        if(worldIn.isRemote)
-            return EnumActionResult.SUCCESS;
+        // 对着电视时的操作都走 MessageTVRemote（客户端截住了按键）；这里只把这次右键吃掉，不打开电池仓
+        return findTelevision(worldIn, playerIn) == null ? EnumActionResult.PASS : EnumActionResult.SUCCESS;
+    }
 
-        ItemStack remote = playerIn.getHeldItem(hand);
-        if(!pressButton(remote))
-        {
-            playerIn.sendStatusMessage(new TextComponentTranslation(InventoryRemoteBattery.peek(remote).isEmpty() ? "cfm.message.remote_no_battery" : "cfm.message.remote_empty"), true);
-            return EnumActionResult.SUCCESS;
-        }
-        if(playerIn.isSneaking())
-        {
-            tileEntityTV.setPowered(!tileEntityTV.isPowered());
-        }
-        else if(tileEntityTV.nextChannel())
-        {
-            worldIn.playSound(null, tileEntityTV.getPos(), FurnitureSounds.white_noise, SoundCategory.BLOCKS, 0.5F, 1.0F);
-        }
-        return EnumActionResult.SUCCESS;
+    /** 没电池、没电时在操作栏提示 */
+    public static void notifyNoCharge(EntityPlayer player, ItemStack remote)
+    {
+        player.sendStatusMessage(new TextComponentTranslation(InventoryRemoteBattery.peek(remote).isEmpty() ? "cfm.message.remote_no_battery" : "cfm.message.remote_empty"), true);
     }
 
     /** 按一下：从电池里取 {@value #FE_PER_PRESS} FE，取到返回 true（电池的新电量写回遥控器） */
