@@ -1,46 +1,29 @@
-buildscript {
-    repositories {
-        maven { url = 'https://maven.minecraftforge.net/' }
-        mavenCentral()
-    }
-    dependencies {
-        classpath 'net.minecraftforge.gradle:ForgeGradle:3.+'
+// MrCrayfish's Furniture Mod 1.12.2（悠然服务器魔改版）。
+// 构建：用 JDK 25 运行 Gradle（RetroFuturaGradle 2.x 要求），编译目标 Java 8，MCP stable 39 映射。
+plugins {
+    id 'java'
+    id 'com.gtnewhorizons.retrofuturagradle' version '2.0.3'
+}
+
+version = "${property('mod_version')}-1.12.2"
+group = 'com.mrcrayfish'
+
+base {
+    archivesName.set('furniture')
+}
+
+java {
+    toolchain {
+        languageVersion.set(JavaLanguageVersion.of(8))
+        vendor.set(JvmVendorSpec.AZUL)
     }
 }
-apply plugin: 'net.minecraftforge.gradle'
-apply plugin: 'eclipse'
-apply plugin: 'maven-publish'
-
-version = "6.3.2-1.12.2"
-group = "com.mrcrayfish"
-archivesBaseName = "furniture"
-
-sourceCompatibility = targetCompatibility = compileJava.sourceCompatibility = compileJava.targetCompatibility = '1.8'
 
 minecraft {
-    mappings channel: 'snapshot', version: '20171003-1.12'
-
-    runs {
-        client {
-            workingDirectory project.file('run')
-            property 'forge.logging.markers', 'SCAN,REGISTRIES,REGISTRYDUMP'
-            property 'forge.logging.console.level', 'debug'
-            mods {
-                cfm {
-                    source sourceSets.main
-                }
-            }
-        }
-        server {
-            property 'forge.logging.markers', 'SCAN,REGISTRIES,REGISTRYDUMP'
-            property 'forge.logging.console.level', 'debug'
-            mods {
-                cfm {
-                    source sourceSets.main
-                }
-            }
-        }
-    }
+    mcVersion.set('1.12.2')
+    mcpMappingChannel.set('stable')
+    mcpMappingVersion.set('39')
+    username.set('Developer')
 }
 
 repositories {
@@ -48,13 +31,20 @@ repositories {
         url = 'https://maven.blamejared.com'
         name = 'BlameJared Maven'
     }
+    mavenCentral()
 }
 
 dependencies {
-    minecraft 'net.minecraftforge:forge:1.12.2-14.23.5.2860'
-    compileOnly fg.deobf('CraftTweaker2:CraftTweaker2-API:1.12-4.1.20.675')
-    compileOnly fg.deobf('CraftTweaker2:CraftTweaker2-MC1120-Main:1.12-4.1.20.675')
-    compileOnly fg.deobf('CraftTweaker2:ZenScript:1.12-4.1.20.675')
+    compileOnly rfg.deobf('CraftTweaker2:CraftTweaker2-API:1.12-4.1.20.675')
+    compileOnly rfg.deobf('CraftTweaker2:CraftTweaker2-MC1120-Main:1.12-4.1.20.675')
+    compileOnly rfg.deobf('CraftTweaker2:ZenScript:1.12-4.1.20.675')
+
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.7.1'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
 }
 
 jar {
@@ -71,17 +61,9 @@ jar {
     }
 }
 
-jar.finalizedBy('reobfJar')
-
-publishing {
-    publications {
-        mavenJava(MavenPublication) {
-            artifact jar
-        }
-    }
-    repositories {
-        maven {
-            url "file:///${project.projectDir}/mcmodsrepo"
-        }
-    }
+test {
+    useJUnitPlatform()
+    javaLauncher.set(javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(8)
+    })
 }

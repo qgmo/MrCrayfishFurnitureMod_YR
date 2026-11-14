@@ -23,7 +23,7 @@ public class BlockModernTable extends BlockTable
     {
         super(Material.WOOD, SoundType.WOOD);
         this.setHardness(1.0F);
-        this.setUnlocalizedName(id);
+        this.setTranslationKey(id);
         this.setRegistryName(id);
     }
 
@@ -52,7 +52,7 @@ public class BlockModernTable extends BlockTable
     }
 
     @Override
-    public BlockRenderLayer getBlockLayer()
+    public BlockRenderLayer getRenderLayer()
     {
         return BlockRenderLayer.CUTOUT;
     }

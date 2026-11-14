@@ -29,7 +29,7 @@ public class BlockTVStand extends BlockFurnitureTile
     public BlockTVStand()
     {
         super(Material.WOOD);
-        this.setUnlocalizedName("tv_stand");
+        this.setTranslationKey("tv_stand");
         this.setRegistryName("tv_stand");
         this.setHardness(0.5F);
         this.setDefaultState(this.blockState.getBaseState().withProperty(FACING, EnumFacing.NORTH).withProperty(TYPE, Type.NONE));
@@ -93,7 +93,7 @@ public class BlockTVStand extends BlockFurnitureTile
     }
 
     @Override
-    public BlockRenderLayer getBlockLayer()
+    public BlockRenderLayer getRenderLayer()
     {
         return BlockRenderLayer.CUTOUT;
     }
