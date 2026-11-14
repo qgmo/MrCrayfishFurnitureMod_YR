@@ -2,6 +2,7 @@ package com.mrcrayfish.furniture.blocks;
 
 import com.mrcrayfish.furniture.DamageSourceFence;
 import com.mrcrayfish.furniture.advancement.Triggers;
+import com.mrcrayfish.furniture.compat.FencePvp;
 import com.mrcrayfish.furniture.init.FurnitureSounds;
 import net.minecraft.block.SoundType;
 import net.minecraft.block.material.Material;
@@ -47,7 +48,8 @@ public class BlockElectricFence extends BlockWhiteFence
             else if(entity instanceof EntityPlayer)
             {
                 EntityPlayer player = (EntityPlayer) entity;
-                if(!player.isCreative())
+                // 伤玩家前按 PvP 规则判断：服务器关了 PvP 或所在领地不允许 PvP 就不伤（悠然服务器魔改）
+                if(!player.isCreative() && (world.isRemote || FencePvp.canHurtPlayer(world, player)))
                 {
                     entity.attackEntityFrom(ELECTRIC_FENCE, (int) 2.0F);
                     world.playSound(null, pos.getX() + 0.5D, pos.getY() + 0.5D, pos.getZ() + 0.5D, FurnitureSounds.zap, SoundCategory.BLOCKS, 0.2F, 1.0F);
