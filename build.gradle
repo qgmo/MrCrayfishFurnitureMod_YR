@@ -25,6 +25,12 @@ minecraft {
     mcpMappingChannel.set('stable')
     mcpMappingVersion.set('39')
     username.set('Developer')
+    // 版本号只写在 gradle.properties 的 mod_version，构建时生成 Tags 类
+    injectedTags.put('VERSION', project.property('mod_version'))
+}
+
+tasks.named('injectTags').configure {
+    outputClassName.set('com.mrcrayfish.furniture.Tags')
 }
 
 repositories {
