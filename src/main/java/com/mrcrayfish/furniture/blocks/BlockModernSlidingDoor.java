@@ -1,6 +1,7 @@
 package com.mrcrayfish.furniture.blocks;
 
 import com.mrcrayfish.furniture.init.FurnitureBlocks;
+import com.mrcrayfish.furniture.util.PlacementHelper;
 import com.mrcrayfish.furniture.init.FurnitureSounds;
 import com.mrcrayfish.furniture.tileentity.TileEntityModernSlidingDoor;
 import com.mrcrayfish.furniture.util.Bounds;
@@ -133,13 +134,10 @@ public class BlockModernSlidingDoor extends BlockFurniture implements IPowered
     @Override
     public void onBlockHarvested(World worldIn, BlockPos pos, IBlockState state, EntityPlayer player)
     {
-        if(state.getValue(TOP))
+        BlockPos other = state.getValue(TOP) ? pos.down() : pos.up();
+        if(PlacementHelper.isPartner(worldIn, other, b -> b == FurnitureBlocks.MODERN_SLIDING_DOOR))
         {
-            worldIn.destroyBlock(pos.down(), false);
-        }
-        else
-        {
-            worldIn.destroyBlock(pos.up(), false);
+            worldIn.destroyBlock(other, false);
         }
     }
 

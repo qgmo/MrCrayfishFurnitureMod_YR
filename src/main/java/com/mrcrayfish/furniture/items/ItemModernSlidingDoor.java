@@ -2,6 +2,7 @@ package com.mrcrayfish.furniture.items;
 
 import com.mrcrayfish.furniture.blocks.BlockFurniture;
 import com.mrcrayfish.furniture.blocks.BlockModernSlidingDoor;
+import com.mrcrayfish.furniture.util.PlacementHelper;
 import net.minecraft.block.Block;
 import net.minecraft.block.SoundType;
 import net.minecraft.block.state.IBlockState;
@@ -43,7 +44,7 @@ public class ItemModernSlidingDoor extends ItemBlock
             }
 
             ItemStack stack = player.getHeldItem(hand);
-            if (player.canPlayerEdit(pos, facing, stack) && this.block.canPlaceBlockAt(worldIn, pos))
+            if (player.canPlayerEdit(pos, facing, stack) && this.block.canPlaceBlockAt(worldIn, pos) && PlacementHelper.canPlayerPlaceAt(worldIn, player, pos.up(), facing, stack))
             {
                 EnumFacing playerFacing = EnumFacing.fromAngle((double)player.rotationYaw);
                 int offsetX = playerFacing.getXOffset();

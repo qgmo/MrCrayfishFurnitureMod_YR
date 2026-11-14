@@ -3,7 +3,9 @@ package com.mrcrayfish.furniture.blocks;
 import com.google.common.collect.Lists;
 import com.mrcrayfish.furniture.advancement.Triggers;
 import com.mrcrayfish.furniture.init.FurnitureBlocks;
+import com.mrcrayfish.furniture.util.PlacementHelper;
 import com.mrcrayfish.furniture.util.CollisionHelper;
+import net.minecraft.block.Block;
 import net.minecraft.block.SoundType;
 import net.minecraft.block.material.Material;
 import net.minecraft.block.state.IBlockState;
@@ -67,7 +69,10 @@ public class BlockShower extends BlockFurniture
     @Override
     public void onBlockHarvested(World world, BlockPos pos, IBlockState state, EntityPlayer player)
     {
-        world.destroyBlock(this == FurnitureBlocks.SHOWER_BOTTOM ? pos.up() : pos.down(), false);
+        BlockPos other = this == FurnitureBlocks.SHOWER_BOTTOM ? pos.up() : pos.down();
+        Block partner = this == FurnitureBlocks.SHOWER_BOTTOM ? FurnitureBlocks.SHOWER_TOP : FurnitureBlocks.SHOWER_BOTTOM;
+        if(PlacementHelper.isPartner(world, other, b -> b == partner))
+            world.destroyBlock(other, false);
     }
 
     @Override

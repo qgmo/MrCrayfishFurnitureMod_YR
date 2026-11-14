@@ -7,6 +7,7 @@ import com.mrcrayfish.furniture.network.PacketHandler;
 import com.mrcrayfish.furniture.network.message.MessageFillBath;
 import com.mrcrayfish.furniture.tileentity.TileEntityBath;
 import com.mrcrayfish.furniture.util.CollisionHelper;
+import com.mrcrayfish.furniture.util.PlacementHelper;
 import com.mrcrayfish.furniture.util.SeatUtil;
 import net.minecraft.block.SoundType;
 import net.minecraft.block.material.Material;
@@ -71,7 +72,14 @@ public class BlockBath extends BlockFurnitureTile
     @Override
     public void onBlockPlacedBy(World world, BlockPos pos, IBlockState state, EntityLivingBase placer, ItemStack stack)
     {
-        world.setBlockState(pos.offset(placer.getHorizontalFacing()), FurnitureBlocks.BATH_2.getDefaultState().withProperty(FACING, state.getValue(FACING)).withProperty(WATER_LEVEL, state.getValue(WATER_LEVEL)));
+        BlockPos second = pos.offset(placer.getHorizontalFacing());
+        if(!world.getBlockState(second).getBlock().isReplaceable(world, second))
+        {
+            // 第二格放不下（ItemBath 已在放置前核对，这里兜底其它放置途径）：撤销底块，不覆盖旁边的方块
+            world.setBlockToAir(pos);
+            return;
+        }
+        world.setBlockState(second, FurnitureBlocks.BATH_2.getDefaultState().withProperty(FACING, state.getValue(FACING)).withProperty(WATER_LEVEL, state.getValue(WATER_LEVEL)));
         if(placer instanceof EntityPlayer)
         {
             Triggers.trigger(Triggers.PLACE_BATHTROOM_FURNITURE, (EntityPlayer) placer);
@@ -317,11 +325,15 @@ public class BlockBath extends BlockFurnitureTile
     {
         if(this == FurnitureBlocks.BATH_1)
         {
-            worldIn.destroyBlock(pos.offset(state.getValue(FACING)), false);
+            BlockPos other = pos.offset(state.getValue(FACING));
+            if(PlacementHelper.isPartner(worldIn, other, b -> b == FurnitureBlocks.BATH_2))
+                worldIn.destroyBlock(other, false);
         }
         else
         {
-            worldIn.destroyBlock(pos.offset(state.getValue(FACING).getOpposite()), false);
+            BlockPos other = pos.offset(state.getValue(FACING).getOpposite());
+            if(PlacementHelper.isPartner(worldIn, other, b -> b == FurnitureBlocks.BATH_1))
+                worldIn.destroyBlock(other, false);
         }
     }
 

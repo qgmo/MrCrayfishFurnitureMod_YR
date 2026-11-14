@@ -3,6 +3,7 @@ package com.mrcrayfish.furniture.items;
 import com.mrcrayfish.furniture.Reference;
 import com.mrcrayfish.furniture.blocks.BlockFurniture;
 import com.mrcrayfish.furniture.init.FurnitureBlocks;
+import com.mrcrayfish.furniture.util.PlacementHelper;
 import com.mrcrayfish.furniture.tileentity.TileEntityColoured;
 import net.minecraft.advancements.CriteriaTriggers;
 import net.minecraft.block.Block;
@@ -48,7 +49,8 @@ public class ItemModernBed extends ItemBlock implements SubItems
         ItemStack stack = player.getHeldItem(hand);
         if(worldIn.isAirBlock(otherPos))
         {
-            if(player.canPlayerEdit(pos, facing, stack) && player.canPlayerEdit(otherPos, facing, stack))
+            // 两格都核对（原来床头这一格不检查是否可替换，改过的客户端可以让它覆盖旁边的方块）
+            if(PlacementHelper.canPlayerPlaceAt(worldIn, player, pos, facing, stack) && PlacementHelper.canPlayerPlaceAt(worldIn, player, otherPos, facing, stack))
             {
                 if(worldIn.getBlockState(pos.down()).isTopSolid() && worldIn.getBlockState(otherPos.down()).isTopSolid())
                 {

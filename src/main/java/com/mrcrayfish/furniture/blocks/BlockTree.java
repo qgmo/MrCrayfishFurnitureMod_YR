@@ -1,6 +1,7 @@
 package com.mrcrayfish.furniture.blocks;
 
 import com.mrcrayfish.furniture.init.FurnitureBlocks;
+import com.mrcrayfish.furniture.util.PlacementHelper;
 import com.mrcrayfish.furniture.tileentity.TileEntityTree;
 import com.mrcrayfish.furniture.util.TileEntityUtil;
 import net.minecraft.block.SoundType;
@@ -78,7 +79,8 @@ public class BlockTree extends BlockFurnitureTile
             {
                 if(player.getHeldItemMainhand().getItem() != Items.SHEARS)
                 {
-                    worldIn.destroyBlock(pos.down(), false);
+                    if(PlacementHelper.isPartner(worldIn, pos.down(), b -> b == FurnitureBlocks.TREE_BOTTOM))
+                        worldIn.destroyBlock(pos.down(), false);
                 }
                 else
                 {
@@ -87,12 +89,14 @@ public class BlockTree extends BlockFurnitureTile
             }
             else
             {
-                worldIn.destroyBlock(pos.down(), false);
+                if(PlacementHelper.isPartner(worldIn, pos.down(), b -> b == FurnitureBlocks.TREE_BOTTOM))
+                    worldIn.destroyBlock(pos.down(), false);
             }
         }
         else
         {
-            worldIn.destroyBlock(pos.up(), false);
+            if(PlacementHelper.isPartner(worldIn, pos.up(), b -> b == FurnitureBlocks.TREE_TOP))
+                worldIn.destroyBlock(pos.up(), false);
         }
     }
 

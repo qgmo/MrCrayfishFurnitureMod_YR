@@ -1,6 +1,7 @@
 package com.mrcrayfish.furniture.blocks;
 
 import com.mrcrayfish.furniture.init.FurnitureBlocks;
+import com.mrcrayfish.furniture.util.PlacementHelper;
 import com.mrcrayfish.furniture.init.FurnitureSounds;
 import com.mrcrayfish.furniture.util.CollisionHelper;
 import net.minecraft.block.material.Material;
@@ -60,7 +61,14 @@ public class BlockDivingboard extends BlockFurniture
     {
         if(this == FurnitureBlocks.DIVING_BOARD_BASE)
         {
-            world.setBlockState(pos.offset(placer.getHorizontalFacing()), FurnitureBlocks.DIVING_BOARD_PLANK.getDefaultState().withProperty(FACING, state.getValue(FACING)));
+            BlockPos second = pos.offset(placer.getHorizontalFacing());
+            if(!world.getBlockState(second).getBlock().isReplaceable(world, second))
+            {
+                // 第二格放不下（ItemBath 已在放置前核对，这里兜底其它放置途径）：撤销底座，不覆盖旁边的方块
+                world.setBlockToAir(pos);
+                return;
+            }
+            world.setBlockState(second, FurnitureBlocks.DIVING_BOARD_PLANK.getDefaultState().withProperty(FACING, state.getValue(FACING)));
         }
     }
 
@@ -128,11 +136,15 @@ public class BlockDivingboard extends BlockFurniture
     {
         if(this == FurnitureBlocks.DIVING_BOARD_BASE)
         {
-            worldIn.destroyBlock(pos.offset(state.getValue(FACING)), false);
+            BlockPos other = pos.offset(state.getValue(FACING));
+            if(PlacementHelper.isPartner(worldIn, other, b -> b == FurnitureBlocks.DIVING_BOARD_PLANK))
+                worldIn.destroyBlock(other, false);
         }
         else
         {
-            worldIn.destroyBlock(pos.offset(state.getValue(FACING).getOpposite()), false);
+            BlockPos other = pos.offset(state.getValue(FACING).getOpposite());
+            if(PlacementHelper.isPartner(worldIn, other, b -> b == FurnitureBlocks.DIVING_BOARD_BASE))
+                worldIn.destroyBlock(other, false);
         }
     }
 

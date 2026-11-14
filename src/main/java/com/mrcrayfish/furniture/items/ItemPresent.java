@@ -6,6 +6,7 @@ import com.mrcrayfish.furniture.blocks.BlockPresent;
 import com.mrcrayfish.furniture.init.FurnitureBlocks;
 import com.mrcrayfish.furniture.tileentity.TileEntityPresent;
 import com.mrcrayfish.furniture.util.NBTHelper;
+import com.mrcrayfish.furniture.util.PlacementHelper;
 import net.minecraft.block.Block;
 import net.minecraft.block.state.IBlockState;
 import net.minecraft.client.resources.I18n;
@@ -78,6 +79,12 @@ public class ItemPresent extends ItemBlock implements IItemInventory, SubItems, 
                     NBTTagList itemList = (NBTTagList) NBTHelper.getCompoundTag(stack, "Present").getTag("Items");
                     if(itemList.tagCount() > 0)
                     {
+                        // 礼物放在点到方块的上方一格：先核对这一格能放（权限、可替换），不能放就不放、不扣物品
+                        if(!PlacementHelper.canPlayerPlaceAt(worldIn, player, pos.up(), EnumFacing.UP, stack))
+                        {
+                            return EnumActionResult.FAIL;
+                        }
+
                         IBlockState state = FurnitureBlocks.PRESENT.getDefaultState().withProperty(BlockPresent.COLOUR, EnumDyeColor.byMetadata(stack.getItemDamage()));
 
                         worldIn.setBlockState(pos.up(), state, 2);
