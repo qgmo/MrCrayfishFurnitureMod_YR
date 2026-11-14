@@ -40,8 +40,8 @@ import java.util.Random;
  */
 public final class WaterBasins
 {
-    /** 一瓶水多少 mB（原版没有定数，取常见的 250） */
-    public static final int BOTTLE = 250;
+    /** 一瓶水多少 mB：三瓶约一桶，不凭空多水（服主 11-14） */
+    public static final int BOTTLE = 334;
 
     private static final Random RANDOM = new Random();
 

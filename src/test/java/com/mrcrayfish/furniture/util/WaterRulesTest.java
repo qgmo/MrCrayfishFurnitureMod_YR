@@ -1,5 +1,6 @@
 package com.mrcrayfish.furniture.util;
 
+import com.mrcrayfish.furniture.water.WaterBasins;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -16,6 +17,15 @@ class WaterRulesTest
         assertEquals(100, WaterRules.TOILET_FLUSH);
         assertEquals(1, WaterRules.SHOWER_PER_TICK);
         assertEquals(1000, WaterRules.TAP_PER_BLOCK);
+    }
+
+    @Test
+    void threeBottlesMakeABucketWithoutExtraWater()
+    {
+        assertEquals(334, WaterBasins.BOTTLE);
+        // 三瓶倒进去够一桶；一桶水装不满三瓶（不凭空多水）
+        assertTrue(3 * WaterBasins.BOTTLE >= 1000);
+        assertTrue(1000 / WaterBasins.BOTTLE == 2);
     }
 
     @Test
