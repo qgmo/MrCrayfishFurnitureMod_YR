@@ -6,6 +6,8 @@ import com.mrcrayfish.furniture.gui.containers.ContainerEnvelope;
 import com.mrcrayfish.furniture.gui.containers.ContainerPackage;
 import com.mrcrayfish.furniture.gui.containers.ContainerPresent;
 import com.mrcrayfish.furniture.gui.containers.ContainerRemoteBattery;
+import com.mrcrayfish.furniture.gui.containers.ContainerTVSettings;
+import com.mrcrayfish.furniture.network.message.MessageTVOpenSettings;
 import com.mrcrayfish.furniture.gui.inventory.InventoryEnvelope;
 import com.mrcrayfish.furniture.gui.inventory.InventoryPackage;
 import com.mrcrayfish.furniture.gui.inventory.InventoryPresent;
@@ -35,6 +37,11 @@ public class GuiHandler implements IGuiHandler
             return remote.getItem() == FurnitureItems.TV_REMOTE ? new ContainerRemoteBattery(player.inventory, new InventoryRemoteBattery(remote)) : null;
         }
         TileEntity tileEntity = world.getTileEntity(new BlockPos(x, y, z));
+        // 电视的频道设置界面（悠然服务器魔改）：卡槽要服务端的 Container
+        if(id == MessageTVOpenSettings.GUI_ID)
+        {
+            return tileEntity instanceof TileEntityTV ? new ContainerTVSettings(player.inventory, (TileEntityTV) tileEntity) : null;
+        }
         if(tileEntity instanceof TileEntityFurniture)
         {
             return ((TileEntityFurniture) tileEntity).createContainer(player.inventory, player);
@@ -85,6 +92,10 @@ public class GuiHandler implements IGuiHandler
             return remote.getItem() == FurnitureItems.TV_REMOTE ? new GuiRemoteBattery(player.inventory, new InventoryRemoteBattery(remote)) : null;
         }
         TileEntity tileEntity = world.getTileEntity(new BlockPos(x, y, z));
+        if(id == MessageTVOpenSettings.GUI_ID)
+        {
+            return tileEntity instanceof TileEntityTV ? new GuiTVSettings(player.inventory, (TileEntityTV) tileEntity) : null;
+        }
         if(tileEntity instanceof IValueContainer && id == 1)
         {
             return new GuiEditValueContainer((IValueContainer) tileEntity);

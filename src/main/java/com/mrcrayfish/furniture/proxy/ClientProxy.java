@@ -1,6 +1,13 @@
 package com.mrcrayfish.furniture.proxy;
 
 import com.mrcrayfish.furniture.client.GifCache;
+import com.mrcrayfish.furniture.client.tv.RemoteControls;
+import com.mrcrayfish.furniture.client.tv.TvClientConfig;
+import com.mrcrayfish.furniture.client.tv.TvVideoManager;
+import com.mrcrayfish.furniture.gui.GuiTVScreen;
+import com.mrcrayfish.furniture.gui.GuiTVSettings;
+import com.mrcrayfish.furniture.network.message.MessageTVChannelsResult;
+import net.minecraft.util.math.BlockPos;
 import com.mrcrayfish.furniture.handler.ClientEvents;
 import com.mrcrayfish.furniture.handler.GuiDrawHandler;
 import com.mrcrayfish.furniture.handler.InputHandler;
@@ -63,6 +70,23 @@ public class ClientProxy extends CommonProxy
 
         MinecraftForge.EVENT_BUS.register(GifCache.INSTANCE);
         MinecraftForge.EVENT_BUS.register(new MirrorRenderer());
+
+        // 电视放视频、遥控器（悠然服务器魔改）
+        TvClientConfig.load();
+        MinecraftForge.EVENT_BUS.register(TvVideoManager.INSTANCE);
+        MinecraftForge.EVENT_BUS.register(RemoteControls.INSTANCE);
+    }
+
+    @Override
+    public void openTvScreen(BlockPos pos)
+    {
+        Minecraft.getMinecraft().displayGuiScreen(new GuiTVScreen(pos));
+    }
+
+    @Override
+    public void onTvChannelsResult(MessageTVChannelsResult message)
+    {
+        Minecraft.getMinecraft().addScheduledTask(() -> GuiTVSettings.onResult(message));
     }
 
     public void registerColorHandlers()
