@@ -8,6 +8,7 @@ import com.mrcrayfish.furniture.network.PacketHandler;
 import com.mrcrayfish.furniture.network.message.MessageComputerAction;
 import com.mrcrayfish.furniture.tileentity.TileEntityComputer;
 import moe.qingu.youran.api.network.tls.CertificateInfo;
+import moe.qingu.youran.api.network.ClientNic;
 import net.minecraft.client.gui.Gui;
 import net.minecraft.client.gui.ScaledResolution;
 import net.minecraft.client.gui.inventory.GuiContainer;
@@ -246,8 +247,12 @@ public class GuiBrowser extends GuiContainer
                 {
                     ComputerViews.renderSnapshot(v.page, deviceScale, s -> spectatorSnapshot = s, p ->
                     {
-                        if(req == spectatorRender)
-                            spectatorPage = p;
+                        if(req != spectatorRender)
+                            return;
+                        spectatorPage = p;
+                        // 先显示没有图的页面，再用自己的玩家临时地址取图（服主 11-14），取到了重画
+                        if(p != null && !p.document.images.isEmpty())
+                            loadSpectatorImages(req, p.document.images);
                     });
                 }
             }
@@ -257,6 +262,25 @@ public class GuiBrowser extends GuiContainer
         {
             viewVersion = -1;
         }
+    }
+
+    /** 旁观者用自己的玩家临时地址取页面里的图（服务器只放行这一页图片所在的主机），规则同操作者（{@link ImageFetcher}） */
+    private void loadSpectatorImages(int req, List<String> urls)
+    {
+        ClientNic.Session s = ClientNic.player();
+        PageSnapshot snap = spectatorSnapshot;
+        if(s == null || s.isClosed() || snap == null)
+            return;
+        ImageFetcher.fetch(s, urls, () -> req == spectatorRender && mc.currentScreen == this, got ->
+        {
+            if(got.isEmpty())
+                return;
+            ComputerViews.render(snap.html, snap.mode, snap.url, got, deviceScale, p ->
+            {
+                if(req == spectatorRender && p != null)
+                    spectatorPage = p;
+            });
+        });
     }
 
     // ---- 当前页面 ----

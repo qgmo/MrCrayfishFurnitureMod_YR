@@ -3,6 +3,7 @@ package com.mrcrayfish.furniture.tileentity;
 import com.mrcrayfish.furniture.compat.RegionUse;
 import com.mrcrayfish.furniture.computer.ComputerNetwork;
 import com.mrcrayfish.furniture.computer.ComputerSync;
+import com.mrcrayfish.furniture.computer.PageFacts;
 import com.mrcrayfish.furniture.gui.containers.ContainerComputer;
 import com.mrcrayfish.furniture.power.ApplianceEnergy;
 import com.mrcrayfish.furniture.power.ApplianceFaces;
@@ -56,8 +57,11 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
     /** 当前页面（压缩的 {@code PageSnapshot}）；没有为 null */
     @Nullable
     private byte[] page;
+    /** 服务端自己从当前页面解析出来的（图片所在的主机等），不信客户端报的 */
+    private PageFacts pageFacts = PageFacts.NONE;
     private int scroll;
     private int retryTicks;
+    private int ticks;
 
     public TileEntityComputer()
     {
@@ -105,6 +109,11 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         return scroll;
     }
 
+    public PageFacts getPageFacts()
+    {
+        return pageFacts;
+    }
+
     /** 当前操作者（服务端；不在线、没开着界面时为 null） */
     @Nullable
     public EntityPlayerMP getOperatorPlayer()
@@ -150,6 +159,8 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         {
             setOperator(null);
         }
+        if(world != null && !world.isRemote)
+            ComputerSync.ungrant(player.getUniqueID(), this);
     }
 
     /** 接管（没人操作时） */
@@ -168,15 +179,16 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         if(!switchedOn)
         {
             // 关机清屏
-            setPage(null);
+            setPage(null, PageFacts.NONE);
         }
         this.markDirty();
         TileEntityUtil.markBlockForUpdate(world, pos);
     }
 
-    public void setPage(@Nullable byte[] compressed)
+    public void setPage(@Nullable byte[] compressed, PageFacts facts)
     {
         this.page = compressed;
+        this.pageFacts = compressed == null ? PageFacts.NONE : facts;
         this.scroll = 0;
         ComputerSync.broadcastPage(this);
     }
@@ -194,6 +206,8 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
             return;
         this.operator = id;
         this.operatorName = player == null ? "" : player.getName();
+        if(id != null)
+            ComputerSync.ungrant(id, this);
         if(device != null && !device.isRemoved() && player == null && device.attachedPlayer() != null)
         {
             device.detach();
@@ -214,6 +228,9 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         }
         dropLegacySlot();
         updateDevice(running);
+        // 旁观者的放行：每秒查一次谁不看了，每分钟给还在看的续期
+        if(++ticks % 20 == 0)
+            ComputerSync.refreshSpectators(this, ticks % 1200 == 0);
     }
 
     /** 设备表：登记（网络开服后才有，失败时每秒再试）、通电、网卡接到操作者 */
@@ -275,6 +292,7 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         {
             ComputerNetwork.unregister(device);
             device = null;
+            ComputerSync.ungrantAll(this);
         }
     }
 

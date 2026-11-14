@@ -181,7 +181,7 @@ public final class ComputerViews
             return;
         }
         snapshot.accept(s);
-        // 旁观者没有网络：不加载图片
+        // 先不带图渲染；图由旁观者用自己的玩家临时地址另取（GuiBrowser.loadSpectatorImages）
         render(s.html, s.mode, s.url, new HashMap<>(), scale, done);
     }
 }

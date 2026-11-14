@@ -468,37 +468,7 @@ public final class Browser
             return;
         }
         setStatus(Status.LOADING, ComputerViews.TR.t("cfm.browser.status.images", imageUrls.size()));
-        loadImages(s, imageUrls, 0, images, gen, () -> loaded(req, page, pageMode, conn, images));
-    }
-
-    private void loadImages(ClientNic.Session s, List<String> urls, int i, Map<String, byte[]> out, int gen, Runnable done)
-    {
-        if(gen != generation)
-            return;
-        if(i >= urls.size() || s.isClosed())
-        {
-            done.run();
-            return;
-        }
-        HttpClient.Url u = HttpClient.Url.parse(urls.get(i));
-        if(u == null)
-        {
-            loadImages(s, urls, i + 1, out, gen, done);
-            return;
-        }
-        HttpClient.send(s.stack(), s.dns(), u, "GET", Collections.singletonMap("Accept", "image/png, image/gif, image/jpeg"), null, IMAGE_TIMEOUT_MS, null)
-                .whenComplete((resp, err) -> Minecraft.getMinecraft().addScheduledTask(() ->
-                {
-                    if(gen != generation)
-                        return;
-                    if(err == null && resp.status == 200 && resp.body.length <= MAX_IMAGE_BYTES)
-                    {
-                        byte[] png = checkedImage(resp.body);
-                        if(png != null)
-                            out.put(urls.get(i), png);
-                    }
-                    loadImages(s, urls, i + 1, out, gen, done);
-                }));
+        ImageFetcher.fetch(s, imageUrls, () -> gen == generation, got -> loaded(req, page, pageMode, conn, got));
     }
 
     /** 图片：先看文件头的尺寸，不超限才解码，再存成 PNG 交给内核；不合格返回 null */

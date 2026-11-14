@@ -2,6 +2,8 @@ package com.mrcrayfish.furniture.network.message;
 
 import com.mrcrayfish.furniture.computer.ComputerAccess;
 import com.mrcrayfish.furniture.computer.ComputerSync;
+import com.mrcrayfish.furniture.client.browser.PageDocument;
+import com.mrcrayfish.furniture.computer.PageFacts;
 import com.mrcrayfish.furniture.computer.PageLimits;
 import com.mrcrayfish.furniture.computer.PageSnapshot;
 import com.mrcrayfish.furniture.computer.PageUploads;
@@ -9,6 +11,7 @@ import com.mrcrayfish.furniture.network.ServerThread;
 import com.mrcrayfish.furniture.tileentity.TileEntityComputer;
 import com.mrcrayfish.furniture.util.RejectLog;
 import io.netty.buffer.ByteBuf;
+import moe.qingu.youran.api.network.YouranNetworkApi;
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.util.math.BlockPos;
 import net.minecraftforge.fml.common.network.simpleimpl.IMessage;
@@ -116,6 +119,17 @@ public class MessageComputerPage implements IMessage, IMessageHandler<MessageCom
             RejectLog.log(player, "computer page rejected (" + p + ") at " + message.pos);
             return;
         }
-        computer.setPage(compressed);
+        // 旁观者能连哪些主机（取图）：服务端自己从页面里解析，不信客户端报的
+        PageFacts facts;
+        try
+        {
+            facts = PageFacts.of(snapshot, YouranNetworkApi::addressOfName);
+        }
+        catch(PageDocument.Invalid | RuntimeException e)
+        {
+            RejectLog.log(player, "computer page rejected (" + e + ") at " + message.pos);
+            return;
+        }
+        computer.setPage(compressed, facts);
     }
 }
