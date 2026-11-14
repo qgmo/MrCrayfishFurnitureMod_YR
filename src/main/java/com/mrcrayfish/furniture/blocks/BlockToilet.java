@@ -78,10 +78,15 @@ public class BlockToilet extends BlockFurniture
         }
         else
         {
-            List<EntityItem> items = worldIn.getEntitiesWithinAABB(EntityItem.class, new AxisAlignedBB(pos.getX(), pos.getY(), pos.getZ(), pos.getX() + 1.0D, pos.getY() + 1.0D, pos.getZ() + 1.0D).grow(1D));
-            for(EntityItem item : items)
+            // 冲水只删马桶自己这一格里的掉落物（原来是周围 3×3×3），并且要求玩家可以改动这一格
+            // （出生点保护、Forge 的方块修改检查）；右键本身在 SpongeForge 上已经过领地插件的交互检查（悠然服务器魔改）
+            if(!worldIn.isRemote && worldIn.isBlockModifiable(playerIn, pos))
             {
-                item.setDead();
+                List<EntityItem> items = worldIn.getEntitiesWithinAABB(EntityItem.class, new AxisAlignedBB(pos));
+                for(EntityItem item : items)
+                {
+                    item.setDead();
+                }
             }
             worldIn.playSound(pos.getX() + 0.5D, pos.getY() + 0.5D, pos.getZ() + 0.5D, FurnitureSounds.flush, SoundCategory.BLOCKS, 0.75F, 1.0F, false);
         }
