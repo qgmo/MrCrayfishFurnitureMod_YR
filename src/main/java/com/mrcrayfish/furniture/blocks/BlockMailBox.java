@@ -55,7 +55,15 @@ public class BlockMailBox extends BlockFurnitureTile
             EntityPlayer player = (EntityPlayer) placer;
             if(!world.isRemote)
             {
-                player.sendMessage(new TextComponentTranslation("cfm.message.mailbox_ownerrequest"));
+                // 放下信箱的人直接成为主人（悠然服务器魔改）。原来要再右键认领，
+                // 认领前谁先右键归谁、谁都能拆。已在世界里尚未认领的信箱照旧右键认领。
+                TileEntity tileEntity = world.getTileEntity(pos);
+                if(tileEntity instanceof TileEntityMailBox)
+                {
+                    ((TileEntityMailBox) tileEntity).setOwner(player);
+                    player.sendMessage(new TextComponentTranslation("cfm.message.mailbox_ownerget", TextFormatting.YELLOW + player.getName()));
+                    TileEntityUtil.markBlockForUpdate(world, pos);
+                }
             }
         }
     }
