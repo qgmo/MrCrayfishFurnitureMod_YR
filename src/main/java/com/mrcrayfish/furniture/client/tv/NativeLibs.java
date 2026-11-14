@@ -100,6 +100,8 @@ public final class NativeLibs
     private static volatile long progressDone;
     private static volatile long progressTotal;
     private static volatile String failure = "";
+    /** 上次下载失败是因为代理认证没通过（屏幕上提示检查代理的用户名、密码） */
+    private static volatile boolean failedProxyAuth;
     private static volatile long failedAt;
 
     private NativeLibs() {}
@@ -153,6 +155,11 @@ public final class NativeLibs
     }
 
     /** 下载失败、不支持时的说明（日志用，界面上用语言键） */
+    public static boolean failedProxyAuth()
+    {
+        return failedProxyAuth;
+    }
+
     public static String getFailure()
     {
         return failure;
@@ -166,6 +173,7 @@ public final class NativeLibs
         if(state == State.NOT_STARTED || (state == State.FAILED && System.currentTimeMillis() - failedAt > 60_000L))
         {
             state = State.DOWNLOADING;
+            failedProxyAuth = false;
             Thread t = new Thread(NativeLibs::prepare, "cfm-tv-natives");
             t.setDaemon(true);
             t.start();
@@ -275,6 +283,13 @@ public final class NativeLibs
                 }
                 Files.move(part.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING);
                 return;
+            }
+            catch(TvProxy.AuthException e)
+            {
+                // 各个源都走同一个代理，换源也没用
+                Files.deleteIfExists(part.toPath());
+                failedProxyAuth = true;
+                throw e;
             }
             catch(IOException | NoSuchAlgorithmException | IllegalArgumentException e)
             {

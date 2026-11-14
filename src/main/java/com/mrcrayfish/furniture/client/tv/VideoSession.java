@@ -255,7 +255,8 @@ public final class VideoSession
                 // 接口出错：30 秒后再试（不高频重试）
                 sleepUntilClosed(30_000);
                 stream = null;
-                if(!"cfm.tv.bili.network".equals(e.getKey()) && !"cfm.tv.bili.blocked".equals(e.getKey()))
+                // 网络、风控、代理的问题：视频信息还能用，只重取流地址
+                if(!"cfm.tv.bili.network".equals(e.getKey()) && !"cfm.tv.bili.blocked".equals(e.getKey()) && !e.getKey().startsWith("cfm.tv.bili.proxy"))
                     info = null;
             }
             catch(InterruptedException e)

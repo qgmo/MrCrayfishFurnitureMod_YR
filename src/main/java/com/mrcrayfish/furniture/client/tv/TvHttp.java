@@ -12,6 +12,8 @@ import java.net.Proxy;
 import java.net.URI;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.Inflater;
 import java.util.zip.InflaterInputStream;
@@ -20,7 +22,8 @@ import java.util.zip.InflaterInputStream;
  * 电视视频的 HTTP 请求（悠然服务器魔改）。所有请求都：
  * <ul>
  * <li>先过 {@link HostPolicy}（https + 白名单域名），跳转不自动跟，每一跳都重新核对；</li>
- * <li>走客户端配置的代理（HTTP 或 SOCKS5），不填就直连；不改全局的代理属性；</li>
+ * <li>走客户端配置的代理（HTTP 或 SOCKS5，可带账号密码，隧道与 TLS 自己做，见 {@link TvProxy}），不填就直连；
+ * 不改全局的代理属性、不用全局的 {@link java.net.Authenticator}；</li>
  * <li>限制连接、读取超时与响应大小；</li>
  * <li>只有发往 bilibili 接口时才带 Cookie；接口与 CDN 带 bilibili 的 Referer 与浏览器 UA（防盗链要求）。</li>
  * </ul>
@@ -47,13 +50,20 @@ public final class TvHttp
         public final String contentType;
         @Nullable
         public final String contentEncoding;
+        @Nullable
+        final String location;
         public final URI uri;
+        @Nullable
         private final HttpURLConnection connection;
+        @Nullable
+        private final TunnelHttp.Result tunnel;
         private final long maxBytes;
 
+        /** 直连（HttpURLConnection） */
         Response(HttpURLConnection connection, URI uri, long maxBytes) throws IOException
         {
             this.connection = connection;
+            this.tunnel = null;
             this.uri = uri;
             this.maxBytes = maxBytes;
             this.status = connection.getResponseCode();
@@ -61,12 +71,32 @@ public final class TvHttp
             this.contentRange = connection.getHeaderField("Content-Range");
             this.contentType = connection.getHeaderField("Content-Type");
             this.contentEncoding = connection.getHeaderField("Content-Encoding");
+            this.location = connection.getHeaderField("Location");
+        }
+
+        /** 经代理隧道（{@link TunnelHttp}） */
+        Response(TunnelHttp.Result tunnel, URI uri, long maxBytes)
+        {
+            this.connection = null;
+            this.tunnel = tunnel;
+            this.uri = uri;
+            this.maxBytes = maxBytes;
+            this.status = tunnel.status;
+            this.contentLength = tunnel.contentLength();
+            this.contentRange = tunnel.header("Content-Range");
+            this.contentType = tunnel.header("Content-Type");
+            this.contentEncoding = tunnel.header("Content-Encoding");
+            this.location = tunnel.header("Location");
         }
 
         /** 响应体（超过上限时读取抛 IOException） */
         public InputStream body() throws IOException
         {
-            InputStream in = status >= 400 ? connection.getErrorStream() : connection.getInputStream();
+            InputStream in;
+            if(tunnel != null)
+                in = tunnel.body;
+            else
+                in = status >= 400 ? connection.getErrorStream() : connection.getInputStream();
             if(in == null)
                 in = new ByteArrayInputStream(new byte[0]);
             return maxBytes < 0 ? in : new LimitedInputStream(in, maxBytes);
@@ -75,7 +105,10 @@ public final class TvHttp
         @Override
         public void close()
         {
-            connection.disconnect();
+            if(tunnel != null)
+                TvProxy.closeQuietly(tunnel.socket);
+            else
+                connection.disconnect();
         }
     }
 
@@ -89,18 +122,17 @@ public final class TvHttp
         {
             if(!HostPolicy.allowed(current, purpose, TvDev.enabled()))
                 throw new IOException("host not allowed: " + safe(current));
-            HttpURLConnection c = open(current, purpose, accept, rangeStart, rangeEnd, readTimeoutMs);
-            int code = c.getResponseCode();
+            Response res = open(current, purpose, accept, rangeStart, rangeEnd, maxBytes, readTimeoutMs);
+            int code = res.status;
             if(code == 301 || code == 302 || code == 303 || code == 307 || code == 308)
             {
-                String location = c.getHeaderField("Location");
-                c.disconnect();
+                String location = res.location;
+                res.close();
                 if(location == null || hop >= MAX_REDIRECTS)
                     throw new IOException("too many redirects from " + safe(uri));
                 current = current.resolve(location.trim());
                 continue;
             }
-            Response res = new Response(c, current, maxBytes);
             if(maxBytes >= 0 && res.contentLength > maxBytes)
             {
                 res.close();
@@ -163,35 +195,58 @@ public final class TvHttp
         return out.toByteArray();
     }
 
-    private static HttpURLConnection open(URI uri, HostPolicy.Purpose purpose, @Nullable String accept, long rangeStart, long rangeEnd, int readTimeoutMs) throws IOException
+    private static Response open(URI uri, HostPolicy.Purpose purpose, @Nullable String accept, long rangeStart, long rangeEnd, long maxBytes, int readTimeoutMs) throws IOException
     {
-        URL url = uri.toURL();
+        Map<String, String> headers = headers(purpose, accept, rangeStart, rangeEnd);
         // 开发测试时的本机地址不走代理
-        Proxy proxy = "127.0.0.1".equals(uri.getHost()) ? null : TvClientConfig.proxy(TvClientConfig.get());
-        HttpURLConnection c = (HttpURLConnection) (proxy == null ? url.openConnection(Proxy.NO_PROXY) : url.openConnection(proxy));
+        TvProxy.Settings proxy = "127.0.0.1".equals(uri.getHost()) ? null : TvClientConfig.proxy(TvClientConfig.get());
+        if(proxy != null)
+        {
+            // 经代理：自己建隧道、套 TLS（不用 Java 自带的代理支持，见 TvProxy）
+            return new Response(TunnelHttp.get(proxy, uri, headers, CONNECT_TIMEOUT_MS, readTimeoutMs, null), uri, maxBytes);
+        }
+        URL url = uri.toURL();
+        HttpURLConnection c = (HttpURLConnection) url.openConnection(Proxy.NO_PROXY);
         c.setInstanceFollowRedirects(false);
         c.setUseCaches(false);
         c.setConnectTimeout(CONNECT_TIMEOUT_MS);
         c.setReadTimeout(readTimeoutMs);
-        c.setRequestProperty("User-Agent", USER_AGENT);
+        for(Map.Entry<String, String> e : headers.entrySet())
+            c.setRequestProperty(e.getKey(), e.getValue());
+        try
+        {
+            return new Response(c, uri, maxBytes);
+        }
+        catch(IOException | RuntimeException e)
+        {
+            c.disconnect();
+            throw e;
+        }
+    }
+
+    /** 请求头（两种连接方式共用） */
+    private static Map<String, String> headers(HostPolicy.Purpose purpose, @Nullable String accept, long rangeStart, long rangeEnd)
+    {
+        Map<String, String> h = new LinkedHashMap<>();
+        h.put("User-Agent", USER_AGENT);
         if(accept != null)
-            c.setRequestProperty("Accept", accept);
+            h.put("Accept", accept);
         if(purpose == HostPolicy.Purpose.API || purpose == HostPolicy.Purpose.CDN || purpose == HostPolicy.Purpose.COVER)
-            c.setRequestProperty("Referer", REFERER);
+            h.put("Referer", REFERER);
         if(purpose == HostPolicy.Purpose.API)
         {
-            c.setRequestProperty("Accept-Encoding", "gzip, deflate");
+            h.put("Accept-Encoding", "gzip, deflate");
             String cookie = TvCookies.header(TvClientConfig.get().cookie);
             if(!cookie.isEmpty())
-                c.setRequestProperty("Cookie", cookie);
+                h.put("Cookie", cookie);
         }
         else
         {
-            c.setRequestProperty("Accept-Encoding", "identity");
+            h.put("Accept-Encoding", "identity");
         }
         if(rangeStart >= 0)
-            c.setRequestProperty("Range", "bytes=" + rangeStart + "-" + (rangeEnd >= 0 ? Long.toString(rangeEnd) : ""));
-        return c;
+            h.put("Range", "bytes=" + rangeStart + "-" + (rangeEnd >= 0 ? Long.toString(rangeEnd) : ""));
+        return h;
     }
 
     /** 日志里只写协议、主机、路径，不写查询串（里面有签名、令牌） */

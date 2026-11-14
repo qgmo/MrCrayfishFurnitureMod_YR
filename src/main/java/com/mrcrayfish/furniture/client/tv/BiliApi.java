@@ -277,6 +277,14 @@ public final class BiliApi
         {
             throw new BiliData.BiliException(e.status == 412 ? "cfm.tv.bili.blocked" : "cfm.tv.bili.network", e.getMessage());
         }
+        catch(TvProxy.AuthException e)
+        {
+            throw new BiliData.BiliException("cfm.tv.bili.proxy_auth", e.getMessage());
+        }
+        catch(TvProxy.ProxyException e)
+        {
+            throw new BiliData.BiliException("cfm.tv.bili.proxy", e.getMessage());
+        }
         catch(IOException e)
         {
             throw new BiliData.BiliException("cfm.tv.bili.network", e.getMessage());

@@ -303,7 +303,7 @@ public final class TvVideoManager
             case UNSUPPORTED:
                 return Screen.text("cfm.tv.video.unsupported", null);
             case FAILED:
-                return Screen.text("cfm.tv.video.download_failed", null);
+                return Screen.text(NativeLibs.failedProxyAuth() ? "cfm.tv.video.download_failed_proxy_auth" : "cfm.tv.video.download_failed", null);
             case NOT_STARTED:
             case DOWNLOADING:
             case LOADING:

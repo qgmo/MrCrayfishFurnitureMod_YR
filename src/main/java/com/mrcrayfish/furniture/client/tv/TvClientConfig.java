@@ -5,8 +5,6 @@ import net.minecraftforge.common.config.Configuration;
 
 import javax.annotation.Nullable;
 import java.io.File;
-import java.net.InetSocketAddress;
-import java.net.Proxy;
 import java.util.Locale;
 
 /**
@@ -14,6 +12,7 @@ import java.util.Locale;
  * 从遥控器（没对着电视时潜行 + 左键）打开的本地配置界面改（{@link com.mrcrayfish.furniture.gui.GuiTVClientConfig}）。
  * <p>
  * bilibili cookie 只用于发往 api.bilibili.com 的请求，不发给服务端，不写进日志、崩溃报告，界面上也不显示原文。
+ * 代理的用户名、密码同样只存在这个本机文件里，只用于和代理认证（{@link TvProxy}），不写进日志、异常信息，界面上不显示原文。
  */
 public final class TvClientConfig
 {
@@ -39,6 +38,8 @@ public final class TvClientConfig
         public ProxyType proxyType = ProxyType.NONE;
         public String proxyHost = "";
         public int proxyPort = 0;
+        public String proxyUsername = "";
+        public String proxyPassword = "";
         public String cookie = "";
 
         public Values copy()
@@ -53,6 +54,8 @@ public final class TvClientConfig
             v.proxyType = proxyType;
             v.proxyHost = proxyHost;
             v.proxyPort = proxyPort;
+            v.proxyUsername = proxyUsername;
+            v.proxyPassword = proxyPassword;
             v.cookie = cookie;
             return v;
         }
@@ -100,6 +103,8 @@ public final class TvClientConfig
         v.proxyType = parseProxyType(config.getString("proxy-type", CATEGORY, "none", "Proxy for fetching videos: none, http or socks5.", new String[]{"none", "http", "socks5"}));
         v.proxyHost = config.getString("proxy-host", CATEGORY, "", "Proxy host name or IP address.").trim();
         v.proxyPort = config.getInt("proxy-port", CATEGORY, 0, 0, 65535, "Proxy port.");
+        v.proxyUsername = cleanCredential(config.getString("proxy-username", CATEGORY, "", "Proxy user name (optional; leave empty if the proxy needs no login). Only sent to the proxy."));
+        v.proxyPassword = cleanCredential(config.getString("proxy-password", CATEGORY, "", "Proxy password (optional). Stored in plain text in this file on your computer; only sent to the proxy."));
         v.cookie = config.getString("bilibili-cookie", CATEGORY, "", "Your own bilibili cookie (optional, e.g. SESSDATA=...). Only sent to api.bilibili.com from this computer, never to the game server. Allows higher qualities.");
         values = v;
         if(config.hasChanged())
@@ -119,6 +124,8 @@ public final class TvClientConfig
         config.get(CATEGORY, "proxy-type", "none").set(v.proxyType.name().toLowerCase(Locale.ROOT));
         config.get(CATEGORY, "proxy-host", "").set(v.proxyHost.trim());
         config.get(CATEGORY, "proxy-port", 0).set(clamp(v.proxyPort, 0, 65535));
+        config.get(CATEGORY, "proxy-username", "").set(cleanCredential(v.proxyUsername));
+        config.get(CATEGORY, "proxy-password", "").set(cleanCredential(v.proxyPassword));
         config.get(CATEGORY, "bilibili-cookie", "").set(v.cookie);
         config.save();
         Values copy = v.copy();
@@ -155,12 +162,27 @@ public final class TvClientConfig
 
     /** 配置里的代理；没配或配得不完整时直连（返回 null） */
     @Nullable
-    public static Proxy proxy(Values v)
+    public static TvProxy.Settings proxy(Values v)
     {
         if(v.proxyType == ProxyType.NONE || v.proxyHost.isEmpty() || v.proxyPort <= 0)
             return null;
-        // 让代理那头解析域名
-        InetSocketAddress address = InetSocketAddress.createUnresolved(v.proxyHost, v.proxyPort);
-        return new Proxy(v.proxyType == ProxyType.HTTP ? Proxy.Type.HTTP : Proxy.Type.SOCKS, address);
+        return new TvProxy.Settings(v.proxyType == ProxyType.HTTP ? TvProxy.Type.HTTP : TvProxy.Type.SOCKS5, v.proxyHost, v.proxyPort, v.proxyUsername, v.proxyPassword);
     }
+
+    /** 用户名、密码：去掉换行等控制字符，最长 {@value #MAX_CREDENTIAL} 字（SOCKS5 的上限是 255 字节） */
+    public static String cleanCredential(@Nullable String s)
+    {
+        if(s == null)
+            return "";
+        StringBuilder sb = new StringBuilder();
+        for(int i = 0; i < s.length() && sb.length() < MAX_CREDENTIAL; i++)
+        {
+            char c = s.charAt(i);
+            if(c >= 0x20 && c != 0x7F)
+                sb.append(c);
+        }
+        return sb.toString();
+    }
+
+    public static final int MAX_CREDENTIAL = 255;
 }

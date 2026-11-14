@@ -18,6 +18,7 @@ import java.io.IOException;
  * <p>
  * 改到一半关掉界面，改的内容留在内存里，下次打开接着改；只有点“保存”或“放弃修改”（再点一次确认）才结束。
  * bilibili cookie 不在界面上显示原文：只能从剪贴板粘贴或清除，界面上只写“已设置（N 个字符）”。
+ * 代理的用户名、密码可以输入，但输入框里只显示星号，也不能复制、剪切出来（免得截图、录屏带出去）。
  */
 public class GuiTVClientConfig extends GuiScreen
 {
@@ -29,6 +30,7 @@ public class GuiTVClientConfig extends GuiScreen
     private final GuiScreen parent;
     private TvClientConfig.Values values;
     private GuiTextField startRange, hearRange, volume, proxyHost, proxyPort;
+    private MaskedField proxyUsername, proxyPassword;
     private GuiButton quality, decoders, danmaku, proxyType, pasteCookie, clearCookie, save, discard;
     private long discardArmedAt;
     private String status = "";
@@ -60,6 +62,8 @@ public class GuiTVClientConfig extends GuiScreen
         volume = field(12, left + 96, top + ROW_FIELDS + 22, 50, Integer.toString(values.masterVolume), 3);
         proxyPort = field(14, right + 96, top + ROW_FIELDS + 22, 50, values.proxyPort > 0 ? Integer.toString(values.proxyPort) : "", 5);
         proxyHost = field(13, right + 50, top + ROW_FIELDS + 44, 96, values.proxyHost, 253);
+        proxyUsername = masked(15, left + 50, top + ROW_FIELDS + 66, 96, values.proxyUsername);
+        proxyPassword = masked(16, right + 50, top + ROW_FIELDS + 66, 96, values.proxyPassword);
         pasteCookie = new GuiButton(4, left + 150, top + ROW_COOKIE, 72, 20, I18n.format("cfm.tv.config.cookie_paste"));
         clearCookie = new GuiButton(5, left + 226, top + ROW_COOKIE, 72, 20, I18n.format("cfm.tv.config.cookie_clear"));
         discard = new GuiButton(6, width / 2 - 150, top + ROW_SAVE, 146, 20, "");
@@ -75,7 +79,7 @@ public class GuiTVClientConfig extends GuiScreen
         refresh();
     }
 
-    private static final int ROW_BUTTONS = 26, ROW_FIELDS = 78, ROW_COOKIE = 146, ROW_STATUS = 172, ROW_SAVE = 186, HEIGHT = 208;
+    private static final int ROW_BUTTONS = 26, ROW_FIELDS = 78, ROW_COOKIE = 168, ROW_STATUS = 194, ROW_SAVE = 208, HEIGHT = 230;
 
     private int top()
     {
@@ -90,9 +94,17 @@ public class GuiTVClientConfig extends GuiScreen
         return f;
     }
 
+    private MaskedField masked(int id, int x, int y, int w, String text)
+    {
+        MaskedField f = new MaskedField(id, fontRenderer, x, y, w, 16);
+        f.setMaxStringLength(TvClientConfig.MAX_CREDENTIAL);
+        f.setText(text);
+        return f;
+    }
+
     private GuiTextField[] fields()
     {
-        return new GuiTextField[]{startRange, hearRange, volume, proxyHost, proxyPort};
+        return new GuiTextField[]{startRange, hearRange, volume, proxyHost, proxyPort, proxyUsername, proxyPassword};
     }
 
     private void refresh()
@@ -129,6 +141,8 @@ public class GuiTVClientConfig extends GuiScreen
         values.masterVolume = number(volume, values.masterVolume, 0, 100);
         values.proxyHost = proxyHost.getText().trim();
         values.proxyPort = proxyPort.getText().trim().isEmpty() ? 0 : number(proxyPort, values.proxyPort, 0, 65535);
+        values.proxyUsername = TvClientConfig.cleanCredential(proxyUsername.getText());
+        values.proxyPassword = TvClientConfig.cleanCredential(proxyPassword.getText());
     }
 
     private static int number(GuiTextField f, int old, int min, int max)
@@ -238,8 +252,11 @@ public class GuiTVClientConfig extends GuiScreen
         {
             if(f.isFocused())
             {
+                // 用户名、密码不能复制、剪切出来
+                if(f instanceof MaskedField && (GuiScreen.isKeyComboCtrlC(keyCode) || GuiScreen.isKeyComboCtrlX(keyCode)))
+                    return;
                 // 数字框只收数字
-                boolean numeric = f != proxyHost;
+                boolean numeric = f != proxyHost && !(f instanceof MaskedField);
                 if(numeric && Character.isLetter(typedChar))
                     return;
                 if(f.textboxKeyTyped(typedChar, keyCode))
@@ -281,6 +298,9 @@ public class GuiTVClientConfig extends GuiScreen
         fontRenderer.drawString(I18n.format("cfm.tv.config.proxy_port"), right, y + 4, 0xE0E0E0);
         y += 22;
         fontRenderer.drawString(I18n.format("cfm.tv.config.proxy_host"), right, y + 4, 0xE0E0E0);
+        y += 22;
+        fontRenderer.drawString(I18n.format("cfm.tv.config.proxy_username"), left, y + 4, 0xE0E0E0);
+        fontRenderer.drawString(I18n.format("cfm.tv.config.proxy_password"), right, y + 4, 0xE0E0E0);
         y = top + ROW_COOKIE;
         String cookie = values.hasCookie() ? I18n.format("cfm.tv.config.cookie_set", TvCookies.sanitize(values.cookie).length()) : I18n.format("cfm.tv.config.cookie_unset");
         fontRenderer.drawString(I18n.format("cfm.tv.config.cookie", cookie), left, y + 6, 0xE0E0E0);
@@ -302,7 +322,7 @@ public class GuiTVClientConfig extends GuiScreen
             case LOADING:
                 return I18n.format("cfm.tv.video.downloading", Math.round(NativeLibs.progress() * 100));
             case FAILED:
-                return I18n.format("cfm.tv.video.download_failed");
+                return I18n.format(NativeLibs.failedProxyAuth() ? "cfm.tv.video.download_failed_proxy_auth" : "cfm.tv.video.download_failed");
             case UNSUPPORTED:
                 return I18n.format("cfm.tv.video.unsupported");
             default:
@@ -314,5 +334,43 @@ public class GuiTVClientConfig extends GuiScreen
     public boolean doesGuiPauseGame()
     {
         return false;
+    }
+
+    /** 只显示星号的输入框（代理用户名、密码）：画的时候临时换成同样长度的星号，画完换回来 */
+    static final class MaskedField extends GuiTextField
+    {
+        MaskedField(int id, net.minecraft.client.gui.FontRenderer font, int x, int y, int w, int h)
+        {
+            super(id, font, x, y, w, h);
+        }
+
+        @Override
+        public void drawTextBox()
+        {
+            String real = getText();
+            int cursor = getCursorPosition();
+            int selection = getSelectionEnd();
+            setText(mask(real.length()));
+            setCursorPosition(cursor);
+            setSelectionPos(selection);
+            try
+            {
+                super.drawTextBox();
+            }
+            finally
+            {
+                setText(real);
+                setCursorPosition(cursor);
+                setSelectionPos(selection);
+            }
+        }
+
+        private static String mask(int n)
+        {
+            StringBuilder sb = new StringBuilder(n);
+            for(int i = 0; i < n; i++)
+                sb.append('*');
+            return sb.toString();
+        }
     }
 }
