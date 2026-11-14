@@ -20,12 +20,19 @@ public final class ComputerSync
     public static final PageUploads UPLOADS = new PageUploads();
     /** 每个玩家报滚动位置的频率 */
     private static final Map<UUID, RateLimiter> SCROLL = new HashMap<>();
+    /** 每个玩家按电源、接管的频率 */
+    private static final Map<UUID, RateLimiter> ACTIONS = new HashMap<>();
 
     private ComputerSync() {}
 
     public static boolean allowScroll(EntityPlayerMP player, long now)
     {
         return SCROLL.computeIfAbsent(player.getUniqueID(), k -> new RateLimiter(8, 8)).tryAcquire(now, 1);
+    }
+
+    public static boolean allowAction(EntityPlayerMP player, long now)
+    {
+        return ACTIONS.computeIfAbsent(player.getUniqueID(), k -> new RateLimiter(4, 4)).tryAcquire(now, 1);
     }
 
     /** 刚打开界面的人：发当前页面 */
@@ -62,6 +69,7 @@ public final class ComputerSync
         {
             UPLOADS.forget(event.player.getUniqueID());
             SCROLL.remove(event.player.getUniqueID());
+            ACTIONS.remove(event.player.getUniqueID());
         }
     }
 }

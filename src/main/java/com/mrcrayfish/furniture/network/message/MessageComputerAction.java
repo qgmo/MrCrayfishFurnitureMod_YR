@@ -1,6 +1,7 @@
 package com.mrcrayfish.furniture.network.message;
 
 import com.mrcrayfish.furniture.compat.RegionUse;
+import com.mrcrayfish.furniture.computer.ComputerSync;
 import com.mrcrayfish.furniture.computer.ComputerAccess;
 import com.mrcrayfish.furniture.network.ServerThread;
 import com.mrcrayfish.furniture.tileentity.TileEntityComputer;
@@ -51,6 +52,11 @@ public class MessageComputerAction implements IMessage, IMessageHandler<MessageC
 
     private static void handle(MessageComputerAction message, EntityPlayerMP player)
     {
+        if(!ComputerSync.allowAction(player, System.currentTimeMillis()))
+        {
+            RejectLog.log(player, "computer actions too fast at " + message.pos);
+            return;
+        }
         if(message.action == POWER)
         {
             TileEntityComputer computer = ComputerAccess.check(player, message.pos, true, false, "computer power switch");
