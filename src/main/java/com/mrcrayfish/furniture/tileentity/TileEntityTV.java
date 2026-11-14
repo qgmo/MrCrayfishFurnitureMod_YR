@@ -163,7 +163,7 @@ public class TileEntityTV extends TileEntitySyncClient implements IValueContaine
 
         this.loaded = false;
         this.result = null;
-        if(!GifCache.INSTANCE.loadCached(url))
+        if(!GifCache.INSTANCE.isCached(url))
         {
             this.loading = true;
             new GifDownloadThread(uri, (result, message) ->

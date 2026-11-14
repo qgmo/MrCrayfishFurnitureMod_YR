@@ -61,41 +61,51 @@ public final class ImageCache
         return null;
     }
 
-    public void add(String url, File file)
+    /**
+     * 放入已解码好的纹理（工作线程调用）。
+     */
+    public void put(String url, Texture texture)
     {
         synchronized(this)
         {
-            if(!cacheMap.containsKey(url))
-            {
-                Texture texture = new Texture(file);
-                cacheMap.put(url, texture);
-            }
+            cacheMap.put(url, texture);
         }
     }
 
-    public boolean add(String url, byte[] data)
+    private File fileFor(String url)
     {
-        synchronized(this)
+        return new File(getCache(), DigestUtils.sha1Hex(url.getBytes()));
+    }
+
+    /**
+     * 读磁盘缓存（工作线程调用）；没有缓存或文件超过下载上限时返回 null。
+     */
+    @Nullable
+    public byte[] readCachedFile(String url)
+    {
+        File file = fileFor(url);
+        if(!file.isFile() || file.length() > MediaDownloader.MAX_FILE_SIZE)
+            return null;
+        try
         {
-            try
-            {
-                if(!cacheMap.containsKey(url))
-                {
-                    String id = DigestUtils.sha1Hex(url.getBytes());
-                    File image = new File(getCache(), id);
-                    FileUtils.writeByteArrayToFile(image, data);
-                    Texture texture = new Texture(image);
-                    cacheMap.put(url, texture);
-                    Minecraft.getMinecraft().addScheduledTask(texture::update);
-                }
-                return true;
-            }
-            catch(IOException e)
-            {
-                e.printStackTrace();
-            }
-            return false;
+            return FileUtils.readFileToByteArray(file);
         }
+        catch(IOException e)
+        {
+            return null;
+        }
+    }
+
+    /**
+     * 写磁盘缓存（工作线程调用，不持有锁，不挡渲染线程）。
+     */
+    public void writeCachedFile(String url, byte[] data)
+    {
+        try
+        {
+            FileUtils.writeByteArrayToFile(fileFor(url), data);
+        }
+        catch(IOException ignored) {}
     }
 
     private void tick()
@@ -113,26 +123,6 @@ public final class ImageCache
         {
             this.tick();
         }
-    }
-
-    public boolean loadCached(String url)
-    {
-        synchronized(this)
-        {
-            if(cacheMap.containsKey(url))
-            {
-                return true;
-            }
-        }
-
-        String id = DigestUtils.sha1Hex(url.getBytes());
-        File file = new File(getCache(), id);
-        if(file.exists())
-        {
-            this.add(url, file);
-            return true;
-        }
-        return false;
     }
 
     public boolean isCached(String url)

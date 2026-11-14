@@ -117,7 +117,7 @@ public class TileEntityPhotoFrame extends TileEntitySyncClient implements IValue
 
         this.loaded = false;
         this.result = null;
-        if(!ImageCache.INSTANCE.loadCached(url))
+        if(!ImageCache.INSTANCE.isCached(url))
         {
             this.loading = true;
             new ImageDownloadThread(uri, (result, message) ->

@@ -1,127 +1,144 @@
 package com.mrcrayfish.furniture.client;
 
-import com.google.common.primitives.Longs;
-import org.apache.commons.io.IOUtils;
+import com.mrcrayfish.furniture.MrCrayfishFurnitureMod;
+import com.mrcrayfish.furniture.handler.ConfigurationHandler;
 
-import java.io.IOException;
 import java.net.URI;
-import java.net.URLConnection;
-import java.util.HashSet;
-import java.util.Set;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.RejectedExecutionException;
 
 /**
  * Author: MrCrayfish
+ * <p>
+ * 悠然服务器魔改：不再每个相框各开一个线程。start() 把任务交给 {@link MediaDownloader} 的固定大小线程池；
+ * 同一地址同时只加载一次，其余请求挂在等待表上，加载完一起回调（原来是每秒轮询、最多等 10 秒）。
+ * 磁盘缓存的读取、下载、尺寸检查与解码都在线程池里做，成功后才放进缓存；任何异常都只记 debug 日志。
  */
-public class ImageDownloadThread extends Thread
+public class ImageDownloadThread implements Runnable
 {
-    private static final String[] SUPPORTED_FILE_TYPES = { "png", "jpeg", "jpg" };
     private static final String[] SUPPORTED_CONTENT_TYPES = { "image/png", "image/jpeg" };
-    private static final Set<String> LOADING_URLS = new HashSet<>();
+    private static final Map<String, List<ResponseProcessor>> WAITING = new HashMap<>();
 
-    //Prevents GIFs larger than 2MB from loading
-    private static final long MAX_FILE_SIZE = 2097152;
-
-    private URI uri;
-    private ResponseProcessor processor;
-    private int tryCount;
+    private final URI uri;
+    private final ResponseProcessor processor;
 
     public ImageDownloadThread(URI uri, ResponseProcessor processor)
     {
-        super("Image Download Thread");
         this.uri = uri;
         this.processor = processor;
+    }
+
+    public void start()
+    {
+        String url = uri.toString();
+        synchronized(WAITING)
+        {
+            List<ResponseProcessor> waiting = WAITING.get(url);
+            if(waiting != null)
+            {
+                waiting.add(processor);
+                return;
+            }
+            waiting = new ArrayList<>();
+            waiting.add(processor);
+            WAITING.put(url, waiting);
+        }
+        try
+        {
+            MediaDownloader.executor().execute(this);
+        }
+        catch(RejectedExecutionException e)
+        {
+            finish(url, ImageDownloadResult.FAILED);
+        }
     }
 
     @Override
     public void run()
     {
         String url = uri.toString();
-
-        if(ImageCache.INSTANCE.loadCached(url))
-        {
-            processor.process(ImageDownloadResult.SUCCESS, "Successfully processed image");
-            return;
-        }
-
-        if(isLoading(url))
-        {
-            while(true)
-            {
-                try
-                {
-                    Thread.sleep(1000);
-                }
-                catch(InterruptedException e)
-                {
-                    e.printStackTrace();
-                }
-
-                if(ImageCache.INSTANCE.isCached(url))
-                {
-                    processor.process(ImageDownloadResult.SUCCESS, "Successfully processed image");
-                    return;
-                }
-
-                if(tryCount++ == 10)
-                {
-                    processor.process(ImageDownloadResult.FAILED, "Unable to process image");
-                    return;
-                }
-            }
-        }
-
+        ImageDownloadResult result;
         try
         {
-            URLConnection connection = uri.toURL().openConnection();
-            connection.addRequestProperty("User-Agent", "Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.0)");
+            result = this.load(url);
+        }
+        catch(Exception | OutOfMemoryError | StackOverflowError e)
+        {
+            MrCrayfishFurnitureMod.logger().debug("Unable to load {}: {}", url, e.toString());
+            result = ImageDownloadResult.FAILED;
+        }
+        finish(url, result);
+    }
 
-            boolean failed = true;
-            for(String format : SUPPORTED_CONTENT_TYPES)
+    private ImageDownloadResult load(String url)
+    {
+        if(ImageCache.INSTANCE.isCached(url))
+        {
+            return ImageDownloadResult.SUCCESS;
+        }
+
+        byte[] data = ImageCache.INSTANCE.readCachedFile(url);
+        boolean fromDisk = data != null;
+        if(data == null)
+        {
+            MediaDownloader.Response response = MediaDownloader.download(uri, SUPPORTED_CONTENT_TYPES);
+            switch(response.status)
             {
-                if(format.equals(connection.getContentType()))
-                {
-                    failed = false;
+                case OK:
+                    data = response.data;
                     break;
-                }
-            }
-            if(failed)
-            {
-                processor.process(ImageDownloadResult.UNKNOWN_FILE, "The file is not a image");
-                return;
-            }
-
-            String lengthString = connection.getHeaderField("Content-Length");
-            if(lengthString == null)
-            {
-                processor.process(ImageDownloadResult.UNKNOWN_SIZE, "Unable to determine size of image");
-                return;
-            }
-
-            Long length = Longs.tryParse(lengthString);
-            if(length == null)
-            {
-                processor.process(ImageDownloadResult.UNKNOWN_SIZE, "Unable to determine size of GIF image");
-                return;
-            }
-
-            if(length > MAX_FILE_SIZE)
-            {
-                processor.process(ImageDownloadResult.TOO_LARGE, "The image is greater than " + MAX_FILE_SIZE / 1024.0 + "MB");
-                return;
-            }
-
-            setLoading(url, true);
-            byte[] data = IOUtils.toByteArray(connection);
-            if(ImageCache.INSTANCE.add(url, data))
-            {
-                setLoading(url, false);
-                processor.process(ImageDownloadResult.SUCCESS, "Successfully processed image");
-                return;
+                case WRONG_TYPE:
+                    return ImageDownloadResult.UNKNOWN_FILE;
+                case UNKNOWN_SIZE:
+                    return ImageDownloadResult.UNKNOWN_SIZE;
+                case TOO_LARGE:
+                    return ImageDownloadResult.TOO_LARGE;
+                case UNTRUSTED:
+                    return ImageDownloadResult.UNTRUSTED;
+                default:
+                    return ImageDownloadResult.FAILED;
             }
         }
-        catch(IOException ignored) {}
-        processor.process(ImageDownloadResult.FAILED, "Unable to process image");
-        setLoading(url, false);
+
+        Texture texture;
+        try
+        {
+            texture = new Texture(MediaDecoding.decodeImage(data, ConfigurationHandler.photoMaxSize));
+        }
+        catch(MediaDecoding.Rejected e)
+        {
+            MrCrayfishFurnitureMod.logger().debug("Rejected {}: {}", url, e.getMessage());
+            return e.reason == MediaDecoding.Reason.TOO_LARGE ? ImageDownloadResult.OVERSIZED : ImageDownloadResult.FAILED;
+        }
+
+        if(!fromDisk)
+        {
+            ImageCache.INSTANCE.writeCachedFile(url, data);
+        }
+        ImageCache.INSTANCE.put(url, texture);
+        return ImageDownloadResult.SUCCESS;
+    }
+
+    private static void finish(String url, ImageDownloadResult result)
+    {
+        List<ResponseProcessor> waiting;
+        synchronized(WAITING)
+        {
+            waiting = WAITING.remove(url);
+        }
+        if(waiting == null)
+            return;
+        for(ResponseProcessor processor : waiting)
+        {
+            try
+            {
+                processor.process(result, result.name());
+            }
+            catch(RuntimeException ignored) {}
+        }
     }
 
     public interface ResponseProcessor
@@ -139,7 +156,8 @@ public class ImageDownloadThread extends Thread
         INVALID_URL("cfm.photo_frame.invalid"),
         WRONG_SCHEME("cfm.photo_frame.wrong_scheme"),
         UNSUPPORTED_FILE_TYPE("cfm.photo_frame.unsupported_type"),
-        UNKNOWN_SIZE("cfm.photo_frame.unknown_size");
+        UNKNOWN_SIZE("cfm.photo_frame.unknown_size"),
+        OVERSIZED("cfm.photo_frame.oversized");
 
         private String key;
 
@@ -151,29 +169,6 @@ public class ImageDownloadThread extends Thread
         public String getKey()
         {
             return key;
-        }
-    }
-
-    public static void setLoading(String url, boolean loading)
-    {
-        synchronized(LOADING_URLS)
-        {
-            if(loading)
-            {
-                LOADING_URLS.add(url);
-            }
-            else
-            {
-                LOADING_URLS.remove(url);
-            }
-        }
-    }
-
-    public static boolean isLoading(String url)
-    {
-        synchronized(LOADING_URLS)
-        {
-           return LOADING_URLS.contains(url);
         }
     }
 }

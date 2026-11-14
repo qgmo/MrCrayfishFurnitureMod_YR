@@ -487,11 +487,13 @@ cfm.tv.success=成功下载 GIF 文件
 cfm.tv.failed=下载文件失败
 cfm.tv.unknown_file=链接不是 GIF 文件
 cfm.tv.too_large=无法加载大于 2MB 的 GIF 文件
+cfm.tv.oversized=GIF 的尺寸或帧数超过上限
 
 cfm.photo_frame.success=成功下载图片
 cfm.photo_frame.failed=下载文件失败
 cfm.photo_frame.unknown_file=链接不是一张图片
 cfm.photo_frame.too_large=无法加载大于 2MB 的图片
+cfm.photo_frame.oversized=图片尺寸超过上限
 
 container.cabinet=橱柜
 container.cabinet_kitchen=厨房橱柜

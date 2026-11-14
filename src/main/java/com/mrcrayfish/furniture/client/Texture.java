@@ -5,63 +5,39 @@ import net.minecraft.client.renderer.GlStateManager;
 import org.lwjgl.BufferUtils;
 import org.lwjgl.opengl.GL11;
 
-import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 /**
  * Author: MrCrayfish
+ * <p>
+ * 悠然服务器魔改：解码改在 MediaDownloader 的线程池里、先按尺寸上限检查再解码（见 {@link MediaDecoding}），
+ * 这里只接收已经解码好的图片，GL 上传仍在主线程。
  */
 public class Texture
 {
-    protected static final ExecutorService THREAD_SERVICE = Executors.newCachedThreadPool(r -> {
-        Thread thread = new Thread(r);
-        thread.setName("Texture File I/O");
-        return thread;
-    });
-
     private ByteBuffer buffer;
     private int textureId = -1;
     protected int width, height;
     protected int counter;
     protected boolean delete;
 
-    public Texture(File file)
-    {
-        this.load(file);
-    }
+    protected Texture() {}
 
-    public void load(File file)
+    /**
+     * 在工作线程里调用：把解码好的图片转成缓冲区，并安排在主线程上传。
+     */
+    public Texture(BufferedImage image)
     {
-        THREAD_SERVICE.submit(() ->
+        this.width = image.getWidth();
+        this.height = image.getHeight();
+        int[] imageData = new int[this.width * this.height];
+        image.getRGB(0, 0, this.width, this.height, imageData, 0, this.width);
+        this.buffer = createBuffer(imageData);
+        Minecraft.getMinecraft().addScheduledTask(() ->
         {
-            try
-            {
-                //Loads the image
-                FileInputStream inputStream = new FileInputStream(file);
-                BufferedImage image = ImageIO.read(inputStream);
-                this.width = image.getWidth();
-                this.height = image.getHeight();
-
-                //Creates the ByteBuffer
-                int[] imageData = new int[this.width * this.height];
-                image.getRGB(0, 0, this.width, this.height, imageData, 0, this.width);
-                buffer = createBuffer(imageData);
-                
-                Minecraft.getMinecraft().addScheduledTask(() -> {
-                    GlStateManager.bindTexture(getTextureId());
-                    GL11.glTexImage2D(GL11.GL_TEXTURE_2D, 0, GL11.GL_RGBA, width, height, 0, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, buffer);
-                });
-            }
-            catch(IOException e)
-            {
-                e.printStackTrace();
-            }
+            GlStateManager.bindTexture(getTextureId());
+            GL11.glTexImage2D(GL11.GL_TEXTURE_2D, 0, GL11.GL_RGBA, width, height, 0, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, buffer);
         });
     }
 

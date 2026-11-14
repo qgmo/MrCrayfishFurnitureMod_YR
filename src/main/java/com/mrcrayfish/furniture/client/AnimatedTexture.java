@@ -7,9 +7,6 @@ import org.lwjgl.opengl.GL11;
 
 import java.awt.*;
 import java.awt.image.*;
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.List;
 
@@ -18,41 +15,27 @@ import java.util.List;
  */
 public class AnimatedTexture extends Texture
 {
-    private List<ByteBuffer> framesTextureData;
+    private final List<ByteBuffer> framesTextureData;
     private int frameCounter;
 
-    public AnimatedTexture(File file)
+    /**
+     * 在工作线程里调用：逐帧取出已按上限检查过的 GIF（{@link MediaDecoding#readGif}）并转成缓冲区。
+     * 悠然服务器魔改：原来在不限数量的线程池里直接解码，不看尺寸和帧数。
+     */
+    public AnimatedTexture(GifDecoder.GifImage decoder)
     {
-        super(file);
-    }
-
-    @Override
-    public void load(File file)
-    {
-        framesTextureData = Lists.newArrayList();
-        THREAD_SERVICE.submit(() ->
+        this.width = decoder.getWidth();
+        this.height = decoder.getHeight();
+        List<ByteBuffer> frames = Lists.newArrayList();
+        int frameCount = decoder.getFrameCount();
+        for(int i = 0; i < frameCount; i++)
         {
-            try
-            {
-                FileInputStream inputStream = new FileInputStream(file);
-                GifDecoder.GifImage decoder = GifDecoder.read(inputStream);
-                this.width = decoder.getWidth();
-                this.height = decoder.getHeight();
-
-                int frameCount = decoder.getFrameCount();
-                for(int i = 0; i < frameCount; i++)
-                {
-                    BufferedImage image = parseFrame(decoder.getFrame(i));
-                    int[] imageData = new int[this.width * this.height];
-                    image.getRGB(0, 0, this.width, this.height, imageData, 0, this.width);
-                    framesTextureData.add(createBuffer(imageData));
-                }
-            }
-            catch(IOException e)
-            {
-                e.printStackTrace();
-            }
-        });
+            BufferedImage image = parseFrame(decoder.getFrame(i));
+            int[] imageData = new int[this.width * this.height];
+            image.getRGB(0, 0, this.width, this.height, imageData, 0, this.width);
+            frames.add(createBuffer(imageData));
+        }
+        this.framesTextureData = frames;
     }
 
     @Override

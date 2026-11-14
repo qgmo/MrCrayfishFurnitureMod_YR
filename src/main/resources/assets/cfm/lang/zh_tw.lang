@@ -503,11 +503,13 @@ cfm.tv.success=成功下載GIF檔案
 cfm.tv.failed=無法下載檔案
 cfm.tv.unknown_file=連結不是一個GIF檔案
 cfm.tv.too_large=無法載入大於2 MB的GIF檔案
+cfm.tv.oversized=GIF 的尺寸或影格數超過上限
 
 cfm.photo_frame.success=成功下載圖片檔案
 cfm.photo_frame.failed=無法下載檔案
 cfm.photo_frame.unknown_file=連結不是一個圖片檔案
 cfm.photo_frame.too_large=無法載入大於2 MB的圖片檔案
+cfm.photo_frame.oversized=圖片尺寸超過上限
 
 container.cabinet=櫃
 container.cabinet_kitchen=櫥櫃

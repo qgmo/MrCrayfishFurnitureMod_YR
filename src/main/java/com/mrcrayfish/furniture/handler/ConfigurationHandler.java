@@ -22,6 +22,13 @@ public class ConfigurationHandler
     public static boolean api_debug = false;
     public static String[] trustedUrlDomains = {};
 
+    // 相框、电视图片加载的上限（客户端，悠然服务器魔改）
+    public static int mediaDownloadThreads = 2;
+    public static int photoMaxSize = 1024;
+    public static int tvGifMaxSize = 512;
+    public static int tvGifMaxFrames = 256;
+    public static int tvGifMaxPixels = 16777216;
+
     public static boolean mirrorEnabled = true;
     public static int mirrorQuality = 128;
     public static float mirrorFov = 80F;
@@ -64,6 +71,11 @@ public class ConfigurationHandler
         api_debug = config.getBoolean("recipe-api-debug", CATEGORY_SETTINGS, false, "If true, prints out information about RecipeAPI. Recommended 'true' for people trying to add custom recipes.");
         items = config.getStringList("custom-recipes", CATEGORY_API, items, "Insert custom recipes here");
         trustedUrlDomains = config.getStringList("trusted-url-domains", CATEGORY_SETTINGS, trustedUrlDomains, "List of trusted domains to download images for the TV and Photo Frame. For example, the domain of the URL (https://i.imgur.com/Jvh1OQm.jpeg) is i.imgur.com");
+        mediaDownloadThreads = config.getInt("media-download-threads", CATEGORY_SETTINGS, 2, 1, 8, "(Client) Maximum number of Photo Frame / TV images downloaded and decoded at the same time. Others wait in a queue. Takes effect after restarting the game.");
+        photoMaxSize = config.getInt("photo-max-size", CATEGORY_SETTINGS, 1024, 16, 4096, "(Client) Maximum width and height in pixels of a Photo Frame image. Larger images are not displayed.");
+        tvGifMaxSize = config.getInt("tv-gif-max-size", CATEGORY_SETTINGS, 512, 16, 2048, "(Client) Maximum width and height in pixels of a TV GIF. Larger GIFs are not displayed.");
+        tvGifMaxFrames = config.getInt("tv-gif-max-frames", CATEGORY_SETTINGS, 256, 1, 4096, "(Client) Maximum number of frames of a TV GIF. GIFs with more frames are not displayed.");
+        tvGifMaxPixels = config.getInt("tv-gif-max-pixels", CATEGORY_SETTINGS, 16777216, 65536, 268435456, "(Client) Maximum width x height x frames of a TV GIF (16777216 is about 64 MB once decoded). Larger GIFs are not displayed.");
         config.addCustomCategoryComment(CATEGORY_RECIPE_SETTINGS, "Enabled or disable the default recipes");
         config.addCustomCategoryComment(CATEGORY_API, "RecipeAPI Configuration. How to use: http://mrcrayfishs-furniture-mod.wikia.com/wiki/Configuration");
         updateEnabledRecipes();

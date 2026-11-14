@@ -25,6 +25,9 @@ import java.util.List;
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
+ * Modified for the Youran server fork of MrCrayfish's Furniture Mod (2026):
+ * added GifImage#getMaxFramePixels().
  */
 /**
  * <p>
@@ -374,6 +377,21 @@ public final class GifDecoder {
 		 */
 		public final int getFrameCount() {
 			return frames.size();
+		}
+
+		/**
+		 * Added for the Youran server fork of MrCrayfish's Furniture Mod: lets the
+		 * caller reject frames whose own size is larger than allowed before they
+		 * are decoded.
+		 *
+		 * @return The largest width * height over all frame descriptors
+		 */
+		public final long getMaxFramePixels() {
+			long max = 0;
+			for (final GifFrame fr : frames) {
+				max = Math.max(max, (long) fr.w * fr.h);
+			}
+			return max;
 		}
 
 		/**

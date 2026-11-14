@@ -1,120 +1,144 @@
 package com.mrcrayfish.furniture.client;
 
-import com.google.common.primitives.Longs;
-import com.mrcrayfish.furniture.tileentity.TileEntityTV;
-import org.apache.commons.io.IOUtils;
+import com.mrcrayfish.furniture.MrCrayfishFurnitureMod;
+import com.mrcrayfish.furniture.handler.ConfigurationHandler;
 
-import java.io.IOException;
 import java.net.URI;
-import java.net.URLConnection;
-import java.util.HashSet;
-import java.util.Set;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.RejectedExecutionException;
 
 /**
  * Author: MrCrayfish
+ * <p>
+ * 悠然服务器魔改：不再每个电视各开一个线程。start() 把任务交给 {@link MediaDownloader} 的固定大小线程池；
+ * 同一地址同时只加载一次，其余请求挂在等待表上，加载完一起回调（原来是每秒轮询、最多等 10 秒）。
+ * 磁盘缓存的读取、下载、尺寸检查与解码都在线程池里做，成功后才放进缓存；任何异常都只记 debug 日志。
  */
-public class GifDownloadThread extends Thread
+public class GifDownloadThread implements Runnable
 {
-    private static final Set<String> LOADING_URLS = new HashSet<>();
+    private static final String[] SUPPORTED_CONTENT_TYPES = { "image/gif" };
+    private static final Map<String, List<ResponseProcessor>> WAITING = new HashMap<>();
 
-    //Prevents GIFs larger than 2MB from loading
-    private static final long MAX_FILE_SIZE = 2097152;
-
-    private URI uri;
-    private ResponseProcessor processor;
-    private int tryCount;
+    private final URI uri;
+    private final ResponseProcessor processor;
 
     public GifDownloadThread(URI uri, ResponseProcessor processor)
     {
-        super("Image Download Thread");
         this.uri = uri;
         this.processor = processor;
+    }
+
+    public void start()
+    {
+        String url = uri.toString();
+        synchronized(WAITING)
+        {
+            List<ResponseProcessor> waiting = WAITING.get(url);
+            if(waiting != null)
+            {
+                waiting.add(processor);
+                return;
+            }
+            waiting = new ArrayList<>();
+            waiting.add(processor);
+            WAITING.put(url, waiting);
+        }
+        try
+        {
+            MediaDownloader.executor().execute(this);
+        }
+        catch(RejectedExecutionException e)
+        {
+            finish(url, ImageDownloadResult.FAILED);
+        }
     }
 
     @Override
     public void run()
     {
         String url = uri.toString();
-
-        if(GifCache.INSTANCE.loadCached(url))
-        {
-            processor.process(ImageDownloadResult.SUCCESS, "Successfully processed GIF");
-            return;
-        }
-
-        if(isLoading(url))
-        {
-            while(true)
-            {
-                try
-                {
-                    Thread.sleep(1000);
-                }
-                catch(InterruptedException e)
-                {
-                    e.printStackTrace();
-                }
-
-                if(GifCache.INSTANCE.isCached(url))
-                {
-                    processor.process(ImageDownloadResult.SUCCESS, "Successfully processed GIF");
-                    return;
-                }
-
-                if(tryCount++ == 10)
-                {
-                    processor.process(ImageDownloadResult.FAILED, "Unable to process GIF");
-                    return;
-                }
-            }
-        }
-
+        ImageDownloadResult result;
         try
         {
-            URLConnection connection = uri.toURL().openConnection();
-            connection.addRequestProperty("User-Agent", "Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.0)");
-
-            if(!"image/gif".equals(connection.getContentType()))
-            {
-                processor.process(ImageDownloadResult.UNKNOWN_FILE, "The file is not a GIF");
-                return;
-            }
-
-            String lengthString = connection.getHeaderField("Content-Length");
-            if(lengthString == null)
-            {
-                processor.process(ImageDownloadResult.UNKNOWN_SIZE, "Unable to determine size of GIF image");
-                return;
-            }
-
-            Long length = Longs.tryParse(lengthString);
-            if(length == null)
-            {
-                processor.process(ImageDownloadResult.UNKNOWN_SIZE, "Unable to determine size of GIF image");
-                return;
-            }
-
-            if(length > MAX_FILE_SIZE)
-            {
-                processor.process(ImageDownloadResult.TOO_LARGE, "The GIF is greater than " + MAX_FILE_SIZE / 1024.0 + "MB");
-                return;
-            }
-
-            setLoading(url, true);
-            byte[] data = IOUtils.toByteArray(connection);
-            if(GifCache.INSTANCE.add(url, data))
-            {
-                setLoading(url, false);
-                processor.process(ImageDownloadResult.SUCCESS, "Successfully processed GIF");
-                return;
-            }
+            result = this.load(url);
         }
-        catch(IOException e)
+        catch(Exception | OutOfMemoryError | StackOverflowError e)
         {
-            e.printStackTrace();
+            MrCrayfishFurnitureMod.logger().debug("Unable to load {}: {}", url, e.toString());
+            result = ImageDownloadResult.FAILED;
         }
-        processor.process(ImageDownloadResult.FAILED, "Unable to process GIF");
-        setLoading(url, false);
+        finish(url, result);
+    }
+
+    private ImageDownloadResult load(String url)
+    {
+        if(GifCache.INSTANCE.isCached(url))
+        {
+            return ImageDownloadResult.SUCCESS;
+        }
+
+        byte[] data = GifCache.INSTANCE.readCachedFile(url);
+        boolean fromDisk = data != null;
+        if(data == null)
+        {
+            MediaDownloader.Response response = MediaDownloader.download(uri, SUPPORTED_CONTENT_TYPES);
+            switch(response.status)
+            {
+                case OK:
+                    data = response.data;
+                    break;
+                case WRONG_TYPE:
+                    return ImageDownloadResult.UNKNOWN_FILE;
+                case UNKNOWN_SIZE:
+                    return ImageDownloadResult.UNKNOWN_SIZE;
+                case TOO_LARGE:
+                    return ImageDownloadResult.TOO_LARGE;
+                case UNTRUSTED:
+                    return ImageDownloadResult.UNTRUSTED;
+                default:
+                    return ImageDownloadResult.FAILED;
+            }
+        }
+
+        AnimatedTexture texture;
+        try
+        {
+            texture = new AnimatedTexture(MediaDecoding.readGif(data, ConfigurationHandler.tvGifMaxSize, ConfigurationHandler.tvGifMaxFrames, ConfigurationHandler.tvGifMaxPixels));
+        }
+        catch(MediaDecoding.Rejected e)
+        {
+            MrCrayfishFurnitureMod.logger().debug("Rejected {}: {}", url, e.getMessage());
+            return e.reason == MediaDecoding.Reason.TOO_LARGE ? ImageDownloadResult.OVERSIZED : ImageDownloadResult.FAILED;
+        }
+
+        if(!fromDisk)
+        {
+            GifCache.INSTANCE.writeCachedFile(url, data);
+        }
+        GifCache.INSTANCE.put(url, texture);
+        return ImageDownloadResult.SUCCESS;
+    }
+
+    private static void finish(String url, ImageDownloadResult result)
+    {
+        List<ResponseProcessor> waiting;
+        synchronized(WAITING)
+        {
+            waiting = WAITING.remove(url);
+        }
+        if(waiting == null)
+            return;
+        for(ResponseProcessor processor : waiting)
+        {
+            try
+            {
+                processor.process(result, result.name());
+            }
+            catch(RuntimeException ignored) {}
+        }
     }
 
     public interface ResponseProcessor
@@ -132,7 +156,8 @@ public class GifDownloadThread extends Thread
         UNTRUSTED("cfm.tv.untrusted"),
         INVALID_URL("cfm.tv.invalid"),
         WRONG_SCHEME("cfm.tv.wrong_scheme"),
-        UNSUPPORTED_FILE_TYPE("cfm.tv.unsupported_type");
+        UNSUPPORTED_FILE_TYPE("cfm.tv.unsupported_type"),
+        OVERSIZED("cfm.tv.oversized");
 
         private String key;
 
@@ -144,29 +169,6 @@ public class GifDownloadThread extends Thread
         public String getKey()
         {
             return key;
-        }
-    }
-
-    public static void setLoading(String url, boolean loading)
-    {
-        synchronized(LOADING_URLS)
-        {
-            if(loading)
-            {
-                LOADING_URLS.add(url);
-            }
-            else
-            {
-                LOADING_URLS.remove(url);
-            }
-        }
-    }
-
-    public static boolean isLoading(String url)
-    {
-        synchronized(LOADING_URLS)
-        {
-           return LOADING_URLS.contains(url);
         }
     }
 }
