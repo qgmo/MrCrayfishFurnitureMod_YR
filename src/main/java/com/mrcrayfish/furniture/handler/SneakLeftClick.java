@@ -24,12 +24,19 @@ import net.minecraftforge.items.ItemHandlerHelper;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import com.mrcrayfish.furniture.blocks.BlockBath;
+import com.mrcrayfish.furniture.blocks.BlockToilet;
+import com.mrcrayfish.furniture.init.FurnitureBlocks;
+import com.mrcrayfish.furniture.tileentity.TileEntityBath;
+import com.mrcrayfish.furniture.water.WaterBasins;
 
 /**
  * 家具的“潜行 + 左键”操作（悠然服务器魔改）。潜行 + 空手右键留给 Carry On 搬方块，家具的新操作一律避开它：
  * <ul>
  * <li>没有界面的电器（吊扇、电视、电脑、烤面包机）：拿能量单元卡潜行左键放入（已有卡时交换），空手潜行左键取出；</li>
  * <li>烤面包机：里面有面包片、没在烤时，空手潜行左键开始烤（原来是潜行 + 空手右键）；</li>
+ * <li>马桶：潜行左键冲水（原来是潜行右键，服主 11-14 改）；</li>
+ * <li>浴缸：潜行左键开 / 关放水（空手右键是坐下）；</li>
  * <li>别的方块、或没有可做的操作时照常挖掘。</li>
  * </ul>
  * 做了操作就取消这次左键，方块不会被挖坏（两端都取消，客户端不会先把方块挖掉）。按住左键时客户端每 tick 都会再发一次，
@@ -61,6 +68,8 @@ public class SneakLeftClick
 
     static
     {
+        HANDLERS.add(SneakLeftClick::toilet);
+        HANDLERS.add(SneakLeftClick::bath);
         HANDLERS.add(SneakLeftClick::toaster);
         HANDLERS.add(SneakLeftClick::card);
     }
@@ -147,6 +156,29 @@ public class SneakLeftClick
             };
         }
         return null;
+    }
+
+    /** 马桶：潜行左键冲水 */
+    private static Action toilet(World world, BlockPos pos, TileEntity tileEntity, EntityPlayer player, ItemStack held)
+    {
+        if(world.getBlockState(pos).getBlock() != FurnitureBlocks.TOILET)
+            return null;
+        return BlockToilet::flush;
+    }
+
+    /** 浴缸：潜行左键开 / 关 */
+    private static Action bath(World world, BlockPos pos, TileEntity tileEntity, EntityPlayer player, ItemStack held)
+    {
+        if(!(tileEntity instanceof TileEntityBath))
+            return null;
+        return (w, p, pl) ->
+        {
+            TileEntityBath master = ((TileEntityBath) tileEntity).getMaster();
+            if(master != null)
+            {
+                WaterBasins.toggle(w, p, pl, master.getTank(), "cfm.message.bath", BlockBath.sources(master));
+            }
+        };
     }
 
     /** 烤面包机：空手潜行左键开始烤（有面包片、没在烤时） */

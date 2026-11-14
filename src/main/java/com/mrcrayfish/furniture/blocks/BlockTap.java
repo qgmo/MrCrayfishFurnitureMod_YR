@@ -17,6 +17,10 @@ import net.minecraft.world.IBlockAccess;
 import net.minecraft.world.World;
 
 import java.util.List;
+import com.mrcrayfish.furniture.util.WaterRules;
+import net.minecraftforge.fluids.FluidStack;
+import net.minecraftforge.fluids.FluidUtil;
+import net.minecraftforge.fluids.capability.IFluidHandler;
 
 public class BlockTap extends BlockFurniture
 {
@@ -33,27 +37,36 @@ public class BlockTap extends BlockFurniture
         this.setSoundType(SoundType.STONE);
     }
 
+    /**
+     * 悠然服务器魔改（服主 11-14）：从下面一格的 Forge 流体容器抽 1000 mB，在前面放一格；任何流体都行，抽到什么放什么。
+     * 放置用 Forge 的 {@link FluidUtil#tryPlaceFluid}（不直接 setBlock），装了天圆地方等改流体的模组时由它们接管。
+     * 原来要求下面第 2 格是水源并把它删掉（无限水），去掉了。
+     */
     @Override
     public boolean onBlockActivated(World worldIn, BlockPos pos, IBlockState state, EntityPlayer playerIn, EnumHand hand, EnumFacing facing, float hitX, float hitY, float hitZ)
     {
+        // 潜行 + 空手右键留给 Carry On
+        if(playerIn.isSneaking() && playerIn.getHeldItem(hand).isEmpty())
+            return false;
         if(!worldIn.isRemote)
         {
-            EnumFacing side = state.getValue(FACING);
-            if(hasWaterSource(worldIn, pos))
+            BlockPos front = pos.offset(state.getValue(FACING).getOpposite());
+            IFluidHandler source = worldIn.isBlockLoaded(pos.down()) ? FluidUtil.getFluidHandler(worldIn, pos.down(), EnumFacing.UP) : null;
+            FluidStack fluid = source != null ? source.drain(WaterRules.TAP_PER_BLOCK, false) : null;
+            if(fluid == null || fluid.amount < WaterRules.TAP_PER_BLOCK || fluid.getFluid() == null)
             {
-                if(worldIn.isAirBlock(pos.offset(side.getOpposite())))
-                {
-                    worldIn.setBlockState(pos.offset(side.getOpposite()), Blocks.WATER.getDefaultState());
-                    worldIn.setBlockToAir(pos.down(2));
-                }
-                else
-                {
-                    playerIn.sendMessage(new TextComponentTranslation("cfm.message.tap_blocked"));
-                }
+                playerIn.sendStatusMessage(new TextComponentTranslation("cfm.message.tap_nowater"), true);
+                return true;
             }
-            else
+            if(!worldIn.isBlockLoaded(front) || !worldIn.isBlockModifiable(playerIn, front) || !playerIn.canPlayerEdit(front, state.getValue(FACING), playerIn.getHeldItem(hand)))
             {
-                playerIn.sendMessage(new TextComponentTranslation("cfm.message.tap_nowater"));
+                playerIn.sendStatusMessage(new TextComponentTranslation("cfm.message.tap_blocked"), true);
+                return true;
+            }
+            FluidStack resource = new FluidStack(fluid, WaterRules.TAP_PER_BLOCK);
+            if(!FluidUtil.tryPlaceFluid(playerIn, worldIn, front, source, resource))
+            {
+                playerIn.sendStatusMessage(new TextComponentTranslation("cfm.message.tap_blocked"), true);
             }
         }
         return true;
@@ -73,15 +86,4 @@ public class BlockTap extends BlockFurniture
         addCollisionBoxToList(pos, entityBox, collidingBoxes, BOUNDING_BOX[facing.getHorizontalIndex()]);
     }
 
-    public boolean hasWaterSource(World world, BlockPos pos)
-    {
-        if(world.getBlockState(pos.down(2)).getBlock() == Blocks.WATER)
-        {
-            if(world.getBlockState(pos.down(2)).getValue(BlockLiquid.LEVEL) == 0)
-            {
-                return true;
-            }
-        }
-        return false;
-    }
 }

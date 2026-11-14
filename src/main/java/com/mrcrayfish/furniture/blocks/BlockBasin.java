@@ -29,6 +29,11 @@ import net.minecraft.util.text.TextComponentTranslation;
 import net.minecraft.world.World;
 
 import java.util.List;
+import com.mrcrayfish.furniture.tileentity.TileEntityBasin;
+import com.mrcrayfish.furniture.water.FurnitureTank;
+import com.mrcrayfish.furniture.water.WaterBasins;
+import net.minecraft.tileentity.TileEntity;
+import javax.annotation.Nullable;
 
 public class BlockBasin extends BlockFurniture
 {
@@ -80,160 +85,22 @@ public class BlockBasin extends BlockFurniture
     @Override
     public boolean onBlockActivated(World worldIn, BlockPos pos, IBlockState state, EntityPlayer playerIn, EnumHand hand, EnumFacing facing, float hitX, float hitY, float hitZ)
     {
-        ItemStack heldItem = playerIn.getHeldItem(hand);
-        if(!heldItem.isEmpty())
-        {
-            if(heldItem.getItem() == Items.BUCKET)
-            {
-                if(hasWater(state))
-                {
-                    if(!worldIn.isRemote)
-                    {
-                        if(!playerIn.isCreative())
-                        {
-                            if(heldItem.getCount() > 1)
-                            {
-                                if(playerIn.inventory.addItemStackToInventory(new ItemStack(Items.WATER_BUCKET)))
-                                {
-                                    heldItem.shrink(1);
-                                }
-                            }
-                            else
-                            {
-                                playerIn.setHeldItem(hand, new ItemStack(Items.WATER_BUCKET));
-                            }
-                        }
-                        worldIn.setBlockState(pos, state.withProperty(FILLED, false));
-                        worldIn.updateComparatorOutputLevel(pos, this);
-                    }
-                    else
-                    {
-                        playerIn.playSound(SoundEvents.ITEM_BUCKET_FILL, 1.0F, 1.0F);
-                    }
-                }
-            }
-            else if(heldItem.getItem() == Items.WATER_BUCKET)
-            {
-                if(!hasWater(state))
-                {
-                    if(!worldIn.isRemote)
-                    {
-                        if(!playerIn.isCreative())
-                        {
-                            playerIn.setHeldItem(hand, new ItemStack(Items.BUCKET));
-                        }
-                        worldIn.setBlockState(pos, state.withProperty(FILLED, true), 2);
-                        worldIn.updateComparatorOutputLevel(pos, this);
-                    }
-                    else
-                    {
-                        playerIn.playSound(SoundEvents.ITEM_BUCKET_EMPTY, 1.0F, 1.0F);
-                        createSplashParticle(worldIn, pos);
-                    }
-                }
-            }
-            else if(heldItem.getItem() == Items.GLASS_BOTTLE)
-            {
-                if(hasWater(state))
-                {
-                    if(!worldIn.isRemote)
-                    {
-                        if(!playerIn.isCreative())
-                        {
-                            if(heldItem.getCount() > 1)
-                            {
-                                if(playerIn.inventory.addItemStackToInventory(PotionUtils.addPotionToItemStack(new ItemStack(Items.POTIONITEM), PotionTypes.WATER)))
-                                {
-                                    heldItem.shrink(1);
-                                }
-                            }
-                            else
-                            {
-                                playerIn.setHeldItem(hand, PotionUtils.addPotionToItemStack(new ItemStack(Items.POTIONITEM), PotionTypes.WATER));
-                            }
-                        }
-                        worldIn.setBlockState(pos, state.withProperty(FILLED, false), 2);
-                        worldIn.updateComparatorOutputLevel(pos, this);
-                    }
-                    else
-                    {
-                        playerIn.playSound(SoundEvents.ITEM_BOTTLE_FILL, 1.0F, 1.0F);
-                        createSplashParticle(worldIn, pos);
-                    }
-                }
-            }
-            else if(PotionUtils.getPotionFromItem(heldItem) == PotionTypes.WATER)
-            {
-                if(!hasWater(state))
-                {
-                    if(!worldIn.isRemote)
-                    {
-                        if(!playerIn.isCreative())
-                        {
-                            if(heldItem.getItem() == Items.POTIONITEM)
-                                playerIn.setHeldItem(hand, new ItemStack(Items.GLASS_BOTTLE));
-                            else playerIn.setHeldItem(hand, ItemStack.EMPTY);
-                        }
-                        worldIn.setBlockState(pos, state.withProperty(FILLED, true), 2);
-                        worldIn.updateComparatorOutputLevel(pos, this);
-                    }
-                    else
-                    {
-                        playerIn.playSound(SoundEvents.ITEM_BOTTLE_EMPTY, 1.0F, 1.0F);
-                        createSplashParticle(worldIn, pos);
-                    }
-                }
-            }
-            else
-            {
-                if(!hasWater(state))
-                {
-                    if(hasWaterSource(worldIn, pos))
-                    {
-                        if(!worldIn.isRemote)
-                        {
-                            worldIn.setBlockState(pos, state.withProperty(FILLED, true), 2);
-                            worldIn.playSound(null, pos.getX() + 0.5, pos.getY() + 1, pos.getZ() + 0.5, FurnitureSounds.tap, SoundCategory.BLOCKS, 0.75F, 1.0F);
-                            worldIn.setBlockToAir(pos.add(0, -2, 0));
-                            worldIn.updateComparatorOutputLevel(pos, this);
-                        }
-                        else
-                        {
-                            createSplashParticle(worldIn, pos);
-                        }
-                    }
-                    else if(!worldIn.isRemote)
-                    {
-                        playerIn.sendMessage(new TextComponentTranslation("cfm.message.basin"));
-                    }
-                }
-            }
-        }
-        else
-        {
-            if(!hasWater(state))
-            {
-                if(hasWaterSource(worldIn, pos))
-                {
-                    if(!worldIn.isRemote)
-                    {
-                        worldIn.setBlockState(pos, state.withProperty(FILLED, true), 2);
-                        worldIn.playSound(null, pos.getX() + 0.5, pos.getY() + 1, pos.getZ() + 0.5, FurnitureSounds.tap, SoundCategory.BLOCKS, 0.75F, 1.0F);
-                        worldIn.setBlockToAir(pos.add(0, -2, 0));
-                        worldIn.updateComparatorOutputLevel(pos, this);
-                    }
-                    else
-                    {
-                        createSplashParticle(worldIn, pos);
-                    }
-                }
-                else if(!worldIn.isRemote)
-                {
-                    playerIn.sendMessage(new TextComponentTranslation("cfm.message.basin"));
-                }
-            }
-        }
+        // 悠然服务器魔改：水存在方块实体里，开着时从下面一格的流体容器抽水（见 WaterBasins）；不再有无限水
+        FurnitureTank tank = WaterBasins.basinTank(worldIn, pos);
+        return WaterBasins.activate(worldIn, pos, playerIn, hand, tank, () -> WaterBasins.refreshFilled(worldIn, pos, tank), true, "cfm.message.basin", pos.down());
+    }
+
+    @Override
+    public boolean hasTileEntity(IBlockState state)
+    {
         return true;
+    }
+
+    @Nullable
+    @Override
+    public TileEntity createTileEntity(World world, IBlockState state)
+    {
+        return new TileEntityBasin();
     }
 
     private void createSplashParticle(World world, BlockPos pos)
@@ -262,15 +129,6 @@ public class BlockBasin extends BlockFurniture
         return new BlockStateContainer(this, FACING, FILLED);
     }
 
-    private boolean hasWater(IBlockState state)
-    {
-        return state.getValue(FILLED);
-    }
-
-    private boolean hasWaterSource(World world, BlockPos pos)
-    {
-        return world.getBlockState(pos.add(0, -2, 0)) == Blocks.WATER.getDefaultState();
-    }
 
     @Override
     public boolean hasComparatorInputOverride(IBlockState state)

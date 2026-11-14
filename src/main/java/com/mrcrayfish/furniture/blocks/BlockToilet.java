@@ -27,6 +27,10 @@ import net.minecraft.world.World;
 import org.lwjgl.input.Keyboard;
 
 import java.util.List;
+import com.mrcrayfish.furniture.compat.WaterFluids;
+import com.mrcrayfish.furniture.util.WaterRules;
+import net.minecraftforge.fluids.FluidUtil;
+import net.minecraftforge.fluids.capability.IFluidHandler;
 
 public class BlockToilet extends BlockFurniture
 {
@@ -78,19 +82,33 @@ public class BlockToilet extends BlockFurniture
         }
         else
         {
-            // 冲水只删马桶自己这一格里的掉落物（原来是周围 3×3×3），并且要求玩家可以改动这一格
-            // （出生点保护、Forge 的方块修改检查）；右键本身在 SpongeForge 上已经过领地插件的交互检查（悠然服务器魔改）
-            if(!worldIn.isRemote && worldIn.isBlockModifiable(playerIn, pos))
-            {
-                List<EntityItem> items = worldIn.getEntitiesWithinAABB(EntityItem.class, new AxisAlignedBB(pos));
-                for(EntityItem item : items)
-                {
-                    item.setDead();
-                }
-            }
-            worldIn.playSound(pos.getX() + 0.5D, pos.getY() + 0.5D, pos.getZ() + 0.5D, FurnitureSounds.flush, SoundCategory.BLOCKS, 0.75F, 1.0F, false);
+            // 冲水改成潜行 + 左键（见 flush）：潜行 + 空手右键留给 Carry On（悠然服务器魔改，服主 11-14）
+            return false;
         }
         return true;
+    }
+
+    /**
+     * 冲水（服务端，潜行 + 左键，见 {@code SneakLeftClick}）：要从下面一格的流体容器抽 {@value WaterRules#TOILET_FLUSH} mB 认得的水，
+     * 没水不冲。冲水只删马桶自己这一格里的掉落物（原来是周围 3×3×3），并且要求玩家可以改动这一格（悠然服务器魔改）。
+     */
+    public static void flush(World worldIn, BlockPos pos, EntityPlayer playerIn)
+    {
+        IFluidHandler source = worldIn.isBlockLoaded(pos.down()) ? FluidUtil.getFluidHandler(worldIn, pos.down(), EnumFacing.UP) : null;
+        if(source == null || WaterFluids.drainExactly(source, null, WaterRules.TOILET_FLUSH) == null)
+        {
+            playerIn.sendStatusMessage(new TextComponentTranslation("cfm.message.toilet_nowater"), true);
+            return;
+        }
+        if(worldIn.isBlockModifiable(playerIn, pos))
+        {
+            List<EntityItem> items = worldIn.getEntitiesWithinAABB(EntityItem.class, new AxisAlignedBB(pos));
+            for(EntityItem item : items)
+            {
+                item.setDead();
+            }
+        }
+        worldIn.playSound(null, pos.getX() + 0.5D, pos.getY() + 0.5D, pos.getZ() + 0.5D, FurnitureSounds.flush, SoundCategory.BLOCKS, 0.75F, 1.0F);
     }
 
     @Override

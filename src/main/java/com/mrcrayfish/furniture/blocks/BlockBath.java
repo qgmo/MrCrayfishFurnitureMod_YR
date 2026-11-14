@@ -4,7 +4,6 @@ import com.mrcrayfish.furniture.advancement.Triggers;
 import com.mrcrayfish.furniture.init.FurnitureBlocks;
 import com.mrcrayfish.furniture.init.FurnitureSounds;
 import com.mrcrayfish.furniture.network.PacketHandler;
-import com.mrcrayfish.furniture.network.message.MessageFillBath;
 import com.mrcrayfish.furniture.tileentity.TileEntityBath;
 import com.mrcrayfish.furniture.util.CollisionHelper;
 import com.mrcrayfish.furniture.util.PlacementHelper;
@@ -39,6 +38,7 @@ import net.minecraftforge.fml.common.network.NetworkRegistry.TargetPoint;
 
 import java.util.List;
 import java.util.Random;
+import com.mrcrayfish.furniture.water.WaterBasins;
 
 public class BlockBath extends BlockFurnitureTile
 {
@@ -125,199 +125,27 @@ public class BlockBath extends BlockFurnitureTile
     @Override
     public boolean onBlockActivated(World worldIn, BlockPos pos, IBlockState state, EntityPlayer playerIn, EnumHand hand, EnumFacing facing, float hitX, float hitY, float hitZ)
     {
+        // 悠然服务器魔改：水存在浴缸头那一半里，开着时从两半下面的流体容器抽水（见 TileEntityBath、WaterBasins）；不再有无限水。
+        // 空手右键坐下（照旧）；拿桶舀水、倒水；拿别的东西右键开 / 关（也可以潜行 + 左键）
         ItemStack heldItem = playerIn.getHeldItem(hand);
-        BlockPos otherBathPos;
-        if(this == FurnitureBlocks.BATH_1)
+        if(heldItem.isEmpty())
         {
-            otherBathPos = pos.offset(state.getValue(FACING));
+            if(playerIn.isSneaking())
+                return false;
+            return SeatUtil.sitOnBlock(worldIn, pos.getX(), pos.getY(), pos.getZ(), playerIn, 0);
         }
-        else
-        {
-            otherBathPos = pos.offset(state.getValue(FACING).getOpposite());
-        }
+        TileEntity tileEntity = worldIn.getTileEntity(pos);
+        TileEntityBath master = tileEntity instanceof TileEntityBath ? ((TileEntityBath) tileEntity).getMaster() : null;
+        if(master == null)
+            return true;
+        return WaterBasins.activate(worldIn, pos, playerIn, hand, master.getTank(), master::refreshLevel, true, "cfm.message.bath", sources(master));
+    }
 
-        TileEntity tile_entity_1 = worldIn.getTileEntity(pos);
-        TileEntity tile_entity_2 = worldIn.getTileEntity(otherBathPos);
-        if(tile_entity_1 instanceof TileEntityBath && tile_entity_2 instanceof TileEntityBath)
-        {
-            TileEntityBath tileEntityBath = (TileEntityBath) tile_entity_1;
-            TileEntityBath tileEntityBath2 = (TileEntityBath) tile_entity_2;
-
-            if(!heldItem.isEmpty())
-            {
-                if(heldItem.getItem() == Items.BUCKET)
-                {
-                    if(tileEntityBath.hasWater())
-                    {
-                        if(!worldIn.isRemote)
-                        {
-                            if(!playerIn.isCreative())
-                            {
-                                if(heldItem.getCount() > 1)
-                                {
-                                    if(playerIn.inventory.addItemStackToInventory(new ItemStack(Items.WATER_BUCKET)))
-                                    {
-                                        heldItem.shrink(1);
-                                    }
-                                }
-                                else
-                                {
-                                    playerIn.setHeldItem(hand, new ItemStack(Items.WATER_BUCKET));
-                                }
-                            }
-                            tileEntityBath.removeWaterLevel();
-                            tileEntityBath2.removeWaterLevel();
-                            worldIn.updateComparatorOutputLevel(pos, this);
-                        }
-                        else
-                        {
-                            playerIn.playSound(SoundEvents.ITEM_BUCKET_FILL, 1.0F, 1.0F);
-                        }
-                    }
-                }
-                else if(heldItem.getItem() == Items.WATER_BUCKET)
-                {
-                    if(!tileEntityBath.isFull())
-                    {
-                        if(!worldIn.isRemote)
-                        {
-                            tileEntityBath.addWaterLevel();
-                            tileEntityBath2.addWaterLevel();
-                            if(!playerIn.isCreative())
-                            {
-                                playerIn.setHeldItem(hand, new ItemStack(Items.BUCKET));
-                            }
-                            worldIn.updateComparatorOutputLevel(pos, this);
-                        }
-                        else
-                        {
-                            playerIn.playSound(SoundEvents.ITEM_BUCKET_EMPTY, 1.0F, 1.0F);
-                            worldIn.spawnParticle(EnumParticleTypes.WATER_SPLASH, pos.getX() + 0.5, pos.getY() + 0.75 + tileEntityBath.getWaterLevel() * 0.0265, pos.getZ() + 0.5, 0, 0.1, 0);
-                        }
-                    }
-                }
-                else if(heldItem.getItem() == Items.GLASS_BOTTLE)
-                {
-                    if(tileEntityBath.hasWater())
-                    {
-                        if(!worldIn.isRemote)
-                        {
-                            if(!playerIn.isCreative())
-                            {
-                                if(heldItem.getCount() > 1)
-                                {
-                                    if(playerIn.inventory.addItemStackToInventory(PotionUtils.addPotionToItemStack(new ItemStack(Items.POTIONITEM), PotionTypes.WATER)))
-                                    {
-                                        heldItem.shrink(1);
-                                    }
-                                }
-                                else
-                                {
-                                    playerIn.setHeldItem(hand, PotionUtils.addPotionToItemStack(new ItemStack(Items.POTIONITEM), PotionTypes.WATER));
-                                }
-                            }
-                            tileEntityBath.removeWaterLevel();
-                            tileEntityBath2.removeWaterLevel();
-                            worldIn.updateComparatorOutputLevel(pos, this);
-                        }
-                        else
-                        {
-                            playerIn.playSound(SoundEvents.ITEM_BOTTLE_FILL, 1.0F, 1.0F);
-                        }
-                    }
-                }
-                else if(PotionUtils.getPotionFromItem(heldItem) == PotionTypes.WATER)
-                {
-                    if(!tileEntityBath.isFull())
-                    {
-                        if(!worldIn.isRemote)
-                        {
-                            tileEntityBath.addWaterLevel();
-                            tileEntityBath2.addWaterLevel();
-                            if(!playerIn.isCreative())
-                            {
-                                if(heldItem.getItem() == Items.POTIONITEM)
-                                    playerIn.setHeldItem(hand, new ItemStack(Items.GLASS_BOTTLE));
-                                else playerIn.setHeldItem(hand, ItemStack.EMPTY);
-                            }
-                            worldIn.updateComparatorOutputLevel(pos, this);
-                        }
-                        else
-                        {
-                            playerIn.playSound(SoundEvents.ITEM_BOTTLE_EMPTY, 1.0F, 1.0F);
-                            worldIn.spawnParticle(EnumParticleTypes.WATER_SPLASH, pos.getX() + 0.5, pos.getY() + 0.75 + tileEntityBath.getWaterLevel() * 0.0265, pos.getZ() + 0.5, 0, 0.1, 0);
-                        }
-                    }
-                }
-                else
-                {
-                    if(!tileEntityBath.isFull())
-                    {
-                        if(hasWaterSource(worldIn, pos))
-                        {
-                            if(this == FurnitureBlocks.BATH_2)
-                            {
-                                if(!worldIn.isRemote)
-                                {
-                                    tileEntityBath.addWaterLevel();
-                                    tileEntityBath2.addWaterLevel();
-                                    worldIn.setBlockToAir(pos.add(0, -2, 0));
-                                    worldIn.updateComparatorOutputLevel(pos, this);
-                                }
-                                else
-                                {
-                                    worldIn.playSound(pos.getX() + 0.5, pos.getY() + 1, pos.getZ() + 0.5, FurnitureSounds.tap, SoundCategory.BLOCKS, 0.75F, 0.8F, true);
-                                }
-                            }
-                        }
-                        else if(!worldIn.isRemote)
-                        {
-                            playerIn.sendMessage(new TextComponentTranslation("cfm.message.bath"));
-                        }
-                    }
-                }
-            }
-            else
-            {
-                if(playerIn.isSneaking())
-                {
-                    if(!tileEntityBath.isFull())
-                    {
-                        if(hasWaterSource(worldIn, pos))
-                        {
-                            if(this == FurnitureBlocks.BATH_2)
-                            {
-                                if(!worldIn.isRemote)
-                                {
-                                    tileEntityBath.addWaterLevel();
-                                    tileEntityBath2.addWaterLevel();
-                                    worldIn.setBlockToAir(pos.add(0, -2, 0));
-                                    worldIn.updateComparatorOutputLevel(pos, this);
-                                }
-                                else
-                                {
-                                    worldIn.playSound(pos.getX() + 0.5, pos.getY() + 1, pos.getZ() + 0.5, FurnitureSounds.tap, SoundCategory.BLOCKS, 0.75F, 0.8F, true);
-                                }
-                            }
-                        }
-                        else if(!worldIn.isRemote)
-                        {
-                            playerIn.sendMessage(new TextComponentTranslation("cfm.message.bath"));
-                        }
-                    }
-                    return true;
-                }
-                else
-                {
-                    return SeatUtil.sitOnBlock(worldIn, pos.getX(), pos.getY(), pos.getZ(), playerIn, 0);
-                }
-            }
-            PacketHandler.INSTANCE.sendToAllAround(new MessageFillBath(tileEntityBath.getWaterLevel(), pos.getX(), pos.getY(), pos.getZ(), otherBathPos.getX(), otherBathPos.getY(), otherBathPos.getZ()), new TargetPoint(playerIn.dimension, pos.getX(), pos.getY(), pos.getZ(), 128D));
-            worldIn.markBlockRangeForRenderUpdate(pos, pos);
-            worldIn.markBlockRangeForRenderUpdate(otherBathPos, otherBathPos);
-        }
-        return true;
-
+    /** 浴缸从哪两格抽水（两半各自的下面一格） */
+    public static BlockPos[] sources(TileEntityBath master)
+    {
+        BlockPos partner = master.getPartnerPos();
+        return partner != null ? new BlockPos[]{partner.down(), master.getPos().down()} : new BlockPos[]{master.getPos().down()};
     }
 
     @Override
@@ -377,10 +205,6 @@ public class BlockBath extends BlockFurnitureTile
         return (world.isAirBlock(pos) && world.isAirBlock(pos.offset(facing, 1)));
     }
 
-    public boolean hasWaterSource(World world, BlockPos pos)
-    {
-        return world.getBlockState(pos.add(0, -2, 0)) == Blocks.WATER.getDefaultState();
-    }
 
     @Override
     public int getComparatorInputOverride(IBlockState state, World world, BlockPos pos)

@@ -50,5 +50,7 @@ public class FurnitureTileEntities
         GameRegistry.registerTileEntity(TileEntityPhotoFrame.class, "cfm:photo_frame");
         GameRegistry.registerTileEntity(TileEntityTVStand.class, "cfm:tv_stand");
         GameRegistry.registerTileEntity(TileEntityElectricFence.class, "cfm:electric_fence");
+        GameRegistry.registerTileEntity(TileEntityBasin.class, "cfm:basin");
+        GameRegistry.registerTileEntity(TileEntityCounterSink.class, "cfm:counter_sink");
     }
 }

@@ -587,8 +587,8 @@ cfm.message.login2=查看所有MrCrayfish模組
 cfm.message.login3=查看傢俱模組的維基
 cfm.message.login4=查看MrCrayfish的YouTube
 cfm.message.login5=查看傢俱模組的社區版以獲得更多傢俱
-cfm.message.basin=你需要在盆池下方有一個水源，或者你可以使用水桶填充它。
-cfm.message.bath=你需要在浴缸水龍頭下方有一個水源，或者你可以使用水桶填充它。
+cfm.message.basin=按右鍵開 / 關水。開著時從正下方的流體容器（如儲槽、管線）抽水；也可以用水桶倒水進去。
+cfm.message.bath=拿著東西按右鍵（或蹲下按左鍵）開 / 關水。開著時從正下方的流體容器抽水；也可以用水桶倒水進去。
 cfm.message.ceiling_light.mode1=吊燈現在是紅石模式。
 cfm.message.ceiling_light.mode2=吊燈現在是右鍵點擊模式。
 cfm.message.computer=有人正在使用電腦。
@@ -596,7 +596,7 @@ cfm.message.lamp=確保燈是由紅石激活或者放在床頭櫃上。
 cfm.message.stereo1=音響已關閉。
 cfm.message.stereo2=音響已經關閉。
 cfm.message.tap_blocked=有東西擋住了水龍頭。
-cfm.message.tap_nowater=你需要在水龍頭下方有一個水源。
+cfm.message.tap_nowater=水龍頭正下方要是一個裝著至少 1000 mB 流體的容器。
 cfm.message.toilet=按下%s以放屁。
 
 # Key
@@ -673,3 +673,7 @@ cfm.appliance.card_in=已插入能量單元卡：接線來的電不夠時從卡�
 cfm.appliance.card_hint=放一張 RFTools 的能量單元卡，從它的網路取電。接線來的電優先。
 cfm.message.card_inserted=插入了能量單元卡。
 cfm.message.card_removed=取出了能量單元卡。
+cfm.message.toilet_nowater=馬桶沒水：正下方要接一個裝著水的流體容器。
+cfm.message.water_on=開水了。
+cfm.message.water_off=關水了。
+cfm.message.water_full=已經滿了。

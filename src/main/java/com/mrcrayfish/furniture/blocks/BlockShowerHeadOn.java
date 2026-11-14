@@ -60,6 +60,9 @@ public class BlockShowerHeadOn extends BlockFurnitureTile
     @Override
     public boolean onBlockActivated(World worldIn, BlockPos pos, IBlockState state, EntityPlayer playerIn, EnumHand hand, EnumFacing facing, float hitX, float hitY, float hitZ)
     {
+        // 潜行 + 空手右键留给 Carry On（悠然服务器魔改）
+        if(playerIn.isSneaking() && playerIn.getHeldItem(hand).isEmpty())
+            return false;
         worldIn.setBlockState(pos, FurnitureBlocks.SHOWER_HEAD_OFF.getDefaultState().withProperty(FACING, state.getValue(FACING)), 2);
         worldIn.playSound(pos.getX() + 0.5D, pos.getY() + 0.5D, pos.getZ() + 0.5D, SoundEvents.BLOCK_LEVER_CLICK, SoundCategory.BLOCKS, 0.3F, 0.5F, false);
         return true;

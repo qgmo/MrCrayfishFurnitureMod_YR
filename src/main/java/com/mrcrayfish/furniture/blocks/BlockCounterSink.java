@@ -30,6 +30,9 @@ import net.minecraft.world.World;
 
 import javax.annotation.Nullable;
 import java.util.List;
+import com.mrcrayfish.furniture.tileentity.TileEntityCounterSink;
+import com.mrcrayfish.furniture.water.FurnitureTank;
+import com.mrcrayfish.furniture.water.WaterBasins;
 
 public class BlockCounterSink extends BlockFurnitureTile
 {
@@ -68,13 +71,9 @@ public class BlockCounterSink extends BlockFurnitureTile
                 }
             }
         }
-        boolean result = FurnitureBlocks.BASIN.onBlockActivated(worldIn, pos, state, playerIn, hand, facing, hitX, hitY, hitZ);
-        if (tileEntity != null)
-        {
-            tileEntity.validate();
-            worldIn.setTileEntity(pos, tileEntity);
-        }
-        return result;
+        // 悠然服务器魔改：同盆池（见 WaterBasins）；旧存档的方块实体在这里换成水槽的
+        FurnitureTank tank = WaterBasins.basinTank(worldIn, pos);
+        return WaterBasins.activate(worldIn, pos, playerIn, hand, tank, () -> WaterBasins.refreshFilled(worldIn, pos, tank), true, "cfm.message.basin", pos.down());
     }
 
     @Override
@@ -213,6 +212,6 @@ public class BlockCounterSink extends BlockFurnitureTile
     @Override
     public TileEntity createNewTileEntity(World worldIn, int meta)
     {
-        return new TileEntityKitchenCounter();
+        return new TileEntityCounterSink();
     }
 }

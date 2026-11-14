@@ -1,43 +1,57 @@
 package com.mrcrayfish.furniture.tileentity;
 
+import com.mrcrayfish.furniture.util.WaterRules;
+import com.mrcrayfish.furniture.water.FurnitureTank;
+import com.mrcrayfish.furniture.water.IWaterBasin;
+import com.mrcrayfish.furniture.water.WaterBasins;
 import net.minecraft.nbt.NBTTagCompound;
+import net.minecraft.util.EnumFacing;
+import net.minecraft.util.ITickable;
+import net.minecraft.util.math.BlockPos;
 
-public class TileEntityCounterSink extends TileEntitySyncClient
+/**
+ * 橱柜水槽（悠然服务器魔改）：颜色同厨房台面，另外自己装 1000 mB 水，规则同盆池（{@link TileEntityBasin}）。
+ * 旧存档的水槽用的是厨房台面的方块实体，第一次操作时换成这个（{@link WaterBasins#basinTank}），水按空。
+ */
+public class TileEntityCounterSink extends TileEntityKitchenCounter implements ITickable, IWaterBasin
 {
-    private boolean hasWater = false;
+    private final FurnitureTank tank = new FurnitureTank(WaterRules.BASIN_CAPACITY, WaterRules.BASIN_FILL_PER_TICK, this::changed);
 
-    public boolean hasWater()
+    private void changed()
     {
-        return hasWater;
+        if(world != null)
+        {
+            world.markChunkDirty(pos, this);
+        }
     }
 
-    public void setHasWater(boolean hasWater)
+    @Override
+    public FurnitureTank getTank()
     {
-        this.hasWater = hasWater;
+        return tank;
     }
 
-    public void fill()
+    @Override
+    public void update()
     {
-        hasWater = true;
-    }
-
-    public void empty()
-    {
-        hasWater = false;
+        if(world == null || world.isRemote)
+            return;
+        tank.tick(world, new BlockPos[]{pos.down()}, new EnumFacing[]{EnumFacing.UP});
+        WaterBasins.refreshFilled(world, pos, tank);
     }
 
     @Override
     public void readFromNBT(NBTTagCompound tagCompound)
     {
         super.readFromNBT(tagCompound);
-        this.hasWater = tagCompound.getBoolean("hasWater");
+        tank.readFromNBT(tagCompound);
     }
 
     @Override
     public NBTTagCompound writeToNBT(NBTTagCompound tagCompound)
     {
         super.writeToNBT(tagCompound);
-        tagCompound.setBoolean("hasWater", hasWater);
+        tank.writeToNBT(tagCompound);
         return tagCompound;
     }
 }
