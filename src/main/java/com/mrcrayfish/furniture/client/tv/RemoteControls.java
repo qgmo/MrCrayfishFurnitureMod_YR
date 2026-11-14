@@ -183,7 +183,10 @@ public final class RemoteControls
             }
             else if(out.target != null && out.action != null)
             {
-                PacketHandler.INSTANCE.sendToServer(new MessageTVRemote(out.target, out.action));
+                // 带上这台电视的视频时长（后退时服务端没采信时长就按它夹到片尾以内）
+                VideoSession session = TvVideoManager.INSTANCE.session(out.target);
+                long duration = session == null ? 0 : session.getDurationMs();
+                PacketHandler.INSTANCE.sendToServer(new MessageTVRemote(out.target, out.action, duration));
             }
         }
     }

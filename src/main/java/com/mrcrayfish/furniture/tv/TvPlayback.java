@@ -3,7 +3,8 @@ package com.mrcrayfish.furniture.tv;
 /**
  * 一台电视的播放进度（纯逻辑，悠然服务器魔改）。服务端只存“播放 / 暂停、基准位置、基准时刻”，
  * 当前位置 = 暂停时的基准位置，或播放时的基准位置 + (现在 − 基准时刻)。时刻一律用服务端的现实时间（毫秒），
- * 不用游戏刻：游戏卡顿时刻会变慢，视频却按现实时间走。服务端不知道视频多长，播完由客户端判断。
+ * 不用游戏刻：游戏卡顿时刻会变慢，视频却按现实时间走。视频多长由在场玩家的客户端报上来（{@link TvDurations}）：
+ * 采信时播到头停在片尾、暂停（{@link #stopAtEnd}）；不采信时服务端不管片尾，后退时按客户端给的时长先夹到片尾以内（{@link #rewind}）。
  */
 public final class TvPlayback
 {
@@ -74,6 +75,33 @@ public final class TvPlayback
     {
         basePosMs = clamp(positionAt(nowMs) + deltaMs);
         baseTimeMs = nowMs;
+    }
+
+    /**
+     * 后退 stepMs。endMs &gt; 0 时先把当前位置夹到 endMs 以内（播完很久以后后退，从片尾往回算）；播放 / 暂停状态不变。
+     */
+    public void rewind(long nowMs, long stepMs, long endMs)
+    {
+        long pos = positionAt(nowMs);
+        if(endMs > 0 && pos > endMs)
+            pos = endMs;
+        basePosMs = clamp(pos - Math.max(0, stepMs));
+        baseTimeMs = nowMs;
+    }
+
+    /**
+     * 到了片尾（endMs）就停在片尾、暂停。返回有没有改动（要同步给客户端）。
+     */
+    public boolean stopAtEnd(long nowMs, long endMs)
+    {
+        if(endMs <= 0 || positionAt(nowMs) < endMs)
+            return false;
+        if(!playing && basePosMs == endMs)
+            return false;
+        playing = false;
+        basePosMs = clamp(endMs);
+        baseTimeMs = nowMs;
+        return true;
     }
 
     /** 弹出进度条；已经显示着时再按一次就收起 */

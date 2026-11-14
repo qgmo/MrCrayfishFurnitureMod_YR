@@ -39,6 +39,7 @@ public class PacketHandler
         registerMessage(MessageTVOpenSettings.class, MessageTVOpenSettings.class, Side.SERVER);
         registerMessage(MessageTVChannels.class, MessageTVChannels.class, Side.SERVER);
         registerMessage(MessageTVChannelsResult.class, MessageTVChannelsResult.class, Side.CLIENT);
+        registerMessage(MessageTVDuration.class, MessageTVDuration.class, Side.SERVER);
     }
     
     private static <REQ extends IMessage, REPLY extends IMessage> void registerMessage(Class<? extends IMessageHandler<REQ, REPLY>> messageHandler, Class<REQ> requestMessageType, Side side)

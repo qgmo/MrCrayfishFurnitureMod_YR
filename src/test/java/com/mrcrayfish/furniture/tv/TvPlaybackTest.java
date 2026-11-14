@@ -56,4 +56,46 @@ class TvPlaybackTest
         assertFalse(p.isOsdShown(300 + TvPlayback.OSD_MS));
         assertEquals(0, p.osdLeftMs(10_000));
     }
+
+    @Test
+    void stopAtEndPausesOnTheLastFrame()
+    {
+        TvPlayback p = new TvPlayback();
+        p.restart(0);
+        assertFalse(p.stopAtEnd(89_000, 90_000));
+        assertFalse(p.stopAtEnd(95_000, 0));
+        assertTrue(p.stopAtEnd(90_040, 90_000));
+        assertFalse(p.isPlaying());
+        assertEquals(90_000, p.positionAt(500_000));
+        // 已经停在片尾：不再算改动
+        assertFalse(p.stopAtEnd(600_000, 90_000));
+        // 快进过了片尾：夹回片尾
+        p.togglePlay(600_000);
+        p.seek(600_000, TvPlayback.SEEK_STEP_MS);
+        assertTrue(p.stopAtEnd(600_000, 90_000));
+        assertEquals(90_000, p.positionAt(700_000));
+        // 后退仍是暂停
+        p.rewind(700_000, TvPlayback.SEEK_STEP_MS, 90_000);
+        assertFalse(p.isPlaying());
+        assertEquals(80_000, p.positionAt(800_000));
+    }
+
+    @Test
+    void rewindClampsToTheEndFirst()
+    {
+        TvPlayback p = new TvPlayback();
+        p.restart(0);
+        // 播完很久（服务端没采信时长，进度一直走）：按客户端给的时长先夹回片尾再退
+        p.rewind(1_000_000, TvPlayback.SEEK_STEP_MS, 90_000);
+        assertTrue(p.isPlaying());
+        assertEquals(80_000, p.positionAt(1_000_000));
+        // 不知道时长：照旧从当前位置退
+        p.rewind(1_000_000, TvPlayback.SEEK_STEP_MS, 0);
+        assertEquals(70_000, p.positionAt(1_000_000));
+        // 还没到片尾：时长不影响
+        p.rewind(1_000_000, TvPlayback.SEEK_STEP_MS, 90_000);
+        assertEquals(60_000, p.positionAt(1_000_000));
+        p.rewind(1_000_000, TvPlayback.SEEK_STEP_MS * 100, 90_000);
+        assertEquals(0, p.positionAt(1_000_000));
+    }
 }

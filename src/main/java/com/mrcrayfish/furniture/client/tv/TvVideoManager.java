@@ -1,6 +1,8 @@
 package com.mrcrayfish.furniture.client.tv;
 
 import com.mrcrayfish.furniture.MrCrayfishFurnitureMod;
+import com.mrcrayfish.furniture.network.PacketHandler;
+import com.mrcrayfish.furniture.network.message.MessageTVDuration;
 import com.mrcrayfish.furniture.tileentity.TileEntityTV;
 import com.mrcrayfish.furniture.tv.TvChannel;
 import com.mrcrayfish.furniture.tv.TvClock;
@@ -31,6 +33,8 @@ import java.util.Map;
  * <li>{@code hear-range}（默认 16 格）内有声音，按距离线性衰减；音量 = 电视音量 × 游戏的主音量与“唱片机/音符盒”音量 × 电视总音量。</li>
  * </ul>
  * 没电（黑屏）超过 2 秒才停掉解码，来电后按服务端的位置接上。
+ * <p>
+ * 取到视频时长后报给服务端（{@link MessageTVDuration}），每台电视每个报告编号（服务端换台、开机后会换）只报一次。
  */
 public final class TvVideoManager
 {
@@ -77,6 +81,8 @@ public final class TvVideoManager
 
     private final Map<BlockPos, VideoSession> sessions = new HashMap<>();
     private final Map<BlockPos, Long> offSince = new HashMap<>();
+    /** 已经报过时长的：电视位置 → 报告编号与频道 */
+    private final Map<BlockPos, String> reported = new HashMap<>();
     @Nullable
     private BlockPos fullscreen;
     private int ticks;
@@ -257,6 +263,7 @@ public final class TvVideoManager
                 it.remove();
             }
         }
+        reportDurations(world);
         long latency = latencyMs(mc);
         for(Map.Entry<BlockPos, TvChannel> e : chosen.entrySet())
         {
@@ -266,6 +273,30 @@ public final class TvVideoManager
                 long start = te instanceof TileEntityTV ? ((TileEntityTV) te).clientClock(latency).targetAt(now) : 0;
                 sessions.put(e.getKey(), new VideoSession(e.getKey(), e.getValue(), cfg.effectiveQuality(), start));
             }
+        }
+    }
+
+    /** 取到时长的视频报给服务端（频道还对得上、这个编号没报过时） */
+    private void reportDurations(World world)
+    {
+        reported.keySet().removeIf(p -> !sessions.containsKey(p));
+        for(VideoSession session : sessions.values())
+        {
+            long duration = session.getDurationMs();
+            if(duration <= 0)
+                continue;
+            TileEntity te = world.getTileEntity(session.getPos());
+            if(!(te instanceof TileEntityTV))
+                continue;
+            TileEntityTV tv = (TileEntityTV) te;
+            String key = session.getChannel().key();
+            if(!key.equals(TvChannel.parse(tv.getCurrentChannel()).key()))
+                continue;
+            String mark = tv.getClientDurationEpoch() + "|" + key;
+            if(mark.equals(reported.get(session.getPos())))
+                continue;
+            reported.put(session.getPos(), mark);
+            PacketHandler.INSTANCE.sendToServer(new MessageTVDuration(session.getPos(), tv.getClientDurationEpoch(), key, duration));
         }
     }
 
@@ -283,6 +314,7 @@ public final class TvVideoManager
             s.close();
         sessions.clear();
         offSince.clear();
+        reported.clear();
         fullscreen = null;
     }
 

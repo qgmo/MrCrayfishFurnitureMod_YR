@@ -17,18 +17,23 @@ import net.minecraftforge.fml.common.network.simpleimpl.MessageContext;
 /**
  * 遥控器的一次操作（客户端 → 服务端，悠然服务器魔改）。按法由客户端判断（{@link com.mrcrayfish.furniture.tv.RemoteInput}），
  * 服务端核对电视、距离、使用权、手里是遥控器且有电（每次扣 2 FE），再改电视的状态并广播。
+ * <p>
+ * 带上客户端知道的视频时长（不知道为 0）：服务端没采信时长时，后退先按它把播完以后的进度夹回片尾（只会让进度变小，
+ * 多按几下后退也能做到，所以不另外校验）。
  */
 public class MessageTVRemote implements IMessage, IMessageHandler<MessageTVRemote, IMessage>
 {
     private BlockPos pos;
     private int action;
+    private long durationMs;
 
     public MessageTVRemote() {}
 
-    public MessageTVRemote(BlockPos pos, RemoteAction action)
+    public MessageTVRemote(BlockPos pos, RemoteAction action, long durationMs)
     {
         this.pos = pos;
         this.action = action.ordinal();
+        this.durationMs = durationMs;
     }
 
     @Override
@@ -36,6 +41,7 @@ public class MessageTVRemote implements IMessage, IMessageHandler<MessageTVRemot
     {
         buf.writeLong(pos.toLong());
         buf.writeByte(action);
+        buf.writeLong(durationMs);
     }
 
     @Override
@@ -43,6 +49,7 @@ public class MessageTVRemote implements IMessage, IMessageHandler<MessageTVRemot
     {
         pos = BlockPos.fromLong(buf.readLong());
         action = buf.readUnsignedByte();
+        durationMs = buf.readLong();
     }
 
     @Override
@@ -82,6 +89,6 @@ public class MessageTVRemote implements IMessage, IMessageHandler<MessageTVRemot
             ItemTVRemote.notifyNoCharge(player, remote);
             return;
         }
-        tv.handleRemote(action);
+        tv.handleRemote(action, message.durationMs);
     }
 }

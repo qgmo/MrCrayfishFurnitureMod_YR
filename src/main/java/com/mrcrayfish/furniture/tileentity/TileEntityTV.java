@@ -1,5 +1,6 @@
 package com.mrcrayfish.furniture.tileentity;
 
+import com.mrcrayfish.furniture.MrCrayfishFurnitureMod;
 import com.mrcrayfish.furniture.blocks.BlockAbstractTV;
 import com.mrcrayfish.furniture.client.DownloadUtils;
 import com.mrcrayfish.furniture.client.GifCache;
@@ -12,6 +13,7 @@ import com.mrcrayfish.furniture.init.FurnitureSounds;
 import com.mrcrayfish.furniture.tv.RemoteAction;
 import com.mrcrayfish.furniture.tv.TvChannel;
 import com.mrcrayfish.furniture.tv.TvClock;
+import com.mrcrayfish.furniture.tv.TvDurations;
 import com.mrcrayfish.furniture.tv.TvPlayback;
 import net.minecraft.util.SoundCategory;
 import net.minecraft.nbt.NBTTagCompound;
@@ -26,6 +28,8 @@ import javax.annotation.Nullable;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Random;
+import java.util.UUID;
 import com.mrcrayfish.furniture.power.ApplianceEnergy;
 import com.mrcrayfish.furniture.power.ApplianceFaces;
 import com.mrcrayfish.furniture.power.IAppliance;
@@ -44,6 +48,8 @@ import net.minecraft.util.ITickable;
  * 只从底面进电，能量单元卡插在频道设置界面里（{@link com.mrcrayfish.furniture.gui.containers.ContainerTVSettings}）。</li>
  * <li>频道可以是 GIF 网址或 bilibili 视频（{@link TvChannel}），三个频道可以混用。服务端只存频道、播放 / 暂停、
  * 基准位置与时刻（{@link TvPlayback}）、音量、开关机、弹幕开关；视频由每个客户端自己取、自己对齐，服务端不碰视频。</li>
+ * <li>视频时长由在场玩家的客户端报上来（{@link #reportDuration}，{@link TvDurations}），采信时播到头停在片尾、暂停；
+ * 换台、开机、改了当前频道时清掉重新收集。时长不存档（区块重新加载后由在场玩家再报）。</li>
  * <li>遥控器的操作见 {@link #handleRemote}；频道设置只从大屏的“设置”按钮进（潜行 + 空手右键留给 Carry On）。</li>
  * </ul>
  */
@@ -68,6 +74,10 @@ public class TileEntityTV extends TileEntitySyncClient implements ITickable, IAp
 
     private TvPlayback playback = new TvPlayback();
     private boolean playbackStarted;
+    /** 服务端：玩家报上来的视频时长。编号从随机数开始，区块重新加载后客户端会再报 */
+    private final TvDurations<UUID> durations = new TvDurations<>(new Random().nextInt());
+    /** 客户端：服务端的报告编号 */
+    private int clientDurationEpoch;
     private int volume = DEFAULT_VOLUME;
     private boolean danmaku = true;
 
@@ -126,6 +136,7 @@ public class TileEntityTV extends TileEntitySyncClient implements ITickable, IAp
         tag.setLong("PosNow", playback.positionAt(now));
         tag.setLong("OsdLeft", playback.osdLeftMs(now));
         tag.setBoolean("VideoOff", !ConfigurationHandler.tvVideoEnabled);
+        tag.setInteger("DurEpoch", durations.epoch());
         return tag;
     }
 
@@ -182,6 +193,7 @@ public class TileEntityTV extends TileEntitySyncClient implements ITickable, IAp
             this.clientReceivedAt = now;
             this.clientOsdUntil = now + Math.min(TvPlayback.OSD_MS, Math.max(0, compound.getLong("OsdLeft")));
             this.clientVideoOff = compound.getBoolean("VideoOff");
+            this.clientDurationEpoch = compound.getInteger("DurEpoch");
         }
         if(world != null && world.isRemote && powered)
         {
@@ -202,8 +214,14 @@ public class TileEntityTV extends TileEntitySyncClient implements ITickable, IAp
         {
             // 新放下的电视、改版前的存档：从现在开始算
             playbackStarted = true;
-            playback.restart(System.currentTimeMillis());
+            restartPlayback(System.currentTimeMillis());
             markDirty();
+        }
+        // 采信了时长：播到头停在片尾、暂停
+        if(playback.stopAtEnd(System.currentTimeMillis(), durations.trusted()))
+        {
+            markDirty();
+            TileEntityUtil.syncToClient(this);
         }
         energy.tick(powered, isVideoChannel() ? AppliancePower.TV_VIDEO : AppliancePower.TV_GIF);
     }
@@ -371,7 +389,7 @@ public class TileEntityTV extends TileEntitySyncClient implements ITickable, IAp
         String after = getCurrentChannel();
         if(after == null ? before != null : !after.equals(before))
         {
-            playback.restart(System.currentTimeMillis());
+            restartPlayback(System.currentTimeMillis());
         }
         this.stretch = stretch;
         this.markDirty();
@@ -381,9 +399,10 @@ public class TileEntityTV extends TileEntitySyncClient implements ITickable, IAp
     /**
      * 遥控器的一次操作（服务端，调用方已核对玩家、距离、电池并扣过电）。关机时只有开关机管用。
      *
+     * @param clientDurationMs 按的人的客户端知道的视频时长（不知道为 0）：只在服务端没采信时长时用于后退，先把进度夹到片尾以内
      * @return 这次操作有没有改动（没有改动也已经扣了电）
      */
-    public boolean handleRemote(RemoteAction action)
+    public boolean handleRemote(RemoteAction action, long clientDurationMs)
     {
         if(disabled)
             return false;
@@ -394,7 +413,7 @@ public class TileEntityTV extends TileEntitySyncClient implements ITickable, IAp
             if(powered)
             {
                 // 关机再开机从头播（服主 11-14）
-                playback.restart(now);
+                restartPlayback(now);
             }
         }
         else if(!powered)
@@ -413,9 +432,13 @@ public class TileEntityTV extends TileEntitySyncClient implements ITickable, IAp
                     playback.toggleOsd(now);
                     break;
                 case SEEK_BACK:
-                    playback.seek(now, -TvPlayback.SEEK_STEP_MS);
+                {
+                    // 采信了时长时按服务端的；没采信时按这个人的客户端知道的时长，把播完以后的进度先夹回片尾再往回退
+                    long end = durations.trusted();
+                    playback.rewind(now, TvPlayback.SEEK_STEP_MS, end > 0 ? end : (TvDurations.valid(clientDurationMs) ? clientDurationMs : 0));
                     playback.showOsd(now);
                     break;
+                }
                 case SEEK_FORWARD:
                     playback.seek(now, TvPlayback.SEEK_STEP_MS);
                     playback.showOsd(now);
@@ -426,7 +449,7 @@ public class TileEntityTV extends TileEntitySyncClient implements ITickable, IAp
                         return false;
                     int step = action == RemoteAction.NEXT_CHANNEL ? 1 : channels.size() - 1;
                     currentChannel = (Math.max(0, currentChannel) + step) % channels.size();
-                    playback.restart(now);
+                    restartPlayback(now);
                     world.playSound(null, pos, FurnitureSounds.white_noise, SoundCategory.BLOCKS, 0.5F, 1.0F);
                     break;
                 case VOLUME_DOWN:
@@ -445,9 +468,56 @@ public class TileEntityTV extends TileEntitySyncClient implements ITickable, IAp
                     return false;
             }
         }
+        // 快进过了片尾：直接停在片尾
+        playback.stopAtEnd(now, durations.trusted());
         markDirty();
         TileEntityUtil.syncToClient(this);
         return true;
+    }
+
+    /** 从头播，并清掉收集到的时长（换台、开机、改了当前频道） */
+    private void restartPlayback(long now)
+    {
+        playback.restart(now);
+        durations.clear();
+    }
+
+    /** 时长报告的结果 */
+    public enum DurationReport
+    {
+        /** 收下了 */
+        ACCEPTED,
+        /** 换过台了（编号或频道对不上）、当前不是视频频道、人数满了：不收，也不算违规 */
+        STALE,
+        /** 时长不在合理范围内（大于 0、不超过 24 小时） */
+        INVALID
+    }
+
+    /**
+     * 在场玩家报上来的视频时长（服务端，调用方已核对玩家、距离、限频）。channelKey 是客户端在放的视频（{@link TvChannel#key()}）。
+     */
+    public DurationReport reportDuration(UUID player, int epoch, String channelKey, long durationMs)
+    {
+        if(!TvDurations.valid(durationMs))
+            return DurationReport.INVALID;
+        if(epoch != durations.epoch() || !isVideoChannel() || !TvChannel.parse(getCurrentChannel()).key().equals(channelKey))
+            return DurationReport.STALE;
+        long before = durations.trusted();
+        boolean disagreedBefore = durations.disagree();
+        if(!durations.report(player, durationMs))
+            return DurationReport.STALE;
+        long after = durations.trusted();
+        if(after != before || durations.disagree() != disagreedBefore)
+        {
+            MrCrayfishFurnitureMod.logger().debug("TV at {}: {} duration report(s), {}", pos, durations.count(), after > 0 ? "using " + after + " ms" : "they disagree, not stopping at the end");
+        }
+        return DurationReport.ACCEPTED;
+    }
+
+    /** 客户端：服务端的时长报告编号 */
+    public int getClientDurationEpoch()
+    {
+        return clientDurationEpoch;
     }
 
     public int getVolume()

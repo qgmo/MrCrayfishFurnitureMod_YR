@@ -100,6 +100,7 @@ public final class VideoSession
 
     /** 渲染线程写、解码线程读：目标位置、是否在播 */
     private volatile long targetMs;
+    private volatile boolean targetPlaying = true;
     /** 跳转请求：每次跳转 generation 加一，旧的帧丢掉 */
     private volatile long seekToMs = -1;
     private volatile int generation;
@@ -242,9 +243,14 @@ public final class VideoSession
                 }
                 if(durationMs > 0 && targetMs >= durationMs)
                 {
-                    status = Status.ENDED;
-                    sleep(250);
-                    continue;
+                    if(targetPlaying)
+                    {
+                        status = Status.ENDED;
+                        sleep(250);
+                        continue;
+                    }
+                    // 停在片尾（暂停）：从片尾前一点开始解，画面停在最后一帧
+                    seekToMs = Math.max(0, durationMs - 1500);
                 }
                 playOnce();
                 failures = 0;
@@ -541,20 +547,27 @@ public final class VideoSession
         long target = clock.targetAt(nowMs);
         boolean playing = clock.isPlaying();
         this.targetMs = target;
+        this.targetPlaying = playing;
         if(clock.getReceivedAtMs() != lastStateAt)
         {
             // 服务端的状态变了（快进、后退、暂停…）：不等跳转的冷却，马上按新位置对齐
             lastStateAt = clock.getReceivedAtMs();
             lastSeekAt = 0;
         }
-        if(durationMs > 0 && target >= durationMs)
+        boolean atEnd = durationMs > 0 && target >= durationMs;
+        if(atEnd && playing)
         {
             if(status == Status.PLAYING)
                 status = Status.ENDED;
             audio.stop();
             return;
         }
-        if(status == Status.ENDED)
+        if(atEnd && status == Status.ENDED)
+        {
+            // 服务端让它停在片尾（暂停）：画面留在最后一帧，不回到噪点
+            status = Status.PLAYING;
+        }
+        else if(status == Status.ENDED)
         {
             // 后退到片尾之前了：解码线程还开着（停在读完处），跳回去接着解
             status = Status.PLAYING;
