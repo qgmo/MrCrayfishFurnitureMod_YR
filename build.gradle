@@ -56,6 +56,9 @@ configurations {
     // 浏览器内核 openhtmltopdf（LGPL-2.1 或更高，纯 Java，Java 8）：类原样打进模组 jar，许可证放在 META-INF/openhtmltopdf/
     embed
     implementation.extendsFrom(embed)
+    // 浏览器的 HTML 解析器 jsoup（MIT，支持 Java 8）：类原样打进模组 jar，许可证在 META-INF/jsoup/LICENSE（jsoup 自带的位置）
+    embedJsoup
+    implementation.extendsFrom(embedJsoup)
 }
 
 // YouranMod（悠然服务器模组，游戏内网络）：家具 fork 直接依赖它。它没有发布到 Maven，用它构建出来的 dev jar（未混淆）编译、
@@ -71,6 +74,7 @@ dependencies {
 
     embed 'at.datenwort.openhtmltopdf:openhtmltopdf-core:1.1.4'
     embed 'at.datenwort.openhtmltopdf:openhtmltopdf-java2d:1.1.4'
+    embedJsoup('org.jsoup:jsoup:1.22.2') { transitive = false }
     implementation files(youranmodJar)
 
     compileOnly rfg.deobf('CraftTweaker2:CraftTweaker2-API:1.12-4.1.20.675')
@@ -111,6 +115,10 @@ jar {
                 f.path = 'META-INF/openhtmltopdf/' + f.path.substring('META-INF/'.length())
             }
         }
+    }
+    // jsoup 原样并进来（不改包名）；Java 11 的多版本类、module-info 去掉（Forge 1.12 扫描 jar 时不认），LICENSE 留在 META-INF/jsoup/
+    from({ configurations.embedJsoup.collect { zipTree(it) } }) {
+        exclude 'META-INF/MANIFEST.MF', 'META-INF/maven/**', 'META-INF/versions/**', 'module-info.class'
     }
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     manifest {

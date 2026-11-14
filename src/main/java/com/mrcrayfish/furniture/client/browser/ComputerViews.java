@@ -1,8 +1,11 @@
 package com.mrcrayfish.furniture.client.browser;
 
 import com.mrcrayfish.furniture.MrCrayfishFurnitureMod;
+import com.mrcrayfish.furniture.computer.BrowserHistory;
 import com.mrcrayfish.furniture.computer.ItemIcons;
+import com.mrcrayfish.furniture.computer.PageParser;
 import com.mrcrayfish.furniture.computer.PageSnapshot;
+import com.mrcrayfish.furniture.computer.TypingSync;
 import com.mrcrayfish.furniture.network.message.MessageComputerView;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.network.NetHandlerPlayClient;
@@ -68,6 +71,11 @@ public final class ComputerViews
         public int scroll;
         /** 每收到一页加一 */
         public int version;
+        /** 操作者正在打的字（框的编号 → 内容；地址栏是 {@link TypingSync#ADDRESS}）；换页面清空 */
+        public final Map<Integer, TypingSync.Typed> typed = new HashMap<>();
+        /** 服务端存着的会话（操作者打开时收到；浏览器没有这台电脑的状态时按它恢复，用过就清掉） */
+        @Nullable
+        public BrowserHistory savedHistory;
     }
 
     /** 这台电脑的浏览器（按服务器 + 维度 + 位置，没有就建一个） */
@@ -100,12 +108,24 @@ public final class ComputerViews
             v.page = data;
             v.scroll = scroll;
             v.version++;
+            v.typed.clear();
         }
         else if(kind == MessageComputerView.CLEAR)
         {
             v.page = null;
             v.scroll = 0;
             v.version++;
+            v.typed.clear();
+        }
+        else if(kind == MessageComputerView.HISTORY)
+        {
+            v.savedHistory = BrowserHistory.decode(data);
+        }
+        else if(kind == MessageComputerView.TYPING)
+        {
+            TypingSync.Typed t = MessageComputerView.decodeTyping(scroll, data);
+            if(t != null && (v.typed.containsKey(t.field) || v.typed.size() <= PageDocument.MAX_CONTROLS))
+                v.typed.put(t.field, t);
         }
         else if(kind == MessageComputerView.SCROLL)
         {
@@ -188,14 +208,14 @@ public final class ComputerViews
     /**
      * 在渲染线程上解析、渲染一页，完成后在主线程上回调（失败为 null）。{@code images} 是检查过的图片。
      */
-    public static void render(byte[] html, String url, Map<String, byte[]> images, double scale, Consumer<RenderedPage> done)
+    public static void render(byte[] html, PageParser.Mode mode, String url, Map<String, byte[]> images, double scale, Consumer<RenderedPage> done)
     {
         RENDER.execute(() ->
         {
             RenderedPage page = null;
             try
             {
-                PageDocument doc = PageDocument.parse(html, url, ComputerViews::itemName, ComputerViews::translate, PageRenderer.VIEW_WIDTH);
+                PageDocument doc = PageDocument.parse(html, mode, url, ComputerViews::itemName, ComputerViews::translate, PageRenderer.VIEW_WIDTH);
                 page = PageRenderer.render(doc, images, scale);
             }
             catch(PageDocument.Invalid e)
@@ -226,7 +246,7 @@ public final class ComputerViews
             return;
         }
         snapshot.accept(s);
-        // 旁观者没有网络：不加载图片
-        render(s.html, s.url, new HashMap<>(), scale, done);
+        // 先不带图渲染；图由旁观者用自己的玩家临时地址另取（GuiBrowser.loadSpectatorImages）
+        render(s.html, s.mode, s.url, new HashMap<>(), scale, done);
     }
 }

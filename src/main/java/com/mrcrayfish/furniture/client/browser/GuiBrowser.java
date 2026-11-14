@@ -1,6 +1,7 @@
 package com.mrcrayfish.furniture.client.browser;
 
 import com.mrcrayfish.furniture.computer.PageSnapshot;
+import com.mrcrayfish.furniture.computer.TypingSync;
 import com.mrcrayfish.furniture.computer.UrlInput;
 import com.mrcrayfish.furniture.gui.ApplianceGui;
 import com.mrcrayfish.furniture.gui.containers.ContainerComputer;
@@ -8,6 +9,7 @@ import com.mrcrayfish.furniture.network.PacketHandler;
 import com.mrcrayfish.furniture.network.message.MessageComputerAction;
 import com.mrcrayfish.furniture.tileentity.TileEntityComputer;
 import moe.qingu.youran.api.network.tls.CertificateInfo;
+import moe.qingu.youran.api.network.ClientNic;
 import net.minecraft.client.gui.Gui;
 import net.minecraft.client.gui.ScaledResolution;
 import net.minecraft.client.gui.inventory.GuiContainer;
@@ -246,8 +248,12 @@ public class GuiBrowser extends GuiContainer
                 {
                     ComputerViews.renderSnapshot(v.page, deviceScale, s -> spectatorSnapshot = s, p ->
                     {
-                        if(req == spectatorRender)
-                            spectatorPage = p;
+                        if(req != spectatorRender)
+                            return;
+                        spectatorPage = p;
+                        // 先显示没有图的页面，再用自己的玩家临时地址取图（服主 11-14），取到了重画
+                        if(p != null && !p.document.images.isEmpty())
+                            loadSpectatorImages(req, p.document.images);
                     });
                 }
             }
@@ -257,6 +263,25 @@ public class GuiBrowser extends GuiContainer
         {
             viewVersion = -1;
         }
+    }
+
+    /** 旁观者用自己的玩家临时地址取页面里的图（服务器只放行这一页图片所在的主机），规则同操作者（{@link ImageFetcher}） */
+    private void loadSpectatorImages(int req, List<String> urls)
+    {
+        ClientNic.Session s = ClientNic.player();
+        PageSnapshot snap = spectatorSnapshot;
+        if(s == null || s.isClosed() || snap == null)
+            return;
+        ImageFetcher.fetch(s, urls, () -> req == spectatorRender && mc.currentScreen == this, got ->
+        {
+            if(got.isEmpty())
+                return;
+            ComputerViews.render(snap.html, snap.mode, snap.url, got, deviceScale, p ->
+            {
+                if(req == spectatorRender && p != null)
+                    spectatorPage = p;
+            });
+        });
     }
 
     // ---- 当前页面 ----
@@ -427,8 +452,11 @@ public class GuiBrowser extends GuiContainer
         }
         else
         {
-            String shown = fontRenderer.trimStringToWidth(url, addrW - 6);
-            fontRenderer.drawString(shown, addrX + 3, toolbarY + 3, TEXT_DIM);
+            // 旁观：操作者正在地址栏里打的字（服主 11-14），没有就显示当前页面的网址
+            TypingSync.Typed typed = ComputerViews.view(computer.getPos()).typed.get(TypingSync.ADDRESS);
+            boolean typing = typed != null && !typed.text.isEmpty() && !typed.text.equals(UrlInput.display(url));
+            String shown = fontRenderer.trimStringToWidth(typing ? typed.text : UrlInput.display(url), addrW - 6);
+            fontRenderer.drawString(shown, addrX + 3, toolbarY + 3, typing ? TEXT : TEXT_DIM);
         }
     }
 
@@ -496,6 +524,14 @@ public class GuiBrowser extends GuiContainer
             int cx = x + fontRenderer.getStringWidth(text.substring(t.viewStart, cursor));
             Gui.drawRect(cx, y - 1, cx + 1, y + 9, 0xFF000000);
         }
+    }
+
+    private static String dots(int n)
+    {
+        StringBuilder sb = new StringBuilder();
+        for(int i = 0; i < Math.min(n, TypingSync.MAX_LENGTH); i++)
+            sb.append('•');
+        return sb.toString();
     }
 
     private static String mask(String s)
@@ -608,6 +644,8 @@ public class GuiBrowser extends GuiContainer
     {
         Browser b = browser();
         FormState forms = b != null && b.current() != null ? b.current().forms : null;
+        // 旁观：操作者正在框里打的字（密码框只有长度）
+        Map<Integer, TypingSync.Typed> typed = b == null ? ComputerViews.view(computer.getPos()).typed : Collections.<Integer, TypingSync.Typed>emptyMap();
         PageDocument doc = p.document;
         for(PageDocument.Control c : doc.controls)
         {
@@ -630,8 +668,12 @@ public class GuiBrowser extends GuiContainer
                     if(focused)
                         Gui.drawRect(x1, y1, x2, y2, FIELD_FOCUS);
                     Gui.drawRect(x1 + 1, y1 + 1, x2 - 1, y2 - 1, c.disabled ? 0xFFEFEFEF : FIELD);
+                    TypingSync.Typed other = typed.get(c.n);
                     if(t != null)
                         drawTextEdit(t, x1 + 3, ty, x2 - x1 - 6, focused, c.kind == PageDocument.Kind.PASSWORD, TEXT);
+                    else if(other != null)
+                        fontRenderer.drawString(fontRenderer.trimStringToWidth(other.password || c.kind == PageDocument.Kind.PASSWORD
+                                ? dots(other.length) : other.text, x2 - x1 - 6), x1 + 3, ty, TEXT);
                     else if(c.kind != PageDocument.Kind.PASSWORD)
                         fontRenderer.drawString(fontRenderer.trimStringToWidth(c.value, x2 - x1 - 6), x1 + 3, ty, TEXT);
                     break;
@@ -690,7 +732,7 @@ public class GuiBrowser extends GuiContainer
             if(n >= 0 && doc.links.containsKey(n))
             {
                 String target = doc.links.get(n);
-                hoverText = target == null ? I18n.format("cfm.browser.link_unsupported") : target;
+                hoverText = target == null ? I18n.format("cfm.browser.link_unsupported") : UrlInput.display(target);
             }
         }
     }
@@ -735,6 +777,14 @@ public class GuiBrowser extends GuiContainer
         PageSnapshot.Connection c = connection();
         String url = currentUrl();
         out.add("§l" + I18n.format("cfm.browser.info.title"));
+        // 主机：国际化域名两种写法都写出来（显示用的 Unicode 与实际用的 A-label）
+        String host = UrlInput.hostOf(url);
+        if(host != null)
+        {
+            String unicode = UrlInput.unicodeHost(host);
+            out.add(unicode.equals(host) ? I18n.format("cfm.browser.info.host", host)
+                    : I18n.format("cfm.browser.info.host_idn", unicode, host));
+        }
         if(c == null)
         {
             out.add(I18n.format(url.startsWith("http://") ? "cfm.browser.info.insecure" : "cfm.browser.info.local"));
@@ -757,7 +807,7 @@ public class GuiBrowser extends GuiContainer
             out.add(I18n.format("cfm.browser.info.issuer", ci.issuer));
             out.add(I18n.format("cfm.browser.info.validity", f.format(ci.notBefore), f.format(ci.notAfter)));
             out.add(I18n.format("cfm.browser.info.sha256", ci.sha256));
-            out.add(I18n.format("cfm.browser.info.san", ci.subjectAltNames.isEmpty() ? "-" : String.join(", ", ci.subjectAltNames)));
+            out.add(I18n.format("cfm.browser.info.san", ci.subjectAltNames.isEmpty() ? "-" : String.join(", ", UrlInput.certificateNames(ci.subjectAltNames))));
         }
         out.add("");
         out.add("§7" + I18n.format("cfm.browser.info.root"));

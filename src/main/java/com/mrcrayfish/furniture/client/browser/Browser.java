@@ -1,14 +1,19 @@
 package com.mrcrayfish.furniture.client.browser;
 
 import com.mrcrayfish.furniture.client.MediaDecoding;
+import com.mrcrayfish.furniture.computer.BrowserHistory;
 import com.mrcrayfish.furniture.computer.FormEncoding;
 import com.mrcrayfish.furniture.computer.PageLimits;
+import com.mrcrayfish.furniture.computer.PageParser;
 import com.mrcrayfish.furniture.computer.PageSnapshot;
 import com.mrcrayfish.furniture.computer.PageUploads;
+import com.mrcrayfish.furniture.computer.TypingSync;
 import com.mrcrayfish.furniture.computer.UrlInput;
 import com.mrcrayfish.furniture.network.PacketHandler;
+import com.mrcrayfish.furniture.network.message.MessageComputerHistory;
 import com.mrcrayfish.furniture.network.message.MessageComputerPage;
 import com.mrcrayfish.furniture.network.message.MessageComputerScroll;
+import com.mrcrayfish.furniture.network.message.MessageComputerTyping;
 import moe.qingu.youran.api.network.ClientNic;
 import moe.qingu.youran.api.network.stack.HttpClient;
 import moe.qingu.youran.api.network.stack.NetworkException;
@@ -57,7 +62,10 @@ public final class Browser
     public static final class Entry
     {
         public final String url;
+        /** 页面原文；会话恢复出来、还没加载的条目为 null（点到时再加载） */
+        @Nullable
         public final byte[] html;
+        public final PageParser.Mode mode;
         @Nullable
         public final PageSnapshot.Connection connection;
         public final Map<String, byte[]> images;
@@ -65,10 +73,22 @@ public final class Browser
         public final FormState forms = new FormState();
         public int scroll;
 
-        Entry(String url, byte[] html, @Nullable PageSnapshot.Connection connection, Map<String, byte[]> images, boolean builtin)
+        /** 会话恢复出来的条目：只有网址 */
+        static Entry placeholder(String url)
+        {
+            return new Entry(url, null, PageParser.Mode.XHTML, null, Collections.<String, byte[]>emptyMap(), false);
+        }
+
+        public boolean isLoaded()
+        {
+            return html != null;
+        }
+
+        Entry(String url, @Nullable byte[] html, PageParser.Mode mode, @Nullable PageSnapshot.Connection connection, Map<String, byte[]> images, boolean builtin)
         {
             this.url = url;
             this.html = html;
+            this.mode = mode;
             this.connection = connection;
             this.images = images;
             this.builtin = builtin;
@@ -126,6 +146,19 @@ public final class Browser
     private int uploadId;
     private int lastSentScroll = -1;
     private long lastScrollSent;
+    /** 打字同步（只读本地的内容，不改它）：发件箱、对得上的那次上传（表单的框按它对上页面；没上传成功为 -1） */
+    private final TypingSync.Outbox typing = new TypingSync.Outbox();
+    private int typingUpload = -1;
+    /** 正在加载的会话恢复条目：加载完（或出错）换掉它，而不是新加一条 */
+    @Nullable
+    private Entry replacing;
+    /** 刚建好时自动开的主页（用户还没动过时可以被会话恢复换掉） */
+    @Nullable
+    private Entry initialHome;
+    /** 报给服务端的会话（变了才报，最多每 500 毫秒一次） */
+    @Nullable
+    private BrowserHistory reportedHistory;
+    private long historySentAt;
 
     Browser(BlockPos pos)
     {
@@ -174,12 +207,33 @@ public final class Browser
 
     // ---- 操作 ----
 
-    /** 刚建好、或重开界面：没有页面时开主页；有页面时重新渲染 */
+    /**
+     * 刚建好、或重开界面：服务端存着会话、而这边还没有这台电脑的状态（或者只有自动开的主页）时，按会话恢复并重新加载当前地址
+     * （服主 11-14）；没有页面时开主页；有页面时重新渲染。这边已经有状态时不按服务端的换（表单里填的东西不能被自动丢掉）。
+     */
     public void ensureStarted()
     {
-        if(current() == null)
+        ComputerViews.View v = ComputerViews.view(pos);
+        BrowserHistory saved = v.savedHistory;
+        if(saved != null)
+        {
+            v.savedHistory = null;
+            if(!saved.isEmpty() && (history.isEmpty() || isPristine()))
+            {
+                restore(saved);
+                return;
+            }
+        }
+        Entry cur = current();
+        if(cur == null)
         {
             showBuiltin(UrlInput.HOME, BuiltinPages.home(ComputerViews.TR), true);
+            initialHome = current();
+        }
+        else if(!cur.isLoaded())
+        {
+            if(status == Status.IDLE && waiting == null)
+                load(cur);
         }
         else if(rendered() == null && !renderPending)
         {
@@ -187,9 +241,38 @@ public final class Browser
         }
     }
 
+    /** 只有自动开的主页，用户什么都没动过 */
+    private boolean isPristine()
+    {
+        return history.size() == 1 && history.get(0) == initialHome && !addressEdited && address.getText().equals(UrlInput.HOME);
+    }
+
+    /** 按会话恢复：前进后退的条目只有网址，当前那条马上重新加载 */
+    void restore(BrowserHistory h)
+    {
+        history.clear();
+        for(String u : h.urls)
+            history.add(Entry.placeholder(u));
+        index = Math.max(0, Math.min(h.index, history.size() - 1));
+        initialHome = null;
+        reportedHistory = h;
+        Entry cur = current();
+        addressEdited = false;
+        address.setText(UrlInput.display(cur.url));
+        load(cur);
+    }
+
+    /** 加载会话恢复出来的条目（GET 它的网址，结果换掉它） */
+    private void load(Entry placeholder)
+    {
+        navigate(new Request(placeholder.url, "GET", null, null, -1), placeholder);
+    }
+
     /** 地址栏回车 */
     public void submitAddress()
     {
+        // 用户自己开新页面：不再替换正在加载的会话恢复条目
+        replacing = null;
         UrlInput.Result r = UrlInput.fromAddressBar(address.getText());
         if(!r.isOk())
         {
@@ -208,13 +291,14 @@ public final class Browser
     /** 点链接 */
     public void openLink(@Nullable String url)
     {
+        replacing = null;
         if(url == null)
         {
             showError("", BuiltinPages.Error.UNSUPPORTED_SCHEME, "", true);
             return;
         }
         addressEdited = false;
-        address.setText(url);
+        address.setText(UrlInput.display(url));
         navigate(new Request(url, "GET", null, null, -1));
     }
 
@@ -244,7 +328,7 @@ public final class Browser
         if(e == null)
             return;
         addressEdited = false;
-        address.setText(e.url);
+        address.setText(UrlInput.display(e.url));
         navigate(new Request(e.url, "GET", null, null, -1));
     }
 
@@ -265,15 +349,21 @@ public final class Browser
         if(!addressEdited || old != null)
         {
             addressEdited = false;
-            address.setText(current().url);
+            address.setText(UrlInput.display(current().url));
         }
         setStatus(Status.IDLE, "");
-        requestRender();
+        reportHistorySoon();
+        Entry now = current();
+        if(!now.isLoaded())
+            load(now);
+        else
+            requestRender();
     }
 
     /** 提交表单（{@code submitter} 是按下的按钮编号；回车提交时为第一个提交按钮或 -1） */
     public void submitForm(int form, int submitter)
     {
+        replacing = null;
         Entry e = current();
         RenderedPage page = rendered();
         if(e == null || page == null || form < 0 || form >= page.document.forms.size())
@@ -288,7 +378,7 @@ public final class Browser
         addressEdited = false;
         if(info.post)
         {
-            address.setText(info.action);
+            address.setText(UrlInput.display(info.action));
             navigate(new Request(info.action, "POST", encoded.getBytes(StandardCharsets.US_ASCII), e, form));
         }
         else
@@ -302,7 +392,7 @@ public final class Browser
                 showError(url, BuiltinPages.Error.URL_TOO_LONG, null, false);
                 return;
             }
-            address.setText(r.url);
+            address.setText(UrlInput.display(r.url));
             navigate(new Request(r.url, "GET", null, e, form));
         }
     }
@@ -319,8 +409,14 @@ public final class Browser
 
     private void navigate(Request req)
     {
+        navigate(req, null);
+    }
+
+    private void navigate(Request req, @Nullable Entry replace)
+    {
         generation++;
         waiting = null;
+        replacing = replace;
         if(req.url.equals(UrlInput.HOME))
         {
             showBuiltin(UrlInput.HOME, BuiltinPages.home(ComputerViews.TR), true);
@@ -337,9 +433,11 @@ public final class Browser
         fetch(s, req, 0, generation);
     }
 
-    /** 每帧调：等网络的请求，接上了就发，等太久就报错 */
+    /** 每帧调：等网络的请求，接上了就发，等太久就报错；把正在打的字同步给旁观者 */
     public void tick()
     {
+        syncTyping();
+        reportHistory();
         if(waiting != null)
         {
             ClientNic.Session s = ClientNic.current();
@@ -404,18 +502,20 @@ public final class Browser
             formAccepted(req);
             Request r = new Request(next, keep ? req.method : "GET", keep ? req.body : null, keep ? req.fromEntry : null, keep ? req.fromForm : -1);
             if(!addressEdited || req.fromEntry != null)
-                address.setText(next);
+                address.setText(UrlInput.display(next));
             fetch(s, r, redirects + 1, gen);
             return;
         }
         String type = resp.header("content-type");
         String t = type == null ? "" : type.toLowerCase(Locale.ROOT);
         byte[] html;
+        PageParser.Mode mode = PageParser.Mode.XHTML;
         Map<String, byte[]> images = new HashMap<>();
         List<String> imageUrls;
         if(t.startsWith("application/xhtml+xml") || t.startsWith("text/html") || t.startsWith("application/xml") || t.startsWith("text/xml") || t.isEmpty())
         {
             html = resp.body;
+            mode = PageParser.Mode.forContentType(type);
         }
         else if(t.startsWith("text/plain"))
         {
@@ -437,7 +537,7 @@ public final class Browser
             showError(req.url, BuiltinPages.Error.UNSUPPORTED_TYPE, type, false);
             return;
         }
-        PageLimits.Problem p = PageLimits.check(html);
+        PageLimits.Problem p = PageLimits.check(html, mode);
         if(p != null)
         {
             showError(req.url, problemError(p), null, false);
@@ -450,7 +550,7 @@ public final class Browser
         // 图片：先把页面列的图取回来（只走游戏内网络，大小、尺寸有上限），再渲染
         try
         {
-            imageUrls = PageDocument.parse(html, req.url, id -> null, PageRenderer.VIEW_WIDTH).images;
+            imageUrls = PageDocument.parse(html, mode, req.url, id -> null, PageRenderer.VIEW_WIDTH).images;
         }
         catch(PageDocument.Invalid e)
         {
@@ -458,43 +558,14 @@ public final class Browser
             return;
         }
         byte[] page = html;
+        PageParser.Mode pageMode = mode;
         if(imageUrls.isEmpty() || !images.isEmpty())
         {
-            loaded(req, page, conn, images);
+            loaded(req, page, pageMode, conn, images);
             return;
         }
         setStatus(Status.LOADING, ComputerViews.TR.t("cfm.browser.status.images", imageUrls.size()));
-        loadImages(s, imageUrls, 0, images, gen, () -> loaded(req, page, conn, images));
-    }
-
-    private void loadImages(ClientNic.Session s, List<String> urls, int i, Map<String, byte[]> out, int gen, Runnable done)
-    {
-        if(gen != generation)
-            return;
-        if(i >= urls.size() || s.isClosed())
-        {
-            done.run();
-            return;
-        }
-        HttpClient.Url u = HttpClient.Url.parse(urls.get(i));
-        if(u == null)
-        {
-            loadImages(s, urls, i + 1, out, gen, done);
-            return;
-        }
-        HttpClient.send(s.stack(), s.dns(), u, "GET", Collections.singletonMap("Accept", "image/png, image/gif, image/jpeg"), null, IMAGE_TIMEOUT_MS, null)
-                .whenComplete((resp, err) -> Minecraft.getMinecraft().addScheduledTask(() ->
-                {
-                    if(gen != generation)
-                        return;
-                    if(err == null && resp.status == 200 && resp.body.length <= MAX_IMAGE_BYTES)
-                    {
-                        byte[] png = checkedImage(resp.body);
-                        if(png != null)
-                            out.put(urls.get(i), png);
-                    }
-                    loadImages(s, urls, i + 1, out, gen, done);
-                }));
+        ImageFetcher.fetch(s, imageUrls, () -> gen == generation, got -> loaded(req, page, pageMode, conn, got));
     }
 
     /** 图片：先看文件头的尺寸，不超限才解码，再存成 PNG 交给内核；不合格返回 null */
@@ -522,11 +593,11 @@ public final class Browser
             req.fromEntry.forms.reset(rendered().document, req.fromForm);
     }
 
-    private void loaded(Request req, byte[] html, @Nullable PageSnapshot.Connection conn, Map<String, byte[]> images)
+    private void loaded(Request req, byte[] html, PageParser.Mode mode, @Nullable PageSnapshot.Connection conn, Map<String, byte[]> images)
     {
-        push(new Entry(req.url, html, conn, images, false));
+        push(new Entry(req.url, html, mode, conn, images, false));
         // 打开成功：地址栏换成实际的网址（失败时才保留敲的原样）
-        address.setText(req.url);
+        address.setText(UrlInput.display(req.url));
         addressEdited = false;
         setStatus(Status.IDLE, "");
     }
@@ -584,18 +655,18 @@ public final class Browser
     {
         generation++;
         waiting = null;
-        push(new Entry(url, BuiltinPages.error(ComputerViews.TR, e, url, detail), null, Collections.<String, byte[]>emptyMap(), true));
+        push(new Entry(url, BuiltinPages.error(ComputerViews.TR, e, url, detail), PageParser.Mode.XHTML, null, Collections.<String, byte[]>emptyMap(), true));
         if(!keepAddress && !addressEdited && !url.isEmpty())
-            address.setText(url);
+            address.setText(UrlInput.display(url));
         setStatus(Status.IDLE, "");
     }
 
     private void showBuiltin(String url, byte[] html, boolean setAddress)
     {
-        push(new Entry(url, html, null, Collections.<String, byte[]>emptyMap(), true));
+        push(new Entry(url, html, PageParser.Mode.XHTML, null, Collections.<String, byte[]>emptyMap(), true));
         if(setAddress)
         {
-            address.setText(url);
+            address.setText(UrlInput.display(url));
             addressEdited = false;
         }
         setStatus(Status.IDLE, "");
@@ -603,13 +674,52 @@ public final class Browser
 
     private void push(Entry e)
     {
+        Entry r = replacing;
+        replacing = null;
+        int at = r == null ? -1 : history.indexOf(r);
+        if(at >= 0)
+        {
+            // 会话恢复出来的条目加载好了（或出错了）：换掉它，前进后退的其他条目不动
+            history.set(at, e);
+            index = at;
+            reportHistorySoon();
+            requestRender();
+            return;
+        }
         while(history.size() > index + 1)
             history.remove(history.size() - 1);
         history.add(e);
         while(history.size() > MAX_HISTORY)
             history.remove(0);
         index = history.size() - 1;
+        reportHistorySoon();
         requestRender();
+    }
+
+    /** 会话变了：下次 tick 时报给服务端 */
+    private void reportHistorySoon()
+    {
+        historyDirty = true;
+    }
+
+    private boolean historyDirty;
+
+    /** 把会话（网址与前进后退，不含内容）报给服务端，变了才报，最多每 500 毫秒一次 */
+    private void reportHistory()
+    {
+        long now = System.currentTimeMillis();
+        if(!historyDirty || now - historySentAt < 500)
+            return;
+        historyDirty = false;
+        List<String> urls = new ArrayList<>();
+        for(Entry e : history)
+            urls.add(e.url);
+        BrowserHistory h = BrowserHistory.of(urls, index);
+        if(h.isEmpty() || h.equals(reportedHistory))
+            return;
+        reportedHistory = h;
+        historySentAt = now;
+        PacketHandler.INSTANCE.sendToServer(new MessageComputerHistory(pos, h));
     }
 
     private void setStatus(Status s, String text)
@@ -633,14 +743,14 @@ public final class Browser
     void requestRender()
     {
         Entry e = current();
-        if(e == null)
+        if(e == null || !e.isLoaded())
             return;
         int req = ++renderRequest;
         renderPending = true;
         if(status == Status.IDLE)
             setStatus(Status.RENDERING, ComputerViews.TR.t("cfm.browser.status.rendering"));
         double scale = lastScale;
-        ComputerViews.render(e.html, e.url, e.images, scale, page ->
+        ComputerViews.render(e.html, e.mode, e.url, e.images, scale, page ->
         {
             if(req != renderRequest)
                 return;
@@ -655,7 +765,7 @@ public final class Browser
                     int at = history.indexOf(e);
                     if(at >= 0)
                     {
-                        history.set(at, new Entry(e.url, BuiltinPages.error(ComputerViews.TR, BuiltinPages.Error.RENDER_FAILED, e.url, null), null,
+                        history.set(at, new Entry(e.url, BuiltinPages.error(ComputerViews.TR, BuiltinPages.Error.RENDER_FAILED, e.url, null), PageParser.Mode.XHTML, null,
                                 Collections.<String, byte[]>emptyMap(), true));
                         requestRender();
                         return;
@@ -693,10 +803,15 @@ public final class Browser
         if(uploadedEntry == e)
             return;
         uploadedEntry = e;
-        byte[] data = new PageSnapshot(e.url, e.html, e.connection).encode();
+        byte[] data = new PageSnapshot(e.url, e.html, e.mode, e.connection).encode();
+        // 换页面了：旁观者那边的打字记录会清空，从页面上的初始值重新比
+        typing.reset();
+        typingUpload = -1;
+        typing.baseline(TypingSync.outgoing(TypingSync.ADDRESS, false, UrlInput.display(e.url)));
         if(data.length > PageSnapshot.MAX_COMPRESSED)
             return;
         int id = ++uploadId;
+        typingUpload = id;
         int count = Math.max(1, (data.length + PageUploads.CHUNK - 1) / PageUploads.CHUNK);
         for(int i = 0; i < count; i++)
         {
@@ -707,6 +822,33 @@ public final class Browser
             PacketHandler.INSTANCE.sendToServer(new MessageComputerPage(pos, id, i, count, part));
         }
         lastSentScroll = 0;
+    }
+
+    /**
+     * 打字同步（服主 11-14）：地址栏和当前页面文本框里的内容变了就排队，每 250 毫秒最多发一条，每条最多 256 个字符；
+     * 密码框只发长度。只读本地的内容（关界面、断电等时本地内容照旧留着，见 {@link ComputerViews}）。
+     */
+    private void syncTyping()
+    {
+        typing.offer(TypingSync.outgoing(TypingSync.ADDRESS, false, address.getText()));
+        Entry e = current();
+        RenderedPage page = rendered();
+        if(e != null && page != null && e == uploadedEntry && typingUpload >= 0)
+        {
+            for(PageDocument.Control c : page.document.controls)
+            {
+                if(!c.isTextual())
+                    continue;
+                boolean pw = c.kind == PageDocument.Kind.PASSWORD;
+                typing.baseline(TypingSync.outgoing(c.n, pw, c.value));
+                TextEdit t = e.forms.text(c.n);
+                if(t != null)
+                    typing.offer(TypingSync.outgoing(c.n, pw, t.getText()));
+            }
+        }
+        TypingSync.Typed t = typing.poll(System.currentTimeMillis());
+        if(t != null)
+            PacketHandler.INSTANCE.sendToServer(new MessageComputerTyping(pos, typingUpload, t));
     }
 
     /** 滚动位置（最多每 250 毫秒报一次） */

@@ -95,4 +95,33 @@ class UrlInputTest
         assertNull(UrlInput.resolve(UrlInput.HOME, "relative"));
         assertEquals("https://minebay.yr/", UrlInput.resolve(UrlInput.HOME, "https://minebay.yr/"));
     }
+
+    @Test
+    void internationalizedDomainNames()
+    {
+        // 地址栏能输入 Unicode 域名，请求用 A-label；显示时转回 Unicode
+        assertEquals("http://xn--0zwm56d.yr/", UrlInput.fromAddressBar("测试.yr").url);
+        assertEquals("https://xn--0zwm56d.yr/a?b=1", UrlInput.fromAddressBar("https://测试.yr/a?b=1").url);
+        assertEquals("https://测试.yr/a?b=1", UrlInput.display("https://xn--0zwm56d.yr/a?b=1"));
+        assertEquals("http://商店.悠然.yr:8080/", UrlInput.display(UrlInput.fromAddressBar("商店.悠然.yr:8080").url));
+        // 混用文字系统（拉丁混西里尔）：显示 xn-- 形式
+        String spoof = UrlInput.fromAddressBar("http://p\u0430ypal.yr/").url;
+        assertTrue(spoof.startsWith("http://xn--"), spoof);
+        assertEquals(spoof, UrlInput.display(spoof));
+        // 页面里的链接写成 Unicode 域名也转
+        assertEquals("http://xn--0zwm56d.yr/x", UrlInput.resolve("http://test.yr/", "http://测试.yr/x"));
+        // 转不了的名字：格式不对
+        assertEquals(UrlInput.Error.MALFORMED, UrlInput.fromAddressBar("http://a_b.yr/").error);
+        assertEquals("http://[fd00::1]/", UrlInput.display("http://[fd00::1]/"));
+        assertEquals("about:home", UrlInput.display("about:home"));
+    }
+
+    @Test
+    void certificateNamesShowBothForms()
+    {
+        assertEquals(java.util.Arrays.asList("DNS:xn--0zwm56d.yr（测试.yr）", "DNS:test.yr"),
+                UrlInput.certificateNames(java.util.Arrays.asList("DNS:xn--0zwm56d.yr", "DNS:test.yr")));
+        assertEquals("测试.yr", UrlInput.unicodeHost("xn--0zwm56d.yr"));
+        assertEquals("[fd00::1]", UrlInput.unicodeHost("[fd00::1]"));
+    }
 }

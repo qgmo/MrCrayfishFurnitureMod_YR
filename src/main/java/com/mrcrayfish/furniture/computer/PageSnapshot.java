@@ -19,7 +19,7 @@ import java.util.zip.Deflater;
 import java.util.zip.Inflater;
 
 /**
- * 操作者当前看的页面（给旁观者看）：网址、XHTML、是不是 https 与连接信息。操作者的客户端上传给服务端，
+ * 操作者当前看的页面（给旁观者看）：网址、页面原文与解析方式、是不是 https 与连接信息。操作者的客户端上传给服务端，
  * 服务端存在电脑方块实体里（只在内存）并转给旁观者，旁观者本地自己渲染。
  * <p>
  * 编码：DataOutput 写字段，再整体 deflate。解码时先限制解压后的大小（防压缩炸弹），再逐个字段检查长度。
@@ -35,10 +35,12 @@ public final class PageSnapshot
     public static final int MAX_RAW = PageLimits.MAX_BYTES + 48 * 1024;
     /** 压缩后最多这么多字节（上传、同步时先看它） */
     public static final int MAX_COMPRESSED = MAX_RAW + 1024;
-    static final int VERSION = 1;
+    static final int VERSION = 2;
 
     public final String url;
     public final byte[] html;
+    /** 按 HTML 还是 XHTML 解析（操作者按响应的 Content-Type 定；服务端、旁观者照这个解析，数出来的元素与层数才一样） */
+    public final PageParser.Mode mode;
     @Nullable
     public final Connection connection;
 
@@ -68,8 +70,14 @@ public final class PageSnapshot
 
     public PageSnapshot(String url, byte[] html, @Nullable Connection connection)
     {
+        this(url, html, PageParser.Mode.XHTML, connection);
+    }
+
+    public PageSnapshot(String url, byte[] html, PageParser.Mode mode, @Nullable Connection connection)
+    {
         this.url = url;
         this.html = html;
+        this.mode = mode;
         this.connection = connection;
     }
 
@@ -88,6 +96,7 @@ public final class PageSnapshot
             writeText(out, url);
             out.writeInt(html.length);
             out.write(html);
+            out.writeByte(mode.ordinal());
             out.writeBoolean(connection != null);
             if(connection != null)
             {
@@ -150,6 +159,10 @@ public final class PageSnapshot
             throw new IOException("页面太大");
         byte[] html = new byte[len];
         in.readFully(html);
+        int modeIndex = in.readUnsignedByte();
+        if(modeIndex >= PageParser.Mode.values().length)
+            throw new IOException("解析方式不对");
+        PageParser.Mode mode = PageParser.Mode.values()[modeIndex];
         Connection conn = null;
         if(in.readBoolean())
         {
@@ -180,7 +193,7 @@ public final class PageSnapshot
         }
         if(in.available() > 0)
             throw new IOException("多出来的数据");
-        return new PageSnapshot(url, html, conn);
+        return new PageSnapshot(url, html, mode, conn);
     }
 
     static byte[] inflate(byte[] compressed, int max) throws IOException

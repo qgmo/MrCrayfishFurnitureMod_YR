@@ -1,4 +1,6 @@
-YR Sans SC（YRSansSC-Regular.ttf、YRSansSC-Bold.ttf）是 Noto Sans SC（Google Fonts 的 NotoSansSC[wght].ttf，版本 2.004）
-的修改版：取字重 400、700 两个实例，只留 GB2312 全部字符、ASCII、拉丁-1 补充和常用标点符号，并按 SIL Open Font License 1.1
-的要求改了字体名（不使用保留名 "Source"）。原字体 Copyright 2014-2021 Adobe (http://www.adobe.com/)，许可证见同目录的 OFL.txt。
+YR Sans（YRSans-Regular.ttf、YRSans-Bold.ttf）是 Noto Sans SC 与 Noto Sans TC（Google Fonts 的 NotoSansSC[wght].ttf、
+NotoSansTC[wght].ttf，版本都是 2.004）的修改版：各取字重 400、700 两个实例；简体部分只留 GB2312 全部字符、ASCII、拉丁-1 补充
+和常用标点符号（取自 Noto Sans SC），繁体部分只留 Big5 常用字（一级字）与 Big5 符号里 GB2312 没有的字符（取自 Noto Sans TC），
+去掉提示信息后合并成一个字体，并按 SIL Open Font License 1.1 的要求改了字体名（不使用保留名 "Source"）。做法见仓库的
+tools/make-browser-font.py。原字体 Copyright 2014-2021 Adobe (http://www.adobe.com/)，许可证见同目录的 OFL.txt。
 家具模组浏览器的网页字体，只随模组发布、不单独出售。

@@ -1,21 +1,14 @@
 package com.mrcrayfish.furniture.client.browser;
 
 import com.mrcrayfish.furniture.computer.PageLimits;
+import com.mrcrayfish.furniture.computer.PageParser;
 import com.mrcrayfish.furniture.computer.UrlInput;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
-import org.xml.sax.InputSource;
-import org.xml.sax.SAXException;
 
 import javax.annotation.Nullable;
-import javax.xml.XMLConstants;
-import javax.xml.parsers.DocumentBuilder;
-import javax.xml.parsers.DocumentBuilderFactory;
-import java.io.ByteArrayInputStream;
-import java.io.StringReader;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -25,12 +18,11 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 浏览器拿到的一页（纯 Java，不碰 Minecraft）：先按 {@link PageLimits} 检查大小与结构，再安全地解析成 DOM
- * （不加载 DTD、外部实体），然后整理：
+ * 浏览器拿到的一页（纯 Java，不碰 Minecraft；两端都用：服务端用它从旁观同步的页面里找出图片所在的主机、密码框）：
+ * 先用 jsoup 宽松解析（{@link PageParser}，不加载 DTD、外部实体），按 {@link PageLimits} 检查大小与结构，再转成 W3C DOM 整理：
  * <ul>
  * <li>去掉脚本、外部样式表、框架等（没有 JavaScript，也不加载外部资源）；</li>
  * <li>{@code <input type="submit">} 等改写成 {@code <button>}，好让内核按文字排版；</li>
@@ -39,7 +31,8 @@ import java.util.regex.Pattern;
  * <li>{@code data-yr-lang="翻译键"} 的元素（里面只有文字时）换成玩家语言里的这句（附魔名、药水效果名等；键只能是字母数字与 {@code ._-}，翻不了时保留原文）；</li>
  * <li>注入默认样式（字体、表单控件大小、页面宽度）。</li>
  * </ul>
- * 只认 XHTML（XML 语法）；常见的 HTML 命名实体（{@code &nbsp;} 等）先换成数字引用。
+ * HTML 的松散写法（不闭合的标签等）和 XHTML 都认；HTML 命名实体按 HTML 规则解码。
+ * 图片只收和页面同一主机的（{@link UrlInput#sameHost}），每页最多 {@value #MAX_IMAGES} 张。
  */
 public final class PageDocument
 {
@@ -154,96 +147,54 @@ public final class PageDocument
     }
 
     /**
+     * 按 XHTML 解析（浏览器内置页、{@code application/xhtml+xml}），见 {@link #parse(byte[], PageParser.Mode, String, Function, int)}
+     */
+    public static PageDocument parse(byte[] page, String baseUrl, Function<String, String> itemName, int viewWidth) throws Invalid
+    {
+        return parse(page, PageParser.Mode.XHTML, baseUrl, itemName, viewWidth);
+    }
+
+    /** 按 XHTML 解析，带翻译（{@code data-yr-lang}） */
+    public static PageDocument parse(byte[] page, String baseUrl, Function<String, String> itemName, Function<String, String> lang, int viewWidth) throws Invalid
+    {
+        return parse(page, PageParser.Mode.XHTML, baseUrl, itemName, lang, viewWidth);
+    }
+
+    /**
+     * 先用 jsoup 宽松解析并按 {@link PageLimits} 检查（{@link PageParser}），再转成 W3C DOM 整理。
+     *
+     * @param mode     按 HTML 还是 XHTML 解析（由 Content-Type 定）
      * @param itemName 物品写法 → 本地化名字（不认识返回 null）
      * @param viewWidth 页面宽度（CSS 像素）
      */
-    public static PageDocument parse(byte[] xhtml, String baseUrl, Function<String, String> itemName, int viewWidth) throws Invalid
+    public static PageDocument parse(byte[] page, PageParser.Mode mode, String baseUrl, Function<String, String> itemName, int viewWidth) throws Invalid
     {
-        return parse(xhtml, baseUrl, itemName, key -> null, viewWidth);
+        return parse(page, mode, baseUrl, itemName, key -> null, viewWidth);
     }
 
     /** @param lang 翻译键 → 玩家语言里的文字（没有返回 null） */
-    public static PageDocument parse(byte[] xhtml, String baseUrl, Function<String, String> itemName, Function<String, String> lang, int viewWidth) throws Invalid
+    public static PageDocument parse(byte[] page, PageParser.Mode mode, String baseUrl, Function<String, String> itemName, Function<String, String> lang, int viewWidth) throws Invalid
     {
-        PageLimits.Problem p = PageLimits.check(xhtml);
-        if(p != null)
-            throw new Invalid(p, p.name());
-        Document dom = parseXml(replaceNamedEntities(new String(xhtml, StandardCharsets.UTF_8)));
+        Document dom;
+        try
+        {
+            dom = PageParser.toW3c(PageParser.parse(page, mode));
+        }
+        catch(PageParser.Rejected r)
+        {
+            throw new Invalid(r.problem, r.problem.name());
+        }
+        catch(RuntimeException | StackOverflowError e)
+        {
+            throw new Invalid(PageLimits.Problem.MALFORMED, e.toString());
+        }
         Element root = dom.getDocumentElement();
         if(root == null || !local(root).equals("html"))
             throw new Invalid(PageLimits.Problem.MALFORMED, "根元素不是 html");
         return new Builder(dom, baseUrl, itemName, lang, viewWidth).build();
     }
 
-    static Document parseXml(String text) throws Invalid
-    {
-        try
-        {
-            DocumentBuilderFactory f = DocumentBuilderFactory.newInstance();
-            f.setNamespaceAware(true);
-            f.setValidating(false);
-            f.setExpandEntityReferences(false);
-            f.setXIncludeAware(false);
-            f.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
-            trySet(f, "http://xml.org/sax/features/external-general-entities", false);
-            trySet(f, "http://xml.org/sax/features/external-parameter-entities", false);
-            trySet(f, "http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
-            DocumentBuilder b = f.newDocumentBuilder();
-            b.setEntityResolver((publicId, systemId) -> new InputSource(new StringReader("")));
-            b.setErrorHandler(null);
-            return b.parse(new InputSource(new StringReader(text)));
-        }
-        catch(SAXException e)
-        {
-            throw new Invalid(PageLimits.Problem.MALFORMED, "不是合法的 XHTML：" + e.getMessage());
-        }
-        catch(Exception e)
-        {
-            throw new Invalid(PageLimits.Problem.MALFORMED, e.toString());
-        }
-    }
-
-    private static void trySet(DocumentBuilderFactory f, String feature, boolean v)
-    {
-        try
-        {
-            f.setFeature(feature, v);
-        }
-        catch(Exception ignored)
-        {
-            // 不是 Xerces 时没有这个开关
-        }
-    }
-
     static final Pattern LANG_KEY = Pattern.compile("[A-Za-z0-9._-]{1,128}");
-    private static final Map<String, Integer> ENTITIES = new HashMap<>();
-    private static final Pattern ENTITY = Pattern.compile("&([a-zA-Z][a-zA-Z0-9]{1,8});");
-
-    static
-    {
-        String[] names = {"nbsp", "160", "copy", "169", "reg", "174", "trade", "8482", "mdash", "8212", "ndash", "8211", "hellip", "8230",
-                "laquo", "171", "raquo", "187", "middot", "183", "times", "215", "divide", "247", "yen", "165", "euro", "8364",
-                "lsquo", "8216", "rsquo", "8217", "ldquo", "8220", "rdquo", "8221", "bull", "8226", "deg", "176", "plusmn", "177",
-                "larr", "8592", "rarr", "8594", "uarr", "8593", "darr", "8595", "sect", "167", "para", "182", "ensp", "8194", "emsp", "8195"};
-        for(int i = 0; i < names.length; i += 2)
-            ENTITIES.put(names[i], Integer.parseInt(names[i + 1]));
-    }
-
-    /** 常见的 HTML 命名实体换成数字引用（XML 只认 5 个预定义的） */
-    static String replaceNamedEntities(String s)
-    {
-        if(s.indexOf('&') < 0)
-            return s;
-        Matcher m = ENTITY.matcher(s);
-        StringBuffer sb = new StringBuffer();
-        while(m.find())
-        {
-            Integer cp = ENTITIES.get(m.group(1));
-            m.appendReplacement(sb, cp == null ? Matcher.quoteReplacement(m.group()) : "&#" + cp + ";");
-        }
-        m.appendTail(sb);
-        return sb.toString();
-    }
 
     static String local(Node n)
     {
@@ -254,7 +205,7 @@ public final class PageDocument
     /** 注入的默认样式（网站的样式写在后面，能覆盖） */
     static String userAgentCss()
     {
-        return "html { font-family: 'YR Sans SC', sans-serif; font-size: 14px; background: #fff; color: #000; }\n"
+        return "html { font-family: 'YR Sans', sans-serif; font-size: 14px; background: #fff; color: #000; }\n"
                 + "body { margin: 8px; }\n"
                 + "a { color: #0645ad; text-decoration: underline; }\n"
                 + "input, textarea, select { display: inline-block; width: 160px; height: 18px; padding: 2px 3px; border: 1px solid #767676; background: #fff; vertical-align: middle; }\n"
@@ -394,7 +345,7 @@ public final class PageDocument
                 case "img":
                 {
                     String src = UrlInput.resolve(baseUrl, e.getAttribute("src"));
-                    if(src != null && !src.equals(UrlInput.HOME) && images.size() < MAX_IMAGES)
+                    if(src != null && !src.equals(UrlInput.HOME) && UrlInput.sameHost(baseUrl, src) && images.size() < MAX_IMAGES)
                         images.add(src);
                     break;
                 }

@@ -95,8 +95,65 @@ class PageDocumentTest
         sb.append("</body></html>");
         PageDocument.Invalid e = assertThrows(PageDocument.Invalid.class, () -> parse(sb.toString()));
         assertEquals(PageLimits.Problem.TOO_MANY_ELEMENTS, e.problem);
-        assertEquals(PageLimits.Problem.MALFORMED, assertThrows(PageDocument.Invalid.class, () -> parse("<html><p>没关上</html>")).problem);
-        assertEquals(PageLimits.Problem.MALFORMED, assertThrows(PageDocument.Invalid.class, () -> parse("<svg/>")).problem);
+        // 第二轮（服主 11-14）起宽松解析：没关上的标签、根元素不是 html 的也能显示（以前是“页面格式不对”）
+        assertEquals("没关上", assertDoesNotThrow(() -> parse("<html><p>没关上</html>")).dom.getElementsByTagNameNS("*", "p").item(0).getTextContent());
+        assertEquals("html", PageDocument.local(assertDoesNotThrow(() -> parse("<svg/>")).dom.getDocumentElement()));
+        // 空页面仍然是“页面格式不对”
+        assertEquals(PageLimits.Problem.MALFORMED, assertThrows(PageDocument.Invalid.class, () -> parse("  ")).problem);
+    }
+
+    static PageDocument parseHtml(String s) throws PageDocument.Invalid
+    {
+        return PageDocument.parse(s.getBytes(StandardCharsets.UTF_8), com.mrcrayfish.furniture.computer.PageParser.Mode.HTML, "http://test.yr/",
+                id -> null, 600);
+    }
+
+    @Test
+    void sloppyHtmlIsShown() throws Exception
+    {
+        // 不闭合的段落、列表、表格，大写标签，没加引号的属性，没有 html/head/body
+        PageDocument d = parseHtml("<TITLE>乱写</TITLE><P>第一段<P>第二段<ul><li>一<li>二</ul><table><tr><td>格<td>子</table>"
+                + "<a href=/next>下一页</a><img src=pic.png><form action=/s><input name=q value=搜><input type=password name=pw></form>&copy; &nbsp;x");
+        assertEquals("乱写", d.title);
+        assertEquals(com.mrcrayfish.furniture.computer.PageParser.XHTML_NS, d.dom.getDocumentElement().getNamespaceURI(), "元素在 XHTML 命名空间里");
+        assertEquals(2, d.dom.getElementsByTagNameNS("*", "p").getLength());
+        assertEquals(2, d.dom.getElementsByTagNameNS("*", "li").getLength());
+        assertEquals(2, d.dom.getElementsByTagNameNS("*", "td").getLength());
+        assertTrue(d.links.containsValue("http://test.yr/next"));
+        assertEquals(Collections.singletonList("http://test.yr/pic.png"), d.images);
+        assertEquals("http://test.yr/s", d.forms.get(0).action);
+        assertEquals(2, d.controls.size());
+        assertEquals(PageDocument.Kind.PASSWORD, d.controls.get(1).kind);
+        assertTrue(d.dom.getDocumentElement().getTextContent().contains("\u00a9 \u00a0x"), "命名实体解码");
+        RenderedPage p = PageRenderer.render(d, new HashMap<>(), 1.0);
+        assertTrue(p.height > 50, "画出来了");
+        // 脚本照样去掉
+        assertEquals(0, parseHtml("<p>a<script>alert(1)</script><iframe src=x></iframe>").dom.getElementsByTagNameNS("*", "script").getLength());
+    }
+
+    @Test
+    void limitsAreCheckedAfterLenientParsing()
+    {
+        StringBuilder deep = new StringBuilder();
+        for(int i = 0; i < 70; i++)
+            deep.append("<div>");
+        assertEquals(PageLimits.Problem.TOO_DEEP, assertThrows(PageDocument.Invalid.class, () -> parseHtml(deep.toString())).problem, "没关上的 div 也一层层算");
+        StringBuilder many = new StringBuilder();
+        for(int i = 0; i < 2100; i++)
+            many.append("<p>x");
+        assertEquals(PageLimits.Problem.TOO_MANY_ELEMENTS, assertThrows(PageDocument.Invalid.class, () -> parseHtml(many.toString())).problem);
+        StringBuilder big = new StringBuilder();
+        while(big.length() <= PageLimits.MAX_BYTES)
+            big.append("<b>xxxxxxxx</b>");
+        assertEquals(PageLimits.Problem.TOO_LARGE, assertThrows(PageDocument.Invalid.class, () -> parseHtml(big.toString())).problem);
+    }
+
+    @Test
+    void imagesOnlyFromSameHost() throws Exception
+    {
+        PageDocument d = parseHtml("<img src=/a.png><img src=http://test.yr:8080/b.png><img src=https://test.yr/c.png><img src=http://other.yr/d.png>"
+                + "<img src=http://[fd00::1]/e.png>");
+        assertEquals(java.util.Arrays.asList("http://test.yr/a.png", "http://test.yr:8080/b.png", "https://test.yr/c.png"), d.images);
     }
 
     @Test
@@ -107,7 +164,9 @@ class PageDocumentTest
         try
         {
             PageDocument d = parse(xxe);
-            assertEquals("", d.dom.getElementsByTagNameNS("*", "p").item(0).getTextContent().trim());
+            // jsoup 不读 DTD：实体引用原样当文字（第一轮的 XML 解析器是去掉它）
+            String text = d.dom.getElementsByTagNameNS("*", "p").item(0).getTextContent().trim();
+            assertTrue(text.isEmpty() || text.equals("&x;"), text);
         }
         catch(PageDocument.Invalid ok)
         {
@@ -116,9 +175,11 @@ class PageDocumentTest
     }
 
     @Test
-    void namedEntities()
+    void namedEntities() throws Exception
     {
-        assertEquals("a&#160;b &#169; &unknown; &amp;", PageDocument.replaceNamedEntities("a&nbsp;b &copy; &unknown; &amp;"));
+        // jsoup 按 HTML 规则解码命名实体；不认识的原样留着
+        PageDocument d = parse("<html><body><p>a&nbsp;b &copy; &unknown; &amp;</p></body></html>");
+        assertEquals("a\u00a0b \u00a9 &unknown; &", d.dom.getElementsByTagNameNS("*", "p").item(0).getTextContent());
     }
 
     @Test
@@ -224,6 +285,71 @@ class PageDocumentTest
         assertEquals(0xFF0000, p.image.getRGB(10, 10) & 0xFFFFFF, "图画出来了");
         RenderedPage none = PageRenderer.render(d, new HashMap<>(), 1.0);
         assertNotEquals(0xFF0000, none.image.getRGB(10, 10) & 0xFFFFFF, "没取到的图不画");
+    }
+
+    @Test
+    void bundledFontCoversGb2312AndBig5CommonCharacters() throws Exception
+    {
+        java.awt.Font f;
+        try(java.io.InputStream in = PageRenderer.class.getResourceAsStream("/assets/cfm/fonts/YRSans-Regular.ttf"))
+        {
+            f = java.awt.Font.createFont(java.awt.Font.TRUETYPE_FONT, in);
+        }
+        assertEquals(PageRenderer.FONT_FAMILY, f.getFamily(java.util.Locale.ROOT));
+        int missingGb = 0, missingBig5 = 0;
+        for(int hi = 0xA1; hi < 0xF8; hi++)
+        {
+            for(int lo = 0xA1; lo < 0xFF; lo++)
+            {
+                String c = decode(new byte[]{(byte) hi, (byte) lo}, "GB2312");
+                if(c != null && !f.canDisplay(c.codePointAt(0)))
+                    missingGb++;
+            }
+        }
+        // Big5 一级字（常用字）
+        for(int code = 0xA440; code <= 0xC67E; code++)
+        {
+            int lo = code & 0xFF;
+            if(!(lo >= 0x40 && lo <= 0x7E || lo >= 0xA1 && lo <= 0xFE))
+                continue;
+            String c = decode(new byte[]{(byte) (code >> 8), (byte) lo}, "Big5");
+            if(c != null && !f.canDisplay(c.codePointAt(0)))
+                missingBig5++;
+        }
+        assertEquals(0, missingGb);
+        assertEquals(0, missingBig5);
+        assertEquals(-1, f.canDisplayUpTo("繁體中文：這個網頁說明們與體驗 臺灣"), "常用繁体字");
+    }
+
+    static String decode(byte[] b, String charset)
+    {
+        String s = new String(b, java.nio.charset.Charset.forName(charset));
+        return s.length() == 1 && s.charAt(0) != '\uFFFD' ? s : null;
+    }
+
+    @Test
+    void missingGlyphsFallBackToSystemFonts() throws Exception
+    {
+        PageRenderer.init();
+        // 字体清单：页面写的 → 自带的 → 系统的逻辑字体 Dialog（按系统的回退链找能显示的）
+        com.openhtmltopdf.layout.SharedContext ctx = new com.openhtmltopdf.layout.SharedContext();
+        PageRenderer.FallbackFontResolver r = new PageRenderer.FallbackFontResolver(ctx);
+        r.setFontMapping("Serif", new java.awt.Font("Serif", java.awt.Font.PLAIN, 1));
+        com.openhtmltopdf.java2d.Java2DFont f = (com.openhtmltopdf.java2d.Java2DFont) r.resolveFont(ctx, new String[]{"Arial"}, 14f,
+                com.openhtmltopdf.css.constants.IdentValue.FONT_WEIGHT_700, com.openhtmltopdf.css.constants.IdentValue.NORMAL, null);
+        java.awt.Font last = f.getAWTFonts().get(f.getAWTFonts().size() - 1);
+        assertEquals(java.awt.Font.DIALOG, last.getName());
+        assertTrue(last.isBold());
+        assertEquals(14f, last.getSize2D());
+        // 整页渲染：繁体字、自带字体里没有的字（谚文、生僻字）都不出错
+        PageDocument d = parse("<html><body><p style=\"font-size:40px\">繁體網頁</p><p>한국어 𠀀 ㄅㄆㄇ</p></body></html>");
+        RenderedPage p = PageRenderer.render(d, new HashMap<>(), 1.0);
+        int dark = 0;
+        for(int y = 0; y < 60; y++)
+            for(int x = 0; x < 200; x++)
+                if((p.image.getRGB(x, y) & 0xFF) < 100)
+                    dark++;
+        assertTrue(dark > 300, "繁体字画出来了：" + dark);
     }
 
     @Test

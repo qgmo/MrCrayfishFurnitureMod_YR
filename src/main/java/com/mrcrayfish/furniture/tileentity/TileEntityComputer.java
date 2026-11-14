@@ -1,8 +1,12 @@
 package com.mrcrayfish.furniture.tileentity;
 
 import com.mrcrayfish.furniture.compat.RegionUse;
+import com.mrcrayfish.furniture.computer.BrowserHistory;
 import com.mrcrayfish.furniture.computer.ComputerNetwork;
 import com.mrcrayfish.furniture.computer.ComputerSync;
+import com.mrcrayfish.furniture.computer.PageFacts;
+import com.mrcrayfish.furniture.computer.TypingSync;
+import com.mrcrayfish.furniture.client.browser.PageDocument;
 import com.mrcrayfish.furniture.gui.containers.ContainerComputer;
 import com.mrcrayfish.furniture.power.ApplianceEnergy;
 import com.mrcrayfish.furniture.power.ApplianceFaces;
@@ -27,7 +31,10 @@ import net.minecraftforge.energy.CapabilityEnergy;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -46,6 +53,8 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
     private final ApplianceEnergy energy = new ApplianceEnergy(this, AppliancePower.COMPUTER, ApplianceFaces.bottom(), () -> TileEntityUtil.markBlockForUpdate(world, pos));
 
     private boolean switchedOn;
+    /** 会话：当前地址与前进后退历史（进存档，不存网页内容；服主 11-14） */
+    private BrowserHistory history = BrowserHistory.EMPTY;
 
     // ---- 只在内存（服务端），操作者同步给客户端 ----
     @Nullable
@@ -56,8 +65,15 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
     /** 当前页面（压缩的 {@code PageSnapshot}）；没有为 null */
     @Nullable
     private byte[] page;
+    /** 服务端自己从当前页面解析出来的（图片所在的主机等），不信客户端报的 */
+    private PageFacts pageFacts = PageFacts.NONE;
+    /** 当前页面是操作者的第几次上传（打字同步按它对上页面） */
+    private int pageId = -1;
+    /** 操作者正在打的字（每个框最新的一条；换页面清空），给新来的旁观者补发 */
+    private final Map<Integer, TypingSync.Typed> typed = new LinkedHashMap<>();
     private int scroll;
     private int retryTicks;
+    private int ticks;
 
     public TileEntityComputer()
     {
@@ -105,6 +121,45 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         return scroll;
     }
 
+    public PageFacts getPageFacts()
+    {
+        return pageFacts;
+    }
+
+    public int getPageId()
+    {
+        return pageId;
+    }
+
+    public BrowserHistory getHistory()
+    {
+        return history;
+    }
+
+    /** 操作者报来的会话（已经检查过） */
+    public void setHistory(BrowserHistory h)
+    {
+        if(!h.equals(history))
+        {
+            this.history = h;
+            this.markDirty();
+        }
+    }
+
+    public Collection<TypingSync.Typed> getTyped()
+    {
+        return typed.values();
+    }
+
+    /** 操作者打的字（已经检查过）：记下、转给旁观者 */
+    public void setTyped(TypingSync.Typed t)
+    {
+        if(!typed.containsKey(t.field) && typed.size() >= PageDocument.MAX_CONTROLS + 1)
+            return;
+        typed.put(t.field, t);
+        ComputerSync.broadcastTyping(this, t);
+    }
+
     /** 当前操作者（服务端；不在线、没开着界面时为 null） */
     @Nullable
     public EntityPlayerMP getOperatorPlayer()
@@ -150,6 +205,8 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         {
             setOperator(null);
         }
+        if(world != null && !world.isRemote)
+            ComputerSync.ungrant(player.getUniqueID(), this);
     }
 
     /** 接管（没人操作时） */
@@ -158,6 +215,7 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         if(getOperatorPlayer() != null || !RegionUse.canUse(world, player, pos))
             return false;
         setOperator(player);
+        ComputerSync.sendHistory(player, this);
         return true;
     }
 
@@ -168,15 +226,18 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         if(!switchedOn)
         {
             // 关机清屏
-            setPage(null);
+            setPage(null, PageFacts.NONE, -1);
         }
         this.markDirty();
         TileEntityUtil.markBlockForUpdate(world, pos);
     }
 
-    public void setPage(@Nullable byte[] compressed)
+    public void setPage(@Nullable byte[] compressed, PageFacts facts, int id)
     {
         this.page = compressed;
+        this.pageFacts = compressed == null ? PageFacts.NONE : facts;
+        this.pageId = compressed == null ? -1 : id;
+        this.typed.clear();
         this.scroll = 0;
         ComputerSync.broadcastPage(this);
     }
@@ -194,6 +255,8 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
             return;
         this.operator = id;
         this.operatorName = player == null ? "" : player.getName();
+        if(id != null)
+            ComputerSync.ungrant(id, this);
         if(device != null && !device.isRemoved() && player == null && device.attachedPlayer() != null)
         {
             device.detach();
@@ -214,6 +277,9 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         }
         dropLegacySlot();
         updateDevice(running);
+        // 旁观者的放行：每秒查一次谁不看了，每分钟给还在看的续期
+        if(++ticks % 20 == 0)
+            ComputerSync.refreshSpectators(this, ticks % 1200 == 0);
     }
 
     /** 设备表：登记（网络开服后才有，失败时每秒再试）、通电、网卡接到操作者 */
@@ -275,6 +341,7 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         {
             ComputerNetwork.unregister(device);
             device = null;
+            ComputerSync.ungrantAll(this);
         }
     }
 
@@ -286,6 +353,7 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         super.readFromNBT(tagCompound);
         this.switchedOn = tagCompound.getBoolean("PowerOn");
         this.energy.readFromNBT(tagCompound);
+        this.history = BrowserHistory.readFromNBT(tagCompound);
     }
 
     @Override
@@ -294,12 +362,16 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         super.writeToNBT(tagCompound);
         tagCompound.setBoolean("PowerOn", switchedOn);
         this.energy.writeToNBT(tagCompound);
+        this.history.writeToNBT(tagCompound);
         return tagCompound;
     }
 
     private NBTTagCompound syncTag()
     {
         NBTTagCompound tag = this.writeToNBT(new NBTTagCompound());
+        // 会话只给操作者（打开界面时单独发），不随方块更新发给附近所有人
+        tag.removeTag("History");
+        tag.removeTag("HistoryIndex");
         if(operator != null)
         {
             tag.setUniqueId("Operator", operator);
