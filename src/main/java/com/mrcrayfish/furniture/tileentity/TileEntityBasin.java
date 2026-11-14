@@ -8,6 +8,8 @@ import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.util.EnumFacing;
 import net.minecraft.util.ITickable;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.block.state.IBlockState;
+import net.minecraft.world.World;
 
 /**
  * 盆池（悠然服务器魔改）：自己装 1000 mB 水，开着时每 tick 从下面一格的流体容器抽 50 mB，满了自动关；水会蒸发。
@@ -38,6 +40,15 @@ public class TileEntityBasin extends TileEntitySyncClient implements ITickable, 
             return;
         tank.tick(world, new BlockPos[]{pos.down()}, new EnumFacing[]{EnumFacing.UP});
         WaterBasins.refreshFilled(world, pos, tank);
+    }
+
+    /**
+     * “有水”的方块状态变了不换方块实体（Forge 对模组的方块实体默认是方块状态一变就重建，水会丢）
+     */
+    @Override
+    public boolean shouldRefresh(World world, BlockPos pos, IBlockState oldState, IBlockState newState)
+    {
+        return oldState.getBlock() != newState.getBlock();
     }
 
     @Override
