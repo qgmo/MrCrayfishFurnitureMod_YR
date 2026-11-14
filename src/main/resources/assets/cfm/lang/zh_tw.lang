@@ -496,7 +496,7 @@ cfm.desk.info=這張書桌可以連接其他書桌以創建你想要的任何形
 cfm.desk_cabinet.info=這張書桌櫃可以連接其他書桌櫃以創建你想要的任何形狀和長度，也可以與書桌連接。
 cfm.mail_signed.info=來自%s
 cfm.present_unsigned.info=未署名
-cfm.digital_clock.info=會以24小時格式顯示世界的時間。需要裝一顆電池才會走：拿電池按右鍵放入（已有電池時與手上的交換），潛行空手按右鍵取出。每2分鐘耗1 FE；SCP 的電池、IC2 的電池和其他提供 Forge Energy 的電池都可以。顯示器可以使用染料變更著色。
+cfm.digital_clock.info=會以24小時格式顯示世界的時間。需要裝一顆電池才會走：拿電池按右鍵放入（已有電池時與手上的交換），空手按右鍵取出。每2分鐘耗1 FE；SCP 的電池、IC2 的電池和其他提供 Forge Energy 的電池都可以。顯示器可以使用染料變更著色。
 cfm.tv_remote.info=允許你以無線的方式控制電視機。要變更電視機的頻道，只需要指向電視機並且右鍵點擊。要開關電視機，需要指向電視機、蹲下並且右鍵點擊。
 
 cfm.tv.success=成功下載GIF檔案
@@ -579,7 +579,7 @@ cfm.message.mailbox_ownerrequest=現在右鍵點擊該郵箱以擁有該郵箱�
 cfm.message.mailbox_ownerget=成功將郵箱的擁有者設置為%s。
 cfm.message.mailbox_belong=該郵箱屬於%s。
 cfm.message.clock_no_battery=數碼時鐘需要裝電池，拿電池按右鍵放入。
-cfm.message.clock_battery_empty=電池沒電了。換一顆，或者潛行空手按右鍵取出。
+cfm.message.clock_battery_empty=電池沒電了。換一顆，或者空手按右鍵取出。
 cfm.message.login1=感謝你安裝MrCrayfish傢俱模組。
 cfm.message.login1.info=你可以在配置中停用此登入信息。
 cfm.message.login2.info=打開連結

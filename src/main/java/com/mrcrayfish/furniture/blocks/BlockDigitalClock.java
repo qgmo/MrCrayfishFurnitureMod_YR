@@ -156,6 +156,9 @@ public class BlockDigitalClock extends BlockFurnitureTile
     @Override
     public boolean onBlockActivated(World worldIn, BlockPos pos, IBlockState state, EntityPlayer playerIn, EnumHand hand, EnumFacing facing, float hitX, float hitY, float hitZ)
     {
+        // 潜行右键留给 Carry On（潜行 + 空手右键是它搬起方块的操作），时钟不处理
+        if(playerIn.isSneaking())
+            return false;
         if(!worldIn.isRemote)
         {
             TileEntity tileEntity = worldIn.getTileEntity(pos);
@@ -189,9 +192,9 @@ public class BlockDigitalClock extends BlockFurnitureTile
                     }
                 }
             }
-            else if(heldItem.isEmpty() && playerIn.isSneaking() && digitalClock.hasBattery())
+            else if(heldItem.isEmpty() && digitalClock.hasBattery())
             {
-                // 潜行空手右键：取出电池
+                // 空手右键（不潜行）：取出电池
                 ItemHandlerHelper.giveItemToPlayer(playerIn, digitalClock.removeBattery());
             }
             else if(!digitalClock.hasBattery())
