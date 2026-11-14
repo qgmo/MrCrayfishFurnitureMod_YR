@@ -1,5 +1,7 @@
 package com.mrcrayfish.furniture.client.browser;
 
+import com.mrcrayfish.furniture.computer.UrlInput;
+
 import com.mrcrayfish.furniture.web.Html;
 
 import java.nio.charset.StandardCharsets;
@@ -58,7 +60,7 @@ public final class BuiltinPages
         head(sb, tr.t("cfm.browser.error.title"));
         sb.append("<div class=\"box err\"><h1>").append(Html.escape(tr.t(key + ".heading"))).append("</h1>\n");
         if(url != null && !url.isEmpty())
-            sb.append("<p class=\"url\">").append(Html.escape(url)).append("</p>\n");
+            sb.append("<p class=\"url\">").append(Html.escape(UrlInput.display(url))).append("</p>\n");
         sb.append("<p>").append(Html.escape(tr.t(key + ".body", detail == null ? "" : detail))).append("</p>\n");
         if(detail != null && !detail.isEmpty() && error != Error.UNSUPPORTED_SCHEME)
             sb.append("<p class=\"small\">").append(Html.escape(tr.t("cfm.browser.error.detail", detail))).append("</p>\n");
