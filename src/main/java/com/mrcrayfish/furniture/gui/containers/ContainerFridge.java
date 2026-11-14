@@ -14,7 +14,8 @@ public class ContainerFridge extends Container
 
     public ContainerFridge(IInventory playerInventory, IInventory fridgeInventory)
     {
-        this.lowerChestInventory = playerInventory;
+        // 原来存的是玩家背包，canInteractWith 恒为 true；改成冰箱库存，按冰箱还在原位、距离 ≤ 8 判断
+        this.lowerChestInventory = fridgeInventory;
         fridgeInventory.openInventory(null);
 
         int count = 0;
