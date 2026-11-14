@@ -16,9 +16,23 @@ import net.minecraft.util.ITickable;
 import net.minecraft.util.SoundCategory;
 
 import java.util.Random;
+import com.mrcrayfish.furniture.power.ApplianceEnergy;
+import com.mrcrayfish.furniture.power.ApplianceFaces;
+import com.mrcrayfish.furniture.power.IAppliance;
+import com.mrcrayfish.furniture.util.AppliancePower;
+import com.mrcrayfish.furniture.util.TileEntityUtil;
+import net.minecraftforge.common.capabilities.Capability;
+import net.minecraftforge.energy.CapabilityEnergy;
+import javax.annotation.Nullable;
 
-public class TileEntityDishwasher extends TileEntityFurniture implements ISidedInventory, ITickable
+/**
+ * 悠然服务器魔改：要用电（照洗衣机，服主 11-14），洗时 6 FE/t、待机不耗，没电暂停、来电接着洗；只从底面进电，
+ * 界面里可插能量单元卡（见 {@link ApplianceEnergy}）。修装备照旧。
+ */
+public class TileEntityDishwasher extends TileEntityFurniture implements ISidedInventory, ITickable, IAppliance
 {
+    private final ApplianceEnergy energy = new ApplianceEnergy(this, AppliancePower.DISHWASHER, ApplianceFaces.bottom(), () -> TileEntityUtil.markBlockForUpdate(world, pos));
+
     private Random rand = new Random();
 
     private static final int[] slots_top = new int[]{0, 1, 2, 3, 4, 5};
@@ -98,6 +112,11 @@ public class TileEntityDishwasher extends TileEntityFurniture implements ISidedI
     @Override
     public void update()
     {
+        // 没电时暂停（进度、剩余时间都不动）
+        if(!energy.tick(washing, AppliancePower.DISHWASHER) && washing)
+        {
+            return;
+        }
         if(washing)
         {
             if(!canWash())
@@ -181,6 +200,7 @@ public class TileEntityDishwasher extends TileEntityFurniture implements ISidedI
         this.superMode = tagCompound.getBoolean("SuperMode");
         this.progress = tagCompound.getInteger("Progress");
         this.timeRemaining = tagCompound.getInteger("Remaining");
+        this.energy.readFromNBT(tagCompound);
     }
 
     @Override
@@ -191,6 +211,7 @@ public class TileEntityDishwasher extends TileEntityFurniture implements ISidedI
         tagCompound.setBoolean("SuperMode", superMode);
         tagCompound.setInteger("Progress", progress);
         tagCompound.setInteger("Remaining", timeRemaining);
+        this.energy.writeToNBT(tagCompound);
         return tagCompound;
     }
 
@@ -234,5 +255,28 @@ public class TileEntityDishwasher extends TileEntityFurniture implements ISidedI
     {
         this.fillWithLoot(playerIn);
         return new ContainerDishwasher(playerInventory, this);
+    }
+
+    @Override
+    public boolean hasCapability(Capability<?> capability, @Nullable EnumFacing facing)
+    {
+        if(capability == CapabilityEnergy.ENERGY)
+            return energy.isInputFace(facing);
+        return super.hasCapability(capability, facing);
+    }
+
+    @Nullable
+    @Override
+    public <T> T getCapability(Capability<T> capability, @Nullable EnumFacing facing)
+    {
+        if(capability == CapabilityEnergy.ENERGY)
+            return energy.isInputFace(facing) ? CapabilityEnergy.ENERGY.cast(energy.port()) : null;
+        return super.getCapability(capability, facing);
+    }
+
+    @Override
+    public ApplianceEnergy getAppliance()
+    {
+        return energy;
     }
 }

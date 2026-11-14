@@ -16,6 +16,7 @@ class AppliancePowerTest
         assertEquals(8, AppliancePower.TOASTER);
         assertEquals(12, AppliancePower.MICROWAVE);
         assertEquals(6, AppliancePower.WASHING_MACHINE);
+        assertEquals(6, AppliancePower.DISHWASHER);
         assertEquals(1, AppliancePower.CEILING_FAN);
         assertEquals(12, AppliancePower.OVEN);
         assertEquals(1, AppliancePower.FRIDGE);

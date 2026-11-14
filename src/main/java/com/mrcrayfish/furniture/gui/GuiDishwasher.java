@@ -12,6 +12,7 @@ import net.minecraft.entity.player.InventoryPlayer;
 import net.minecraft.util.ResourceLocation;
 import org.lwjgl.input.Keyboard;
 import org.lwjgl.opengl.GL11;
+import java.util.List;
 
 public class GuiDishwasher extends GuiContainer
 {
@@ -19,10 +20,12 @@ public class GuiDishwasher extends GuiContainer
     private TileEntityDishwasher tileEntityDishwasher;
 
     private GuiButton button_start;
+    private final ContainerDishwasher powerContainer;
 
     public GuiDishwasher(InventoryPlayer inventoryPlayer, TileEntityDishwasher dishwasher)
     {
         super(new ContainerDishwasher(inventoryPlayer, dishwasher));
+        this.powerContainer = (ContainerDishwasher) this.inventorySlots;
         this.tileEntityDishwasher = dishwasher;
         this.xSize = 176;
         this.ySize = 228;
@@ -69,6 +72,11 @@ public class GuiDishwasher extends GuiContainer
         this.drawDefaultBackground();
         super.drawScreen(mouseX, mouseY, partialTicks);
         this.renderHoveredToolTip(mouseX, mouseY);
+        List<String> power = ApplianceGui.tooltip(guiLeft, guiTop, ContainerDishwasher.CARD_X, ContainerDishwasher.CARD_Y, powerContainer.getCardSlot(), tileEntityDishwasher.getAppliance(), mouseX, mouseY);
+        if(power != null)
+        {
+            drawHoveringText(power, mouseX, mouseY);
+        }
 
         if(isPointInRegion(37, 9, 11, 11, mouseX, mouseY))
         {
@@ -102,6 +110,8 @@ public class GuiDishwasher extends GuiContainer
         int l = (width - xSize) / 2;
         int i1 = (height - ySize) / 2;
         this.drawTexturedModalRect(l, i1, 0, 0, xSize, ySize);
+        ApplianceGui.draw(l, i1, ContainerDishwasher.CARD_X, ContainerDishwasher.CARD_Y, powerContainer.getCardSlot(), tileEntityDishwasher.getAppliance());
+        this.mc.getTextureManager().bindTexture(gui);
 
         if(tileEntityDishwasher.isWashing())
         {

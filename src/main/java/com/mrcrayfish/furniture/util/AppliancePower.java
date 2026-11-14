@@ -23,6 +23,8 @@ public final class AppliancePower
     public static final int MICROWAVE = 12;
     /** 洗衣机洗时 */
     public static final int WASHING_MACHINE = 6;
+    /** 洗碗机洗时（照洗衣机，服主 11-14） */
+    public static final int DISHWASHER = 6;
     /** 吊扇转时 */
     public static final int CEILING_FAN = 1;
     /** 烤箱烤时 */
