@@ -6,6 +6,7 @@ import com.mrcrayfish.furniture.init.FurnitureSounds;
 import com.mrcrayfish.furniture.util.ParticleSpawner;
 import com.mrcrayfish.furniture.util.WaterRules;
 import net.minecraft.block.state.IBlockState;
+import net.minecraft.entity.EntityLivingBase;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.init.Items;
 import net.minecraft.item.ItemArmor;
@@ -26,6 +27,8 @@ import java.util.Random;
 /**
  * 开着的花洒（悠然服务器魔改，服主 11-14）：贴着的那个方块（花洒装在它上面，后面可以接管道）是装着认得的水的 Forge 流体容器
  * 时才出水，开着时每 tick 从里面抽 {@value WaterRules#SHOWER_PER_TICK} mB。没水时不出水（没有水花、声音和洗澡的效果），开关不变。
+ * <p>
+ * 出水时每 5 tick 对花洒下方一格里的所有生物（{@link EntityLivingBase}，服主 11-14：原来只对玩家）清药水效果（同喝牛奶）、灭火。
  */
 public class TileEntityShowerHead extends TileEntitySyncClient implements ITickable
 {
@@ -78,30 +81,36 @@ public class TileEntityShowerHead extends TileEntitySyncClient implements ITicka
 
         if(timer % 5 == 0)
         {
-            List<EntityPlayer> listPlayers = world.getEntitiesWithinAABB(EntityPlayer.class, new AxisAlignedBB(pos.getX(), pos.getY() - 1, pos.getZ(), pos.getX() + 1.0D, pos.getY() - 1 + 1.0D, pos.getZ() + 1.0D));
-            for(EntityPlayer player : listPlayers)
+            // 花洒下方的所有生物（悠然服务器魔改：原来只管玩家）：清掉药水效果（同喝牛奶，牛奶清不掉的效果照样清不掉）、灭火；
+            // 洗掉皮革盔甲的颜色只对玩家
+            List<EntityLivingBase> entities = world.getEntitiesWithinAABB(EntityLivingBase.class, new AxisAlignedBB(pos.getX(), pos.getY() - 1, pos.getZ(), pos.getX() + 1.0D, pos.getY() - 1 + 1.0D, pos.getZ() + 1.0D));
+            for(EntityLivingBase entity : entities)
             {
-                player.curePotionEffects(new ItemStack(Items.MILK_BUCKET));
+                entity.curePotionEffects(new ItemStack(Items.MILK_BUCKET));
 
-                for(int i = 0; i < 4; i++)
+                if(entity instanceof EntityPlayer)
                 {
-                    ItemStack itemstack = player.inventory.armorInventory.get(i);
-                    if(itemstack != ItemStack.EMPTY)
+                    EntityPlayer player = (EntityPlayer) entity;
+                    for(int i = 0; i < 4; i++)
                     {
-                        if(itemstack.getItem() instanceof ItemArmor)
+                        ItemStack itemstack = player.inventory.armorInventory.get(i);
+                        if(itemstack != ItemStack.EMPTY)
                         {
-                            ItemArmor armour = (ItemArmor) itemstack.getItem();
-                            if(armour.getArmorMaterial() == ArmorMaterial.LEATHER)
+                            if(itemstack.getItem() instanceof ItemArmor)
                             {
-                                player.inventory.armorInventory.set(i, new ItemStack(itemstack.getItem(), 1, itemstack.getItemDamage()));
+                                ItemArmor armour = (ItemArmor) itemstack.getItem();
+                                if(armour.getArmorMaterial() == ArmorMaterial.LEATHER)
+                                {
+                                    player.inventory.armorInventory.set(i, new ItemStack(itemstack.getItem(), 1, itemstack.getItemDamage()));
+                                }
                             }
                         }
                     }
                 }
 
-                if(player.isBurning())
+                if(entity.isBurning())
                 {
-                    player.extinguish();
+                    entity.extinguish();
                 }
             }
         }
