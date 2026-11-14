@@ -29,8 +29,10 @@ class PageSnapshotTest
         assertEquals(443, d.connection.remotePort);
         assertEquals("CN=中间 CA", d.connection.chain.get(0).issuer);
         assertEquals(2000, d.connection.chain.get(0).notAfter.getTime());
-        PageSnapshot plain = PageSnapshot.decode(new PageSnapshot("http://test.yr/", new byte[0], null).encode());
+        assertEquals(PageParser.Mode.XHTML, d.mode);
+        PageSnapshot plain = PageSnapshot.decode(new PageSnapshot("http://test.yr/", new byte[0], PageParser.Mode.HTML, null).encode());
         assertFalse(plain.isSecure());
+        assertEquals(PageParser.Mode.HTML, plain.mode, "解析方式跟着页面走，服务端与旁观者照它解析");
     }
 
     @Test

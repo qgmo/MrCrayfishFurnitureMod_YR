@@ -1,17 +1,13 @@
 package com.mrcrayfish.furniture.computer;
 
 import javax.annotation.Nullable;
-import javax.xml.stream.XMLInputFactory;
-import javax.xml.stream.XMLStreamConstants;
-import javax.xml.stream.XMLStreamException;
-import javax.xml.stream.XMLStreamReader;
-import java.io.ByteArrayInputStream;
 
 /**
- * 电脑页面的上限（服主 11-14 定）：XHTML 最大 {@value #MAX_BYTES} 字节、最多 {@value #MAX_ELEMENTS} 个元素、最深 {@value #MAX_DEPTH} 层。
+ * 电脑页面的上限（服主 11-14 定）：页面最大 {@value #MAX_BYTES} 字节、最多 {@value #MAX_ELEMENTS} 个元素、最深 {@value #MAX_DEPTH} 层。
  * 服务端收旁观同步的页面、旁观者渲染前、浏览器渲染前都按它检查；只看大小与结构，不看内容。
  * <p>
- * 检查用流式读（StAX）：不建 DOM、不处理 DTD 与外部实体，数到超限就停，所以在真正解析之前就能拒绝。
+ * 先看字节数（超了不解析），再用 jsoup 宽松解析（{@link PageParser}），解析后数元素与层数。
+ * jsoup 不处理 DTD 与外部实体，也不展开自定义实体（“十亿笑声”炸不了）；HTML 解析器本身的嵌套层数也有上限。
  */
 public final class PageLimits
 {
@@ -21,61 +17,32 @@ public final class PageLimits
 
     public enum Problem
     {
-        TOO_LARGE, TOO_MANY_ELEMENTS, TOO_DEEP, MALFORMED
+        TOO_LARGE, TOO_MANY_ELEMENTS, TOO_DEEP,
+        /** 空页面、解析器出错 */
+        MALFORMED
     }
 
     private PageLimits() {}
 
+    /** 按 XHTML（XML 解析器）检查；不超限返回 null */
+    @Nullable
+    public static Problem check(byte[] page)
+    {
+        return check(page, PageParser.Mode.XHTML);
+    }
+
     /** 不超限返回 null */
     @Nullable
-    public static Problem check(byte[] xhtml)
+    public static Problem check(byte[] page, PageParser.Mode mode)
     {
-        if(xhtml.length > MAX_BYTES)
-            return Problem.TOO_LARGE;
-        XMLStreamReader r = null;
         try
         {
-            XMLInputFactory f = XMLInputFactory.newInstance();
-            f.setProperty(XMLInputFactory.SUPPORT_DTD, false);
-            f.setProperty(XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES, false);
-            f.setProperty(XMLInputFactory.IS_REPLACING_ENTITY_REFERENCES, false);
-            f.setProperty(XMLInputFactory.IS_COALESCING, false);
-            r = f.createXMLStreamReader(new ByteArrayInputStream(xhtml));
-            int elements = 0;
-            int depth = 0;
-            boolean root = false;
-            while(r.hasNext())
-            {
-                int e = r.next();
-                if(e == XMLStreamConstants.START_ELEMENT)
-                {
-                    root = true;
-                    if(++elements > MAX_ELEMENTS)
-                        return Problem.TOO_MANY_ELEMENTS;
-                    if(++depth > MAX_DEPTH)
-                        return Problem.TOO_DEEP;
-                }
-                else if(e == XMLStreamConstants.END_ELEMENT)
-                {
-                    depth--;
-                }
-            }
-            return root ? null : Problem.MALFORMED;
+            PageParser.parse(page, mode);
+            return null;
         }
-        catch(XMLStreamException | RuntimeException e)
+        catch(PageParser.Rejected r)
         {
-            return Problem.MALFORMED;
-        }
-        finally
-        {
-            if(r != null)
-            {
-                try
-                {
-                    r.close();
-                }
-                catch(XMLStreamException ignored) {}
-            }
+            return r.problem;
         }
     }
 }

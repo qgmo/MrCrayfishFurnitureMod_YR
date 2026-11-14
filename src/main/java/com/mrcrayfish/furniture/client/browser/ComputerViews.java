@@ -1,6 +1,7 @@
 package com.mrcrayfish.furniture.client.browser;
 
 import com.mrcrayfish.furniture.MrCrayfishFurnitureMod;
+import com.mrcrayfish.furniture.computer.PageParser;
 import com.mrcrayfish.furniture.computer.PageSnapshot;
 import com.mrcrayfish.furniture.network.message.MessageComputerView;
 import net.minecraft.client.Minecraft;
@@ -142,14 +143,14 @@ public final class ComputerViews
     /**
      * 在渲染线程上解析、渲染一页，完成后在主线程上回调（失败为 null）。{@code images} 是检查过的图片。
      */
-    public static void render(byte[] html, String url, Map<String, byte[]> images, double scale, Consumer<RenderedPage> done)
+    public static void render(byte[] html, PageParser.Mode mode, String url, Map<String, byte[]> images, double scale, Consumer<RenderedPage> done)
     {
         RENDER.execute(() ->
         {
             RenderedPage page = null;
             try
             {
-                PageDocument doc = PageDocument.parse(html, url, ComputerViews::itemName, PageRenderer.VIEW_WIDTH);
+                PageDocument doc = PageDocument.parse(html, mode, url, ComputerViews::itemName, PageRenderer.VIEW_WIDTH);
                 page = PageRenderer.render(doc, images, scale);
             }
             catch(PageDocument.Invalid e)
@@ -181,6 +182,6 @@ public final class ComputerViews
         }
         snapshot.accept(s);
         // 旁观者没有网络：不加载图片
-        render(s.html, s.url, new HashMap<>(), scale, done);
+        render(s.html, s.mode, s.url, new HashMap<>(), scale, done);
     }
 }

@@ -67,13 +67,31 @@ class PageLimitsTest
     @Test
     void malformedAndEntityBombs()
     {
-        assertEquals(PageLimits.Problem.MALFORMED, PageLimits.check("<html><body>".getBytes(StandardCharsets.UTF_8)));
-        assertEquals(PageLimits.Problem.MALFORMED, PageLimits.check("not xml".getBytes(StandardCharsets.UTF_8)));
+        // 第二轮（服主 11-14）起宽松解析：没关上、不是 XML 的也收（以前是 MALFORMED），只有空页面还算 MALFORMED
+        assertNull(PageLimits.check("<html><body>".getBytes(StandardCharsets.UTF_8)));
+        assertNull(PageLimits.check("not xml".getBytes(StandardCharsets.UTF_8)));
         assertEquals(PageLimits.Problem.MALFORMED, PageLimits.check(new byte[0]));
         // 内部实体不展开：十亿笑声在这里不会炸
         String lol = "<?xml version=\"1.0\"?><!DOCTYPE lolz [<!ENTITY lol \"lol\"><!ENTITY lol2 \"&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;\">"
                 + "<!ENTITY lol3 \"&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;\">]><html><body>&lol3;</body></html>";
         PageLimits.Problem p = PageLimits.check(lol.getBytes(StandardCharsets.UTF_8));
         assertTrue(p == null || p == PageLimits.Problem.MALFORMED);
+        assertNull(PageLimits.check(lol.getBytes(StandardCharsets.UTF_8), PageParser.Mode.HTML));
+    }
+
+    @Test
+    void htmlModeCountsTheSameLimits()
+    {
+        // HTML 解析器会补上 head：html + head + body + 1997 个 = 2000
+        byte[] ok = ("<html><body>" + repeat("<br>", 1997) + "</body></html>").getBytes(StandardCharsets.UTF_8);
+        assertNull(PageLimits.check(ok, PageParser.Mode.HTML));
+        byte[] over = ("<html><body>" + repeat("<br>", 1998) + "</body></html>").getBytes(StandardCharsets.UTF_8);
+        assertEquals(PageLimits.Problem.TOO_MANY_ELEMENTS, PageLimits.check(over, PageParser.Mode.HTML));
+        // 不闭合的嵌套：html、body 两层 + 62 层 = 64
+        assertNull(PageLimits.check(repeat("<div>", 62).getBytes(StandardCharsets.UTF_8), PageParser.Mode.HTML));
+        assertEquals(PageLimits.Problem.TOO_DEEP, PageLimits.check(repeat("<div>", 63).getBytes(StandardCharsets.UTF_8), PageParser.Mode.HTML));
+        assertEquals(PageParser.Mode.XHTML, PageParser.Mode.forContentType("application/xhtml+xml; charset=utf-8"));
+        assertEquals(PageParser.Mode.HTML, PageParser.Mode.forContentType("text/html"));
+        assertEquals(PageParser.Mode.HTML, PageParser.Mode.forContentType(null));
     }
 }

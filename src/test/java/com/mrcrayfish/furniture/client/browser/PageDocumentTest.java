@@ -95,8 +95,65 @@ class PageDocumentTest
         sb.append("</body></html>");
         PageDocument.Invalid e = assertThrows(PageDocument.Invalid.class, () -> parse(sb.toString()));
         assertEquals(PageLimits.Problem.TOO_MANY_ELEMENTS, e.problem);
-        assertEquals(PageLimits.Problem.MALFORMED, assertThrows(PageDocument.Invalid.class, () -> parse("<html><p>没关上</html>")).problem);
-        assertEquals(PageLimits.Problem.MALFORMED, assertThrows(PageDocument.Invalid.class, () -> parse("<svg/>")).problem);
+        // 第二轮（服主 11-14）起宽松解析：没关上的标签、根元素不是 html 的也能显示（以前是“页面格式不对”）
+        assertEquals("没关上", assertDoesNotThrow(() -> parse("<html><p>没关上</html>")).dom.getElementsByTagNameNS("*", "p").item(0).getTextContent());
+        assertEquals("html", PageDocument.local(assertDoesNotThrow(() -> parse("<svg/>")).dom.getDocumentElement()));
+        // 空页面仍然是“页面格式不对”
+        assertEquals(PageLimits.Problem.MALFORMED, assertThrows(PageDocument.Invalid.class, () -> parse("  ")).problem);
+    }
+
+    static PageDocument parseHtml(String s) throws PageDocument.Invalid
+    {
+        return PageDocument.parse(s.getBytes(StandardCharsets.UTF_8), com.mrcrayfish.furniture.computer.PageParser.Mode.HTML, "http://test.yr/",
+                id -> null, 600);
+    }
+
+    @Test
+    void sloppyHtmlIsShown() throws Exception
+    {
+        // 不闭合的段落、列表、表格，大写标签，没加引号的属性，没有 html/head/body
+        PageDocument d = parseHtml("<TITLE>乱写</TITLE><P>第一段<P>第二段<ul><li>一<li>二</ul><table><tr><td>格<td>子</table>"
+                + "<a href=/next>下一页</a><img src=pic.png><form action=/s><input name=q value=搜><input type=password name=pw></form>&copy; &nbsp;x");
+        assertEquals("乱写", d.title);
+        assertEquals(com.mrcrayfish.furniture.computer.PageParser.XHTML_NS, d.dom.getDocumentElement().getNamespaceURI(), "元素在 XHTML 命名空间里");
+        assertEquals(2, d.dom.getElementsByTagNameNS("*", "p").getLength());
+        assertEquals(2, d.dom.getElementsByTagNameNS("*", "li").getLength());
+        assertEquals(2, d.dom.getElementsByTagNameNS("*", "td").getLength());
+        assertTrue(d.links.containsValue("http://test.yr/next"));
+        assertEquals(Collections.singletonList("http://test.yr/pic.png"), d.images);
+        assertEquals("http://test.yr/s", d.forms.get(0).action);
+        assertEquals(2, d.controls.size());
+        assertEquals(PageDocument.Kind.PASSWORD, d.controls.get(1).kind);
+        assertTrue(d.dom.getDocumentElement().getTextContent().contains("\u00a9 \u00a0x"), "命名实体解码");
+        RenderedPage p = PageRenderer.render(d, new HashMap<>(), 1.0);
+        assertTrue(p.height > 50, "画出来了");
+        // 脚本照样去掉
+        assertEquals(0, parseHtml("<p>a<script>alert(1)</script><iframe src=x></iframe>").dom.getElementsByTagNameNS("*", "script").getLength());
+    }
+
+    @Test
+    void limitsAreCheckedAfterLenientParsing()
+    {
+        StringBuilder deep = new StringBuilder();
+        for(int i = 0; i < 70; i++)
+            deep.append("<div>");
+        assertEquals(PageLimits.Problem.TOO_DEEP, assertThrows(PageDocument.Invalid.class, () -> parseHtml(deep.toString())).problem, "没关上的 div 也一层层算");
+        StringBuilder many = new StringBuilder();
+        for(int i = 0; i < 2100; i++)
+            many.append("<p>x");
+        assertEquals(PageLimits.Problem.TOO_MANY_ELEMENTS, assertThrows(PageDocument.Invalid.class, () -> parseHtml(many.toString())).problem);
+        StringBuilder big = new StringBuilder();
+        while(big.length() <= PageLimits.MAX_BYTES)
+            big.append("<b>xxxxxxxx</b>");
+        assertEquals(PageLimits.Problem.TOO_LARGE, assertThrows(PageDocument.Invalid.class, () -> parseHtml(big.toString())).problem);
+    }
+
+    @Test
+    void imagesOnlyFromSameHost() throws Exception
+    {
+        PageDocument d = parseHtml("<img src=/a.png><img src=http://test.yr:8080/b.png><img src=https://test.yr/c.png><img src=http://other.yr/d.png>"
+                + "<img src=http://[fd00::1]/e.png>");
+        assertEquals(java.util.Arrays.asList("http://test.yr/a.png", "http://test.yr:8080/b.png", "https://test.yr/c.png"), d.images);
     }
 
     @Test
@@ -107,7 +164,9 @@ class PageDocumentTest
         try
         {
             PageDocument d = parse(xxe);
-            assertEquals("", d.dom.getElementsByTagNameNS("*", "p").item(0).getTextContent().trim());
+            // jsoup 不读 DTD：实体引用原样当文字（第一轮的 XML 解析器是去掉它）
+            String text = d.dom.getElementsByTagNameNS("*", "p").item(0).getTextContent().trim();
+            assertTrue(text.isEmpty() || text.equals("&x;"), text);
         }
         catch(PageDocument.Invalid ok)
         {
@@ -116,9 +175,11 @@ class PageDocumentTest
     }
 
     @Test
-    void namedEntities()
+    void namedEntities() throws Exception
     {
-        assertEquals("a&#160;b &#169; &unknown; &amp;", PageDocument.replaceNamedEntities("a&nbsp;b &copy; &unknown; &amp;"));
+        // jsoup 按 HTML 规则解码命名实体；不认识的原样留着
+        PageDocument d = parse("<html><body><p>a&nbsp;b &copy; &unknown; &amp;</p></body></html>");
+        assertEquals("a\u00a0b \u00a9 &unknown; &", d.dom.getElementsByTagNameNS("*", "p").item(0).getTextContent());
     }
 
     @Test

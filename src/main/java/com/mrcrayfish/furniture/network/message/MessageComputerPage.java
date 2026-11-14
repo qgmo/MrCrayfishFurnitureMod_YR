@@ -110,7 +110,7 @@ public class MessageComputerPage implements IMessage, IMessageHandler<MessageCom
             RejectLog.log(player, "computer page rejected (" + e.getMessage() + ") at " + message.pos);
             return;
         }
-        PageLimits.Problem p = PageLimits.check(snapshot.html);
+        PageLimits.Problem p = PageLimits.check(snapshot.html, snapshot.mode);
         if(p != null)
         {
             RejectLog.log(player, "computer page rejected (" + p + ") at " + message.pos);

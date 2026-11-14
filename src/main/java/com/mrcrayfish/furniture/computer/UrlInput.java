@@ -272,6 +272,50 @@ public final class UrlInput
         return Character.digit((char) (b & 0xFF), 16) >= 0;
     }
 
+    /**
+     * 网址的主机部分（小写；IPv6 地址带方括号，不带端口）；不是 http / https 网址时返回 null。
+     * 给规范化过的网址用（{@link #normalize} 的结果）。
+     */
+    @Nullable
+    public static String hostOf(@Nullable String url)
+    {
+        if(url == null)
+            return null;
+        String s;
+        if(url.regionMatches(true, 0, "http://", 0, 7))
+            s = url.substring(7);
+        else if(url.regionMatches(true, 0, "https://", 0, 8))
+            s = url.substring(8);
+        else
+            return null;
+        int end = s.length();
+        for(int i = 0; i < s.length(); i++)
+        {
+            char c = s.charAt(i);
+            if(c == '/' || c == '?' || c == '#')
+            {
+                end = i;
+                break;
+            }
+        }
+        String authority = s.substring(0, end);
+        if(authority.startsWith("["))
+        {
+            int close = authority.indexOf(']');
+            return close < 0 ? null : authority.substring(0, close + 1).toLowerCase(Locale.ROOT);
+        }
+        int colon = authority.lastIndexOf(':');
+        String host = colon >= 0 ? authority.substring(0, colon) : authority;
+        return host.isEmpty() ? null : host.toLowerCase(Locale.ROOT);
+    }
+
+    /** 两个网址是不是同一主机（不管协议、端口）：页面里的图片只从页面所在的网站取 */
+    public static boolean sameHost(@Nullable String a, @Nullable String b)
+    {
+        String ha = hostOf(a);
+        return ha != null && ha.equals(hostOf(b));
+    }
+
     public static boolean isSecure(String url)
     {
         return url != null && url.startsWith("https://");

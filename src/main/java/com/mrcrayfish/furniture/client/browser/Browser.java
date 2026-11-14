@@ -3,6 +3,7 @@ package com.mrcrayfish.furniture.client.browser;
 import com.mrcrayfish.furniture.client.MediaDecoding;
 import com.mrcrayfish.furniture.computer.FormEncoding;
 import com.mrcrayfish.furniture.computer.PageLimits;
+import com.mrcrayfish.furniture.computer.PageParser;
 import com.mrcrayfish.furniture.computer.PageSnapshot;
 import com.mrcrayfish.furniture.computer.PageUploads;
 import com.mrcrayfish.furniture.computer.UrlInput;
@@ -58,6 +59,7 @@ public final class Browser
     {
         public final String url;
         public final byte[] html;
+        public final PageParser.Mode mode;
         @Nullable
         public final PageSnapshot.Connection connection;
         public final Map<String, byte[]> images;
@@ -65,10 +67,11 @@ public final class Browser
         public final FormState forms = new FormState();
         public int scroll;
 
-        Entry(String url, byte[] html, @Nullable PageSnapshot.Connection connection, Map<String, byte[]> images, boolean builtin)
+        Entry(String url, byte[] html, PageParser.Mode mode, @Nullable PageSnapshot.Connection connection, Map<String, byte[]> images, boolean builtin)
         {
             this.url = url;
             this.html = html;
+            this.mode = mode;
             this.connection = connection;
             this.images = images;
             this.builtin = builtin;
@@ -411,11 +414,13 @@ public final class Browser
         String type = resp.header("content-type");
         String t = type == null ? "" : type.toLowerCase(Locale.ROOT);
         byte[] html;
+        PageParser.Mode mode = PageParser.Mode.XHTML;
         Map<String, byte[]> images = new HashMap<>();
         List<String> imageUrls;
         if(t.startsWith("application/xhtml+xml") || t.startsWith("text/html") || t.startsWith("application/xml") || t.startsWith("text/xml") || t.isEmpty())
         {
             html = resp.body;
+            mode = PageParser.Mode.forContentType(type);
         }
         else if(t.startsWith("text/plain"))
         {
@@ -437,7 +442,7 @@ public final class Browser
             showError(req.url, BuiltinPages.Error.UNSUPPORTED_TYPE, type, false);
             return;
         }
-        PageLimits.Problem p = PageLimits.check(html);
+        PageLimits.Problem p = PageLimits.check(html, mode);
         if(p != null)
         {
             showError(req.url, problemError(p), null, false);
@@ -448,7 +453,7 @@ public final class Browser
         // 图片：先把页面列的图取回来（只走游戏内网络，大小、尺寸有上限），再渲染
         try
         {
-            imageUrls = PageDocument.parse(html, req.url, id -> null, PageRenderer.VIEW_WIDTH).images;
+            imageUrls = PageDocument.parse(html, mode, req.url, id -> null, PageRenderer.VIEW_WIDTH).images;
         }
         catch(PageDocument.Invalid e)
         {
@@ -456,13 +461,14 @@ public final class Browser
             return;
         }
         byte[] page = html;
+        PageParser.Mode pageMode = mode;
         if(imageUrls.isEmpty() || !images.isEmpty())
         {
-            loaded(req, page, conn, images);
+            loaded(req, page, pageMode, conn, images);
             return;
         }
         setStatus(Status.LOADING, ComputerViews.TR.t("cfm.browser.status.images", imageUrls.size()));
-        loadImages(s, imageUrls, 0, images, gen, () -> loaded(req, page, conn, images));
+        loadImages(s, imageUrls, 0, images, gen, () -> loaded(req, page, pageMode, conn, images));
     }
 
     private void loadImages(ClientNic.Session s, List<String> urls, int i, Map<String, byte[]> out, int gen, Runnable done)
@@ -520,9 +526,9 @@ public final class Browser
             req.fromEntry.forms.reset(rendered().document, req.fromForm);
     }
 
-    private void loaded(Request req, byte[] html, @Nullable PageSnapshot.Connection conn, Map<String, byte[]> images)
+    private void loaded(Request req, byte[] html, PageParser.Mode mode, @Nullable PageSnapshot.Connection conn, Map<String, byte[]> images)
     {
-        push(new Entry(req.url, html, conn, images, false));
+        push(new Entry(req.url, html, mode, conn, images, false));
         // 打开成功：地址栏换成实际的网址（失败时才保留敲的原样）
         address.setText(req.url);
         addressEdited = false;
@@ -582,7 +588,7 @@ public final class Browser
     {
         generation++;
         waiting = null;
-        push(new Entry(url, BuiltinPages.error(ComputerViews.TR, e, url, detail), null, Collections.<String, byte[]>emptyMap(), true));
+        push(new Entry(url, BuiltinPages.error(ComputerViews.TR, e, url, detail), PageParser.Mode.XHTML, null, Collections.<String, byte[]>emptyMap(), true));
         if(!keepAddress && !addressEdited && !url.isEmpty())
             address.setText(url);
         setStatus(Status.IDLE, "");
@@ -590,7 +596,7 @@ public final class Browser
 
     private void showBuiltin(String url, byte[] html, boolean setAddress)
     {
-        push(new Entry(url, html, null, Collections.<String, byte[]>emptyMap(), true));
+        push(new Entry(url, html, PageParser.Mode.XHTML, null, Collections.<String, byte[]>emptyMap(), true));
         if(setAddress)
         {
             address.setText(url);
@@ -638,7 +644,7 @@ public final class Browser
         if(status == Status.IDLE)
             setStatus(Status.RENDERING, ComputerViews.TR.t("cfm.browser.status.rendering"));
         double scale = lastScale;
-        ComputerViews.render(e.html, e.url, e.images, scale, page ->
+        ComputerViews.render(e.html, e.mode, e.url, e.images, scale, page ->
         {
             if(req != renderRequest)
                 return;
@@ -653,7 +659,7 @@ public final class Browser
                     int at = history.indexOf(e);
                     if(at >= 0)
                     {
-                        history.set(at, new Entry(e.url, BuiltinPages.error(ComputerViews.TR, BuiltinPages.Error.RENDER_FAILED, e.url, null), null,
+                        history.set(at, new Entry(e.url, BuiltinPages.error(ComputerViews.TR, BuiltinPages.Error.RENDER_FAILED, e.url, null), PageParser.Mode.XHTML, null,
                                 Collections.<String, byte[]>emptyMap(), true));
                         requestRender();
                         return;
@@ -691,7 +697,7 @@ public final class Browser
         if(uploadedEntry == e)
             return;
         uploadedEntry = e;
-        byte[] data = new PageSnapshot(e.url, e.html, e.connection).encode();
+        byte[] data = new PageSnapshot(e.url, e.html, e.mode, e.connection).encode();
         if(data.length > PageSnapshot.MAX_COMPRESSED)
             return;
         int id = ++uploadId;
