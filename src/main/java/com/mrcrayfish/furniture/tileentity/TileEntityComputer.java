@@ -4,6 +4,8 @@ import com.mrcrayfish.furniture.compat.RegionUse;
 import com.mrcrayfish.furniture.computer.ComputerNetwork;
 import com.mrcrayfish.furniture.computer.ComputerSync;
 import com.mrcrayfish.furniture.computer.PageFacts;
+import com.mrcrayfish.furniture.computer.TypingSync;
+import com.mrcrayfish.furniture.client.browser.PageDocument;
 import com.mrcrayfish.furniture.gui.containers.ContainerComputer;
 import com.mrcrayfish.furniture.power.ApplianceEnergy;
 import com.mrcrayfish.furniture.power.ApplianceFaces;
@@ -28,7 +30,10 @@ import net.minecraftforge.energy.CapabilityEnergy;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -59,6 +64,10 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
     private byte[] page;
     /** 服务端自己从当前页面解析出来的（图片所在的主机等），不信客户端报的 */
     private PageFacts pageFacts = PageFacts.NONE;
+    /** 当前页面是操作者的第几次上传（打字同步按它对上页面） */
+    private int pageId = -1;
+    /** 操作者正在打的字（每个框最新的一条；换页面清空），给新来的旁观者补发 */
+    private final Map<Integer, TypingSync.Typed> typed = new LinkedHashMap<>();
     private int scroll;
     private int retryTicks;
     private int ticks;
@@ -112,6 +121,25 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
     public PageFacts getPageFacts()
     {
         return pageFacts;
+    }
+
+    public int getPageId()
+    {
+        return pageId;
+    }
+
+    public Collection<TypingSync.Typed> getTyped()
+    {
+        return typed.values();
+    }
+
+    /** 操作者打的字（已经检查过）：记下、转给旁观者 */
+    public void setTyped(TypingSync.Typed t)
+    {
+        if(!typed.containsKey(t.field) && typed.size() >= PageDocument.MAX_CONTROLS + 1)
+            return;
+        typed.put(t.field, t);
+        ComputerSync.broadcastTyping(this, t);
     }
 
     /** 当前操作者（服务端；不在线、没开着界面时为 null） */
@@ -179,16 +207,18 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         if(!switchedOn)
         {
             // 关机清屏
-            setPage(null, PageFacts.NONE);
+            setPage(null, PageFacts.NONE, -1);
         }
         this.markDirty();
         TileEntityUtil.markBlockForUpdate(world, pos);
     }
 
-    public void setPage(@Nullable byte[] compressed, PageFacts facts)
+    public void setPage(@Nullable byte[] compressed, PageFacts facts, int id)
     {
         this.page = compressed;
         this.pageFacts = compressed == null ? PageFacts.NONE : facts;
+        this.pageId = compressed == null ? -1 : id;
+        this.typed.clear();
         this.scroll = 0;
         ComputerSync.broadcastPage(this);
     }

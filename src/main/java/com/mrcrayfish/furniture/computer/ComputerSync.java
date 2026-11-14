@@ -28,6 +28,8 @@ public final class ComputerSync
     private static final Map<UUID, RateLimiter> SCROLL = new HashMap<>();
     /** 每个玩家按电源、接管的频率 */
     private static final Map<UUID, RateLimiter> ACTIONS = new HashMap<>();
+    /** 每个玩家同步打字的频率 */
+    private static final Map<UUID, RateLimiter> TYPING = new HashMap<>();
     /** 旁观者的玩家临时地址放行页面里图片所在主机的用途（服主 11-14：旁观者自己下载图片） */
     public static final String SPECTATE_PURPOSE = "cfm:spectate";
     /** 放行的有效期；看着的时候每分钟续一次 */
@@ -40,6 +42,11 @@ public final class ComputerSync
     public static boolean allowScroll(EntityPlayerMP player, long now)
     {
         return SCROLL.computeIfAbsent(player.getUniqueID(), k -> new RateLimiter(8, 8)).tryAcquire(now, 1);
+    }
+
+    public static boolean allowTyping(EntityPlayerMP player, long now)
+    {
+        return TYPING.computeIfAbsent(player.getUniqueID(), k -> new RateLimiter(TypingSync.SERVER_RATE, TypingSync.SERVER_BURST)).tryAcquire(now, 1);
     }
 
     public static boolean allowAction(EntityPlayerMP player, long now)
@@ -55,6 +62,21 @@ public final class ComputerSync
         byte[] page = computer.getPage();
         PacketHandler.INSTANCE.sendTo(page == null ? MessageComputerView.clear(computer.getPos())
                 : MessageComputerView.page(computer.getPos(), page, computer.getScroll()), player);
+        if(!computer.isOperator(player))
+        {
+            for(TypingSync.Typed t : computer.getTyped())
+                PacketHandler.INSTANCE.sendTo(MessageComputerView.typing(computer.getPos(), t), player);
+        }
+    }
+
+    /** 操作者打的字转给旁观者 */
+    public static void broadcastTyping(TileEntityComputer computer, TypingSync.Typed t)
+    {
+        for(EntityPlayerMP p : computer.getViewers())
+        {
+            if(!computer.isOperator(p))
+                PacketHandler.INSTANCE.sendTo(MessageComputerView.typing(computer.getPos(), t), p);
+        }
     }
 
     private static String key(TileEntityComputer computer)
@@ -154,6 +176,7 @@ public final class ComputerSync
             UPLOADS.forget(event.player.getUniqueID());
             SCROLL.remove(event.player.getUniqueID());
             ACTIONS.remove(event.player.getUniqueID());
+            TYPING.remove(event.player.getUniqueID());
             // 临时地址下线就收回了，放行跟着没了
             SPECTATING.remove(event.player.getUniqueID());
         }

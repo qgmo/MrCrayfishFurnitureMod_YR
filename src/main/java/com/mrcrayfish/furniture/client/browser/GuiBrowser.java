@@ -1,6 +1,7 @@
 package com.mrcrayfish.furniture.client.browser;
 
 import com.mrcrayfish.furniture.computer.PageSnapshot;
+import com.mrcrayfish.furniture.computer.TypingSync;
 import com.mrcrayfish.furniture.computer.UrlInput;
 import com.mrcrayfish.furniture.gui.ApplianceGui;
 import com.mrcrayfish.furniture.gui.containers.ContainerComputer;
@@ -451,8 +452,11 @@ public class GuiBrowser extends GuiContainer
         }
         else
         {
-            String shown = fontRenderer.trimStringToWidth(url, addrW - 6);
-            fontRenderer.drawString(shown, addrX + 3, toolbarY + 3, TEXT_DIM);
+            // 旁观：操作者正在地址栏里打的字（服主 11-14），没有就显示当前页面的网址
+            TypingSync.Typed typed = ComputerViews.view(computer.getPos()).typed.get(TypingSync.ADDRESS);
+            boolean typing = typed != null && !typed.text.isEmpty() && !typed.text.equals(url);
+            String shown = fontRenderer.trimStringToWidth(typing ? typed.text : url, addrW - 6);
+            fontRenderer.drawString(shown, addrX + 3, toolbarY + 3, typing ? TEXT : TEXT_DIM);
         }
     }
 
@@ -520,6 +524,14 @@ public class GuiBrowser extends GuiContainer
             int cx = x + fontRenderer.getStringWidth(text.substring(t.viewStart, cursor));
             Gui.drawRect(cx, y - 1, cx + 1, y + 9, 0xFF000000);
         }
+    }
+
+    private static String dots(int n)
+    {
+        StringBuilder sb = new StringBuilder();
+        for(int i = 0; i < Math.min(n, TypingSync.MAX_LENGTH); i++)
+            sb.append('•');
+        return sb.toString();
     }
 
     private static String mask(String s)
@@ -632,6 +644,8 @@ public class GuiBrowser extends GuiContainer
     {
         Browser b = browser();
         FormState forms = b != null && b.current() != null ? b.current().forms : null;
+        // 旁观：操作者正在框里打的字（密码框只有长度）
+        Map<Integer, TypingSync.Typed> typed = b == null ? ComputerViews.view(computer.getPos()).typed : Collections.<Integer, TypingSync.Typed>emptyMap();
         PageDocument doc = p.document;
         for(PageDocument.Control c : doc.controls)
         {
@@ -654,8 +668,12 @@ public class GuiBrowser extends GuiContainer
                     if(focused)
                         Gui.drawRect(x1, y1, x2, y2, FIELD_FOCUS);
                     Gui.drawRect(x1 + 1, y1 + 1, x2 - 1, y2 - 1, c.disabled ? 0xFFEFEFEF : FIELD);
+                    TypingSync.Typed other = typed.get(c.n);
                     if(t != null)
                         drawTextEdit(t, x1 + 3, ty, x2 - x1 - 6, focused, c.kind == PageDocument.Kind.PASSWORD, TEXT);
+                    else if(other != null)
+                        fontRenderer.drawString(fontRenderer.trimStringToWidth(other.password || c.kind == PageDocument.Kind.PASSWORD
+                                ? dots(other.length) : other.text, x2 - x1 - 6), x1 + 3, ty, TEXT);
                     else if(c.kind != PageDocument.Kind.PASSWORD)
                         fontRenderer.drawString(fontRenderer.trimStringToWidth(c.value, x2 - x1 - 6), x1 + 3, ty, TEXT);
                     break;

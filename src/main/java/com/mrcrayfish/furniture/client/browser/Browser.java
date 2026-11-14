@@ -6,10 +6,12 @@ import com.mrcrayfish.furniture.computer.PageLimits;
 import com.mrcrayfish.furniture.computer.PageParser;
 import com.mrcrayfish.furniture.computer.PageSnapshot;
 import com.mrcrayfish.furniture.computer.PageUploads;
+import com.mrcrayfish.furniture.computer.TypingSync;
 import com.mrcrayfish.furniture.computer.UrlInput;
 import com.mrcrayfish.furniture.network.PacketHandler;
 import com.mrcrayfish.furniture.network.message.MessageComputerPage;
 import com.mrcrayfish.furniture.network.message.MessageComputerScroll;
+import com.mrcrayfish.furniture.network.message.MessageComputerTyping;
 import moe.qingu.youran.api.network.ClientNic;
 import moe.qingu.youran.api.network.stack.HttpClient;
 import moe.qingu.youran.api.network.stack.NetworkException;
@@ -129,6 +131,9 @@ public final class Browser
     private int uploadId;
     private int lastSentScroll = -1;
     private long lastScrollSent;
+    /** 打字同步（只读本地的内容，不改它）：发件箱、对得上的那次上传（表单的框按它对上页面；没上传成功为 -1） */
+    private final TypingSync.Outbox typing = new TypingSync.Outbox();
+    private int typingUpload = -1;
 
     Browser(BlockPos pos)
     {
@@ -340,9 +345,10 @@ public final class Browser
         fetch(s, req, 0, generation);
     }
 
-    /** 每帧调：等网络的请求，接上了就发，等太久就报错 */
+    /** 每帧调：等网络的请求，接上了就发，等太久就报错；把正在打的字同步给旁观者 */
     public void tick()
     {
+        syncTyping();
         if(waiting != null)
         {
             ClientNic.Session s = ClientNic.current();
@@ -668,9 +674,14 @@ public final class Browser
             return;
         uploadedEntry = e;
         byte[] data = new PageSnapshot(e.url, e.html, e.mode, e.connection).encode();
+        // 换页面了：旁观者那边的打字记录会清空，从页面上的初始值重新比
+        typing.reset();
+        typingUpload = -1;
+        typing.baseline(TypingSync.outgoing(TypingSync.ADDRESS, false, e.url));
         if(data.length > PageSnapshot.MAX_COMPRESSED)
             return;
         int id = ++uploadId;
+        typingUpload = id;
         int count = Math.max(1, (data.length + PageUploads.CHUNK - 1) / PageUploads.CHUNK);
         for(int i = 0; i < count; i++)
         {
@@ -681,6 +692,33 @@ public final class Browser
             PacketHandler.INSTANCE.sendToServer(new MessageComputerPage(pos, id, i, count, part));
         }
         lastSentScroll = 0;
+    }
+
+    /**
+     * 打字同步（服主 11-14）：地址栏和当前页面文本框里的内容变了就排队，每 250 毫秒最多发一条，每条最多 256 个字符；
+     * 密码框只发长度。只读本地的内容（关界面、断电等时本地内容照旧留着，见 {@link ComputerViews}）。
+     */
+    private void syncTyping()
+    {
+        typing.offer(TypingSync.outgoing(TypingSync.ADDRESS, false, address.getText()));
+        Entry e = current();
+        RenderedPage page = rendered();
+        if(e != null && page != null && e == uploadedEntry && typingUpload >= 0)
+        {
+            for(PageDocument.Control c : page.document.controls)
+            {
+                if(!c.isTextual())
+                    continue;
+                boolean pw = c.kind == PageDocument.Kind.PASSWORD;
+                typing.baseline(TypingSync.outgoing(c.n, pw, c.value));
+                TextEdit t = e.forms.text(c.n);
+                if(t != null)
+                    typing.offer(TypingSync.outgoing(c.n, pw, t.getText()));
+            }
+        }
+        TypingSync.Typed t = typing.poll(System.currentTimeMillis());
+        if(t != null)
+            PacketHandler.INSTANCE.sendToServer(new MessageComputerTyping(pos, typingUpload, t));
     }
 
     /** 滚动位置（最多每 250 毫秒报一次） */

@@ -3,6 +3,7 @@ package com.mrcrayfish.furniture.client.browser;
 import com.mrcrayfish.furniture.MrCrayfishFurnitureMod;
 import com.mrcrayfish.furniture.computer.PageParser;
 import com.mrcrayfish.furniture.computer.PageSnapshot;
+import com.mrcrayfish.furniture.computer.TypingSync;
 import com.mrcrayfish.furniture.network.message.MessageComputerView;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.network.NetHandlerPlayClient;
@@ -64,6 +65,8 @@ public final class ComputerViews
         public int scroll;
         /** 每收到一页加一 */
         public int version;
+        /** 操作者正在打的字（框的编号 → 内容；地址栏是 {@link TypingSync#ADDRESS}）；换页面清空 */
+        public final Map<Integer, TypingSync.Typed> typed = new HashMap<>();
     }
 
     /** 这台电脑的浏览器（按服务器 + 维度 + 位置，没有就建一个） */
@@ -96,12 +99,20 @@ public final class ComputerViews
             v.page = data;
             v.scroll = scroll;
             v.version++;
+            v.typed.clear();
         }
         else if(kind == MessageComputerView.CLEAR)
         {
             v.page = null;
             v.scroll = 0;
             v.version++;
+            v.typed.clear();
+        }
+        else if(kind == MessageComputerView.TYPING)
+        {
+            TypingSync.Typed t = MessageComputerView.decodeTyping(scroll, data);
+            if(t != null && (v.typed.containsKey(t.field) || v.typed.size() <= PageDocument.MAX_CONTROLS))
+                v.typed.put(t.field, t);
         }
         else if(kind == MessageComputerView.SCROLL)
         {

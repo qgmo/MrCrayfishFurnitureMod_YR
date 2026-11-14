@@ -130,6 +130,6 @@ public class MessageComputerPage implements IMessage, IMessageHandler<MessageCom
             RejectLog.log(player, "computer page rejected (" + e + ") at " + message.pos);
             return;
         }
-        computer.setPage(compressed, facts);
+        computer.setPage(compressed, facts, message.id);
     }
 }
