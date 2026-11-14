@@ -56,6 +56,10 @@ public class BlockDoorMat extends BlockFurniture implements ITileEntityProvider
         if(tileEntity instanceof TileEntityDoorMat)
         {
             ((TileEntityDoorMat) tileEntity).setColour(15 - stack.getMetadata());
+            if(!worldIn.isRemote && placer instanceof EntityPlayer)
+            {
+                ((TileEntityDoorMat) tileEntity).setEditor(placer.getUniqueID());
+            }
         }
         if(placer instanceof EntityPlayer)
         {

@@ -4,6 +4,8 @@ import com.mrcrayfish.furniture.gui.containers.ContainerFreezer;
 import com.mrcrayfish.furniture.tileentity.TileEntityDoorMat;
 import com.mrcrayfish.furniture.util.TileEntityUtil;
 import com.mrcrayfish.furniture.network.ServerThread;
+import com.mrcrayfish.furniture.util.RejectLog;
+import com.mrcrayfish.furniture.util.TextLimits;
 import io.netty.buffer.ByteBuf;
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.tileentity.TileEntity;
@@ -58,13 +60,25 @@ public class MessageDoorMat implements IMessage, IMessageHandler<MessageDoorMat,
     {
         World world = player.world;
         BlockPos pos = new BlockPos(message.x, message.y, message.z);
-        if(!world.isAreaLoaded(pos, 0))
+        if(!world.isBlockLoaded(pos))
             return;
+        // 距离 ≤ 8，且只有刚放下这块门垫的人能写一次（文字界面只在放下时打开）
+        if(player.getDistanceSq(pos.getX() + 0.5D, pos.getY() + 0.5D, pos.getZ() + 0.5D) > 64.0D)
+        {
+            RejectLog.log(player, "door mat edit too far at " + pos);
+            return;
+        }
         TileEntity tileEntity = world.getTileEntity(pos);
         if(tileEntity instanceof TileEntityDoorMat)
         {
             TileEntityDoorMat doorMat = (TileEntityDoorMat) tileEntity;
-            doorMat.setMessage(message.message);
+            if(!doorMat.isEditor(player.getUniqueID()))
+            {
+                RejectLog.log(player, "door mat edit without placing it at " + pos);
+                return;
+            }
+            doorMat.setEditor(null);
+            doorMat.setMessage(TextLimits.truncate(message.message, TextLimits.MAX_DOOR_MAT_LENGTH));
             TileEntityUtil.markBlockForUpdate(world, pos);
         }
     }
