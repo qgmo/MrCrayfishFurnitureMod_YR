@@ -2,6 +2,7 @@ package com.mrcrayfish.furniture.client.browser;
 
 import com.mrcrayfish.furniture.MrCrayfishFurnitureMod;
 import com.mrcrayfish.furniture.computer.BrowserHistory;
+import com.mrcrayfish.furniture.computer.ItemIcons;
 import com.mrcrayfish.furniture.computer.PageParser;
 import com.mrcrayfish.furniture.computer.PageSnapshot;
 import com.mrcrayfish.furniture.computer.TypingSync;
@@ -11,11 +12,15 @@ import net.minecraft.client.network.NetHandlerPlayClient;
 import net.minecraft.client.resources.I18n;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
+import net.minecraft.nbt.JsonToNBT;
+import net.minecraft.nbt.NBTException;
+import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.util.ResourceLocation;
 import net.minecraft.util.math.BlockPos;
 
 import javax.annotation.Nullable;
 import java.io.IOException;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -128,7 +133,7 @@ public final class ComputerViews
         }
     }
 
-    /** 物品写法（注册名[@数据值]）→ 本地化名字 */
+    /** 物品写法 → 本地化名字 */
     @Nullable
     public static String itemName(String id)
     {
@@ -136,24 +141,65 @@ public final class ComputerViews
         return s.isEmpty() ? null : s.getDisplayName();
     }
 
+    /** 网页里 {@code data-yr-lang} 的翻译：只翻有的键，不带参数 */
+    @Nullable
+    public static String translate(String key)
+    {
+        return I18n.hasKey(key) ? I18n.format(key) : null;
+    }
+
+    /** 解析过的物品写法（画图标每帧都要用）；渲染线程与主线程都会调 */
+    private static final Map<String, ItemStack> STACKS = Collections.synchronizedMap(new LinkedHashMap<String, ItemStack>(64, 0.75f, true)
+    {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<String, ItemStack> eldest)
+        {
+            return size() > 256;
+        }
+    });
+
+    /** 物品写法 {@code 注册名[@数据值][{SNBT}]}（见 {@link ItemIcons}）→ 物品；认不出来为空 */
     public static ItemStack itemStack(String id)
+    {
+        ItemStack cached = STACKS.get(id);
+        if(cached != null)
+            return cached;
+        ItemStack s = parseItem(id);
+        STACKS.put(id, s);
+        return s;
+    }
+
+    static ItemStack parseItem(String id)
     {
         try
         {
-            String name = id;
+            String base = id;
+            NBTTagCompound tag = null;
+            int brace = id.indexOf('{');
+            if(brace >= 0)
+            {
+                if(id.length() - brace > ItemIcons.MAX_NBT)
+                    return ItemStack.EMPTY;
+                tag = ItemIcons.filter(JsonToNBT.getTagFromJson(id.substring(brace)));
+                base = id.substring(0, brace);
+            }
+            String name = base;
             int meta = 0;
-            int at = id.indexOf('@');
+            int at = base.indexOf('@');
             if(at >= 0)
             {
-                name = id.substring(0, at);
-                meta = Integer.parseInt(id.substring(at + 1));
+                name = base.substring(0, at);
+                meta = Integer.parseInt(base.substring(at + 1));
             }
             Item item = Item.REGISTRY.getObject(new ResourceLocation(name));
             if(item == null || meta < 0 || meta > Short.MAX_VALUE)
                 return ItemStack.EMPTY;
-            return new ItemStack(item, 1, meta);
+            ItemStack stack = new ItemStack(item, 1, meta);
+            if(tag != null)
+                stack.setTagCompound(tag);
+            return stack;
         }
-        catch(RuntimeException e)
+        catch(RuntimeException | NBTException e)
         {
             return ItemStack.EMPTY;
         }
@@ -169,7 +215,7 @@ public final class ComputerViews
             RenderedPage page = null;
             try
             {
-                PageDocument doc = PageDocument.parse(html, mode, url, ComputerViews::itemName, PageRenderer.VIEW_WIDTH);
+                PageDocument doc = PageDocument.parse(html, mode, url, ComputerViews::itemName, ComputerViews::translate, PageRenderer.VIEW_WIDTH);
                 page = PageRenderer.render(doc, images, scale);
             }
             catch(PageDocument.Invalid e)

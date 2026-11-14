@@ -21,8 +21,12 @@ public final class Html
                 case '"': sb.append("&quot;"); break;
                 case '\'': sb.append("&#39;"); break;
                 default:
-                    // XML 1.0 不许的控制字符去掉
-                    if(c >= 0x20 || c == '\n' || c == '\t' || c == '\r')
+                    // XML 1.0 不许的字符去掉：控制字符、U+FFFE / U+FFFF、落单的代理项（否则整页解析失败）
+                    if(Character.isHighSurrogate(c) && i + 1 < s.length() && Character.isLowSurrogate(s.charAt(i + 1)))
+                    {
+                        sb.append(c).append(s.charAt(++i));
+                    }
+                    else if((c >= 0x20 || c == '\n' || c == '\t' || c == '\r') && c != 0xFFFE && c != 0xFFFF && !Character.isSurrogate(c))
                         sb.append(c);
             }
         }

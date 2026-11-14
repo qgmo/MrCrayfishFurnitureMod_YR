@@ -32,6 +32,12 @@ public final class WebResponse
         return new WebResponse(200, "OK", XHTML, page.getBytes(StandardCharsets.UTF_8), Collections.<String, String>emptyMap());
     }
 
+    /** 一页 XHTML，带指定的状态码（例如表单不合格时 422 回原页面并说明原因） */
+    public static WebResponse xhtml(int status, String reason, String page)
+    {
+        return new WebResponse(status, reason, XHTML, page.getBytes(StandardCharsets.UTF_8), Collections.<String, String>emptyMap());
+    }
+
     /** 303：提交表单后跳到结果页（浏览器改用 GET 打开 location） */
     public static WebResponse seeOther(String location)
     {
