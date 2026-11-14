@@ -145,6 +145,14 @@ public class BlockDigitalClock extends BlockFurnitureTile
         super.breakBlock(worldIn, pos, state);
     }
 
+    /** 一叠里取一个（有的电池一叠多个时不肯放电，要按单个判断） */
+    private static ItemStack single(ItemStack stack)
+    {
+        ItemStack one = stack.copy();
+        one.setCount(1);
+        return one;
+    }
+
     @Override
     public boolean onBlockActivated(World worldIn, BlockPos pos, IBlockState state, EntityPlayer playerIn, EnumHand hand, EnumFacing facing, float hitX, float hitY, float hitZ)
     {
@@ -163,11 +171,10 @@ public class BlockDigitalClock extends BlockFurnitureTile
                     heldItem.shrink(1);
                 }
             }
-            else if(!heldItem.isEmpty() && ClockBatteries.isBattery(heldItem))
+            else if(!heldItem.isEmpty() && ClockBatteries.isBattery(single(heldItem)))
             {
                 // 拿电池右键：放进去；里面已经有电池就和手上的交换
-                ItemStack one = heldItem.copy();
-                one.setCount(1);
+                ItemStack one = single(heldItem);
                 ItemStack old = digitalClock.swapBattery(one);
                 heldItem.shrink(1);
                 if(!old.isEmpty())
