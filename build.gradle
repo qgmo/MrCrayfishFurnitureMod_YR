@@ -49,7 +49,19 @@ repositories {
     mavenCentral()
 }
 
+configurations {
+    // 打进模组 jar 的库（只有 Java 类；本地库不打包，玩家第一次用时按平台下载，见 client.tv.NativeLibs）
+    shade
+    implementation.extendsFrom shade
+}
+
 dependencies {
+    // 电视播放视频：JavaCV / JavaCPP / FFmpeg 的 Java 部分（Apache-2.0；FFmpeg 本地库是 LGPL 版）。
+    // 不要传递依赖（javacv 的 pom 会拉进 OpenCV 等用不到的预设）。版本须与 NativeLibs 里写死的本地库一致。
+    shade('org.bytedeco:javacv:1.5.14') { transitive = false }
+    shade('org.bytedeco:javacpp:1.5.14') { transitive = false }
+    shade('org.bytedeco:ffmpeg:8.1.2-1.5.14') { transitive = false }
+
     compileOnly rfg.deobf('CraftTweaker2:CraftTweaker2-API:1.12-4.1.20.675')
     compileOnly rfg.deobf('CraftTweaker2:CraftTweaker2-MC1120-Main:1.12-4.1.20.675')
     compileOnly rfg.deobf('CraftTweaker2:ZenScript:1.12-4.1.20.675')
@@ -74,6 +86,13 @@ processResources {
 }
 
 jar {
+    // 把 JavaCV 等的类并进模组 jar；Java 9+ 的 module-info、多版本目录、签名去掉（Forge 1.12 扫描 jar 时不认）
+    from({ configurations.shade.collect { zipTree(it) } }) {
+        exclude 'module-info.class', 'META-INF/**', '**/package-info.class'
+        // Maven 插件、OpenCL 内核等用不到的部分
+        exclude 'org/bytedeco/javacpp/tools/*Mojo*', 'org/bytedeco/javacv/*.cl'
+    }
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     manifest {
         attributes([
                 "Specification-Title": "MrCrayfish's Furniture Mod",

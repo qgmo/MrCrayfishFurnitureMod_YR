@@ -1,0 +1,13 @@
+This jar bundles the Java classes of the following libraries (unmodified):
+
+- JavaCV 1.5.14 (org.bytedeco:javacv) - Apache License 2.0 (see Apache-2.0.txt)
+  https://github.com/bytedeco/javacv
+- JavaCPP 1.5.14 (org.bytedeco:javacpp) - Apache License 2.0 (see Apache-2.0.txt)
+  https://github.com/bytedeco/javacpp
+- JavaCPP Presets for FFmpeg 8.1.2-1.5.14 (org.bytedeco:ffmpeg) - Apache License 2.0 (see Apache-2.0.txt)
+  https://github.com/bytedeco/javacpp-presets
+
+The FFmpeg native libraries are NOT bundled. On first use the client downloads the
+LGPL build of FFmpeg 8.1.2 for its platform (org.bytedeco:ffmpeg:8.1.2-1.5.14:<platform>,
+FFmpeg is licensed under the GNU LGPL v3 for that build) and verifies its SHA-256.
+FFmpeg source code: https://ffmpeg.org/download.html
