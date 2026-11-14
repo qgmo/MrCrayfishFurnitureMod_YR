@@ -444,7 +444,9 @@ public final class Browser
             return;
         }
         PageSnapshot.Connection conn = resp.tls == null ? null : PageSnapshot.Connection.of(resp.tls);
-        formAccepted(req);
+        // 只有成功（2xx）才算网站收下了表单；4xx / 5xx 是提交失败，原页面表单里填的保留
+        if(resp.status / 100 == 2)
+            formAccepted(req);
         // 图片：先把页面列的图取回来（只走游戏内网络，大小、尺寸有上限），再渲染
         try
         {

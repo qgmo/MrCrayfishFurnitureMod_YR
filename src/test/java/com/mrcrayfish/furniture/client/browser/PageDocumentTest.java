@@ -232,4 +232,17 @@ class PageDocumentTest
         PageDocument d = parse("<html><body style=\"font-family: Arial, 'Comic Sans MS'\"><p style=\"font-family: monospace\">等宽 abc</p><p>中文</p></body></html>");
         assertNotNull(PageRenderer.render(d, new HashMap<>(), 1.0));
     }
+
+    @Test
+    void translatesLangKeys() throws Exception
+    {
+        String page = "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body><p><span data-yr-lang=\"enchantment.untouching\">Silk Touch</span>|"
+                + "<span data-yr-lang=\"no.such.key\">原文</span>|<span data-yr-lang=\"bad key&lt;\">坏键</span>|"
+                + "<span data-yr-lang=\"enchantment.untouching\"><b>有子元素</b></span></p></body></html>";
+        Map<String, String> lang = new HashMap<>();
+        lang.put("enchantment.untouching", "精准采集");
+        lang.put("bad key<", "不该用");
+        PageDocument d = PageDocument.parse(page.getBytes(StandardCharsets.UTF_8), "https://minebay.yr/", id -> null, lang::get, 600);
+        assertEquals("精准采集|原文|坏键|有子元素", d.dom.getElementsByTagNameNS("*", "p").item(0).getTextContent());
+    }
 }

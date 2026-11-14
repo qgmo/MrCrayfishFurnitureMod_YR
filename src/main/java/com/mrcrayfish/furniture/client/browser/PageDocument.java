@@ -36,6 +36,7 @@ import java.util.regex.Pattern;
  * <li>{@code <input type="submit">} 等改写成 {@code <button>}，好让内核按文字排版；</li>
  * <li>给链接、表单控件、物品图标编号（{@code data-yr-n}），渲染后按编号找到它们在页面上的位置；</li>
  * <li>{@code data-yr-item-name="注册名[@数据值]"} 的空元素填上本地化的物品名（服务器不知道玩家的语言）；</li>
+ * <li>{@code data-yr-lang="翻译键"} 的元素（里面只有文字时）换成玩家语言里的这句（附魔名、药水效果名等；键只能是字母数字与 {@code ._-}，翻不了时保留原文）；</li>
  * <li>注入默认样式（字体、表单控件大小、页面宽度）。</li>
  * </ul>
  * 只认 XHTML（XML 语法）；常见的 HTML 命名实体（{@code &nbsp;} 等）先换成数字引用。
@@ -158,6 +159,12 @@ public final class PageDocument
      */
     public static PageDocument parse(byte[] xhtml, String baseUrl, Function<String, String> itemName, int viewWidth) throws Invalid
     {
+        return parse(xhtml, baseUrl, itemName, key -> null, viewWidth);
+    }
+
+    /** @param lang 翻译键 → 玩家语言里的文字（没有返回 null） */
+    public static PageDocument parse(byte[] xhtml, String baseUrl, Function<String, String> itemName, Function<String, String> lang, int viewWidth) throws Invalid
+    {
         PageLimits.Problem p = PageLimits.check(xhtml);
         if(p != null)
             throw new Invalid(p, p.name());
@@ -165,7 +172,7 @@ public final class PageDocument
         Element root = dom.getDocumentElement();
         if(root == null || !local(root).equals("html"))
             throw new Invalid(PageLimits.Problem.MALFORMED, "根元素不是 html");
-        return new Builder(dom, baseUrl, itemName, viewWidth).build();
+        return new Builder(dom, baseUrl, itemName, lang, viewWidth).build();
     }
 
     static Document parseXml(String text) throws Invalid
@@ -208,6 +215,7 @@ public final class PageDocument
         }
     }
 
+    static final Pattern LANG_KEY = Pattern.compile("[A-Za-z0-9._-]{1,128}");
     private static final Map<String, Integer> ENTITIES = new HashMap<>();
     private static final Pattern ENTITY = Pattern.compile("&([a-zA-Z][a-zA-Z0-9]{1,8});");
 
@@ -263,6 +271,7 @@ public final class PageDocument
         final Document dom;
         final String baseUrl;
         final Function<String, String> itemName;
+        final Function<String, String> lang;
         final int viewWidth;
         final List<FormInfo> forms = new ArrayList<>();
         final Map<Element, Integer> formIndex = new HashMap<>();
@@ -272,8 +281,9 @@ public final class PageDocument
         final Set<String> images = new LinkedHashSet<>();
         int next;
 
-        Builder(Document dom, String baseUrl, Function<String, String> itemName, int viewWidth)
+        Builder(Document dom, String baseUrl, Function<String, String> itemName, Function<String, String> lang, int viewWidth)
         {
+            this.lang = lang;
             this.dom = dom;
             this.baseUrl = baseUrl;
             this.itemName = itemName;
@@ -362,6 +372,13 @@ public final class PageDocument
                 String name = itemName.apply(nameOf);
                 if(name != null)
                     e.setTextContent(name);
+            }
+            String key = e.getAttribute("data-yr-lang");
+            if(!key.isEmpty() && LANG_KEY.matcher(key).matches() && !hasElementChildren(e))
+            {
+                String text = lang.apply(key);
+                if(text != null)
+                    e.setTextContent(text.length() > 200 ? text.substring(0, 200) : text);
             }
             switch(tag)
             {
