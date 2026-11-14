@@ -288,6 +288,71 @@ class PageDocumentTest
     }
 
     @Test
+    void bundledFontCoversGb2312AndBig5CommonCharacters() throws Exception
+    {
+        java.awt.Font f;
+        try(java.io.InputStream in = PageRenderer.class.getResourceAsStream("/assets/cfm/fonts/YRSans-Regular.ttf"))
+        {
+            f = java.awt.Font.createFont(java.awt.Font.TRUETYPE_FONT, in);
+        }
+        assertEquals(PageRenderer.FONT_FAMILY, f.getFamily(java.util.Locale.ROOT));
+        int missingGb = 0, missingBig5 = 0;
+        for(int hi = 0xA1; hi < 0xF8; hi++)
+        {
+            for(int lo = 0xA1; lo < 0xFF; lo++)
+            {
+                String c = decode(new byte[]{(byte) hi, (byte) lo}, "GB2312");
+                if(c != null && !f.canDisplay(c.codePointAt(0)))
+                    missingGb++;
+            }
+        }
+        // Big5 一级字（常用字）
+        for(int code = 0xA440; code <= 0xC67E; code++)
+        {
+            int lo = code & 0xFF;
+            if(!(lo >= 0x40 && lo <= 0x7E || lo >= 0xA1 && lo <= 0xFE))
+                continue;
+            String c = decode(new byte[]{(byte) (code >> 8), (byte) lo}, "Big5");
+            if(c != null && !f.canDisplay(c.codePointAt(0)))
+                missingBig5++;
+        }
+        assertEquals(0, missingGb);
+        assertEquals(0, missingBig5);
+        assertEquals(-1, f.canDisplayUpTo("繁體中文：這個網頁說明們與體驗 臺灣"), "常用繁体字");
+    }
+
+    static String decode(byte[] b, String charset)
+    {
+        String s = new String(b, java.nio.charset.Charset.forName(charset));
+        return s.length() == 1 && s.charAt(0) != '\uFFFD' ? s : null;
+    }
+
+    @Test
+    void missingGlyphsFallBackToSystemFonts() throws Exception
+    {
+        PageRenderer.init();
+        // 字体清单：页面写的 → 自带的 → 系统的逻辑字体 Dialog（按系统的回退链找能显示的）
+        com.openhtmltopdf.layout.SharedContext ctx = new com.openhtmltopdf.layout.SharedContext();
+        PageRenderer.FallbackFontResolver r = new PageRenderer.FallbackFontResolver(ctx);
+        r.setFontMapping("Serif", new java.awt.Font("Serif", java.awt.Font.PLAIN, 1));
+        com.openhtmltopdf.java2d.Java2DFont f = (com.openhtmltopdf.java2d.Java2DFont) r.resolveFont(ctx, new String[]{"Arial"}, 14f,
+                com.openhtmltopdf.css.constants.IdentValue.FONT_WEIGHT_700, com.openhtmltopdf.css.constants.IdentValue.NORMAL, null);
+        java.awt.Font last = f.getAWTFonts().get(f.getAWTFonts().size() - 1);
+        assertEquals(java.awt.Font.DIALOG, last.getName());
+        assertTrue(last.isBold());
+        assertEquals(14f, last.getSize2D());
+        // 整页渲染：繁体字、自带字体里没有的字（谚文、生僻字）都不出错
+        PageDocument d = parse("<html><body><p style=\"font-size:40px\">繁體網頁</p><p>한국어 𠀀 ㄅㄆㄇ</p></body></html>");
+        RenderedPage p = PageRenderer.render(d, new HashMap<>(), 1.0);
+        int dark = 0;
+        for(int y = 0; y < 60; y++)
+            for(int x = 0; x < 200; x++)
+                if((p.image.getRGB(x, y) & 0xFF) < 100)
+                    dark++;
+        assertTrue(dark > 300, "繁体字画出来了：" + dark);
+    }
+
+    @Test
     void unknownFontsFallBackToBundledFont() throws Exception
     {
         PageDocument d = parse("<html><body style=\"font-family: Arial, 'Comic Sans MS'\"><p style=\"font-family: monospace\">等宽 abc</p><p>中文</p></body></html>");

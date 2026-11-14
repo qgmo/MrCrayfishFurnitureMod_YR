@@ -189,7 +189,7 @@ public final class PageDocument
     /** 注入的默认样式（网站的样式写在后面，能覆盖） */
     static String userAgentCss()
     {
-        return "html { font-family: 'YR Sans SC', sans-serif; font-size: 14px; background: #fff; color: #000; }\n"
+        return "html { font-family: 'YR Sans', sans-serif; font-size: 14px; background: #fff; color: #000; }\n"
                 + "body { margin: 8px; }\n"
                 + "a { color: #0645ad; text-decoration: underline; }\n"
                 + "input, textarea, select { display: inline-block; width: 160px; height: 18px; padding: 2px 3px; border: 1px solid #767676; background: #fff; vertical-align: middle; }\n"
