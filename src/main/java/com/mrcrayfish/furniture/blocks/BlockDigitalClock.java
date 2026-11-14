@@ -1,5 +1,6 @@
 package com.mrcrayfish.furniture.blocks;
 
+import com.mrcrayfish.furniture.compat.ClockBatteries;
 import com.mrcrayfish.furniture.tileentity.IColored;
 import com.mrcrayfish.furniture.tileentity.TileEntityDigitalClock;
 import com.mrcrayfish.furniture.util.Bounds;
@@ -25,9 +26,12 @@ import net.minecraft.util.EnumHand;
 import net.minecraft.util.math.AxisAlignedBB;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.RayTraceResult;
+import net.minecraft.util.text.TextComponentTranslation;
 import net.minecraft.util.text.TextFormatting;
 import net.minecraft.world.IBlockAccess;
 import net.minecraft.world.World;
+
+import net.minecraftforge.items.ItemHandlerHelper;
 
 import javax.annotation.Nullable;
 import java.util.List;
@@ -126,23 +130,70 @@ public class BlockDigitalClock extends BlockFurnitureTile
     }
 
     @Override
+    public void breakBlock(World worldIn, BlockPos pos, IBlockState state)
+    {
+        // 拆掉时（挖掉、爆炸、被别的方块顶掉）电池掉出来
+        TileEntity tileEntity = worldIn.getTileEntity(pos);
+        if(tileEntity instanceof TileEntityDigitalClock && !worldIn.isRemote)
+        {
+            ItemStack battery = ((TileEntityDigitalClock) tileEntity).getBattery();
+            if(!battery.isEmpty())
+            {
+                spawnAsEntity(worldIn, pos, battery.copy());
+            }
+        }
+        super.breakBlock(worldIn, pos, state);
+    }
+
+    @Override
     public boolean onBlockActivated(World worldIn, BlockPos pos, IBlockState state, EntityPlayer playerIn, EnumHand hand, EnumFacing facing, float hitX, float hitY, float hitZ)
     {
         if(!worldIn.isRemote)
         {
+            TileEntity tileEntity = worldIn.getTileEntity(pos);
+            if(!(tileEntity instanceof TileEntityDigitalClock))
+                return true;
+            TileEntityDigitalClock digitalClock = (TileEntityDigitalClock) tileEntity;
             ItemStack heldItem = playerIn.getHeldItem(hand);
             if(!heldItem.isEmpty() && heldItem.getItem() instanceof ItemDye)
             {
-                TileEntity tileEntity = worldIn.getTileEntity(pos);
-                if(tileEntity instanceof TileEntityDigitalClock)
+                digitalClock.setTextColorColor(EnumDyeColor.byDyeDamage(heldItem.getMetadata()));
+                if(!playerIn.capabilities.isCreativeMode)
                 {
-                    TileEntityDigitalClock digitalClock = (TileEntityDigitalClock) tileEntity;
-                    digitalClock.setTextColorColor(EnumDyeColor.byDyeDamage(heldItem.getMetadata()));
-                    if(!playerIn.capabilities.isCreativeMode)
+                    heldItem.shrink(1);
+                }
+            }
+            else if(!heldItem.isEmpty() && ClockBatteries.isBattery(heldItem))
+            {
+                // 拿电池右键：放进去；里面已经有电池就和手上的交换
+                ItemStack one = heldItem.copy();
+                one.setCount(1);
+                ItemStack old = digitalClock.swapBattery(one);
+                heldItem.shrink(1);
+                if(!old.isEmpty())
+                {
+                    if(heldItem.isEmpty())
                     {
-                        heldItem.shrink(1);
+                        playerIn.setHeldItem(hand, old);
+                    }
+                    else
+                    {
+                        ItemHandlerHelper.giveItemToPlayer(playerIn, old);
                     }
                 }
+            }
+            else if(heldItem.isEmpty() && playerIn.isSneaking() && digitalClock.hasBattery())
+            {
+                // 潜行空手右键：取出电池
+                ItemHandlerHelper.giveItemToPlayer(playerIn, digitalClock.removeBattery());
+            }
+            else if(!digitalClock.hasBattery())
+            {
+                playerIn.sendStatusMessage(new TextComponentTranslation("cfm.message.clock_no_battery"), true);
+            }
+            else if(!digitalClock.isPowered())
+            {
+                playerIn.sendStatusMessage(new TextComponentTranslation("cfm.message.clock_battery_empty"), true);
             }
         }
         return true;

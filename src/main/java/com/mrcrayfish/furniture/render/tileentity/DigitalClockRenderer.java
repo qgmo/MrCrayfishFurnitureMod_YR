@@ -25,6 +25,10 @@ public class DigitalClockRenderer extends TileEntitySpecialRenderer<TileEntityDi
         if(state.getBlock() != FurnitureBlocks.DIGITAL_CLOCK)
             return;
 
+        // 没电池或没电：屏幕黑着，不显示时间
+        if(!te.isPowered())
+            return;
+
         GlStateManager.pushMatrix();
         {
             GlStateManager.translate(x, y, z);

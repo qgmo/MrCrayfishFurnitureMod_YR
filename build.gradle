@@ -38,6 +38,14 @@ repositories {
         url = 'https://maven.blamejared.com'
         name = 'BlameJared Maven'
     }
+    maven {
+        // 工业时代 2 的 API（可选依赖，只编译）
+        url = 'https://maven.ic2.player.to'
+        name = 'IC2 Maven'
+        content {
+            includeGroup 'net.industrial-craft'
+        }
+    }
     mavenCentral()
 }
 
@@ -45,6 +53,10 @@ dependencies {
     compileOnly rfg.deobf('CraftTweaker2:CraftTweaker2-API:1.12-4.1.20.675')
     compileOnly rfg.deobf('CraftTweaker2:CraftTweaker2-MC1120-Main:1.12-4.1.20.675')
     compileOnly rfg.deobf('CraftTweaker2:ZenScript:1.12-4.1.20.675')
+
+    // 工业时代 2（与现网同版本）：可选依赖，只编译 API 包，不打包；数字时钟用它的电器管理器取电，
+    // 没装 IC2 时不加载相关的类（见 compat.ClockBatteries）
+    compileOnly 'net.industrial-craft:industrialcraft-2:2.8.221-ex112:api'
 
     testImplementation 'org.junit.jupiter:junit-jupiter:5.7.1'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'

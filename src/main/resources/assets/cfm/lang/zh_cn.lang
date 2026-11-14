@@ -480,7 +480,7 @@ cfm.desk.info=书桌可以连接到其他书桌以设计出你想要的任何形
 cfm.desk_cabinet.info=书桌柜可以连接到其他书桌柜以设计出你想要的任何形状和长度，它也可以与书桌连在一起。
 cfm.mail_signed.info=来自%s
 cfm.present_unsigned.info=未签名的
-cfm.digital_clock.info=以24小时格式显示主世界的当前时间，显示器可以用你选择的染料来改变颜色。
+cfm.digital_clock.info=以24小时格式显示主世界的当前时间。需要装一节电池才会走：拿电池右键放入（已有电池时和手上的交换），潜行空手右键取出。每2分钟耗1 FE；SCP 的电池、IC2 的电池和其他提供 Forge Energy 的电池都可以。显示器可以用你选择的染料来改变颜色。
 cfm.tv_remote.info=允许你无线控制电视。要切换频道，只需对准电视右击即可，你也可以通过潜行开启或关闭电视。
 
 cfm.tv.success=成功下载 GIF 文件
@@ -562,6 +562,8 @@ cfm.message.mailbox_break=你需要成为信箱的所有者来破坏它。
 cfm.message.mailbox_ownerrequest=现在右击信箱与玩家进行绑定。
 cfm.message.mailbox_ownerget=信箱的所有者已成功设置为%s。
 cfm.message.mailbox_belong=这个信箱属于%s。
+cfm.message.clock_no_battery=数字时钟需要装电池，拿电池右键放入。
+cfm.message.clock_battery_empty=电池没电了。换一节电池，或者潜行空手右键取出。
 cfm.message.login1=感谢下载 MrCrayfish 的家具模组。
 cfm.message.login1.info=你可以在配置文件中禁用这条登录消息。
 cfm.message.login2.info=打开链接
