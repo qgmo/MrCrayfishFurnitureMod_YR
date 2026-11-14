@@ -645,3 +645,4 @@ cfm.tv_remote.charge=电池：%s / %s FE
 cfm.tv_remote.battery_compartment=电池仓
 cfm.message.remote_no_battery=遥控器里没有电池。不对着电视时潜行右击，打开电池仓装电池。
 cfm.message.remote_empty=遥控器没电了。
+cfm.electric_fence.charge=电量：%s / %s FE

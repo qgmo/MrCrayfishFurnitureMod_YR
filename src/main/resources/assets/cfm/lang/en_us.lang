@@ -655,3 +655,4 @@ cfm.tv_remote.charge=Battery: %s / %s FE
 cfm.tv_remote.battery_compartment=Battery Compartment
 cfm.message.remote_no_battery=The remote has no battery. Sneak and right click while not pointing at a TV to open the battery compartment.
 cfm.message.remote_empty=The remote's battery is drained.
+cfm.electric_fence.charge=Energy: %s / %s FE

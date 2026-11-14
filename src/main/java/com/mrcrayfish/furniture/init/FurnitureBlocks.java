@@ -416,7 +416,7 @@ public class FurnitureBlocks
         registerBlock(TV);
         registerBlock(COMPUTER);
         registerBlock(PRINTER);
-        registerBlock(ELECTRIC_FENCE);
+        registerBlock(ELECTRIC_FENCE, new ItemElectricFence(ELECTRIC_FENCE));
         registerBlock(DOOR_BELL);
         registerBlock(DOOR_BELL_SPRUCE);
         registerBlock(DOOR_BELL_BIRCH);
