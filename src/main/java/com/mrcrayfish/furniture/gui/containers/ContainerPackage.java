@@ -53,12 +53,6 @@ public class ContainerPackage extends ContainerItemInventory
     }
 
     @Override
-    public boolean canInteractWith(EntityPlayer player)
-    {
-        return this.itemInventory.isUsableByPlayer(player);
-    }
-
-    @Override
     public ItemStack transferStackInSlot(EntityPlayer player, int slotNum)
     {
         ItemStack itemCopy = ItemStack.EMPTY;

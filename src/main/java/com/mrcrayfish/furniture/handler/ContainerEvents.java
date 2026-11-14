@@ -2,13 +2,7 @@ package com.mrcrayfish.furniture.handler;
 
 import com.mrcrayfish.furniture.Reference;
 import com.mrcrayfish.furniture.gui.containers.ContainerItemInventory;
-import com.mrcrayfish.furniture.gui.inventory.ItemInventory;
-import com.mrcrayfish.furniture.items.IItemInventory;
-import com.mrcrayfish.furniture.util.NBTHelper;
 import net.minecraft.inventory.Container;
-import net.minecraft.item.ItemStack;
-import net.minecraft.nbt.NBTTagCompound;
-import net.minecraft.nbt.NBTTagList;
 import net.minecraftforge.event.entity.player.PlayerContainerEvent;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
@@ -25,36 +19,10 @@ public class ContainerEvents
         Container container = event.getContainer();
         if(container instanceof ContainerItemInventory)
         {
-            ItemStack heldItem = event.getEntityPlayer().getHeldItemMainhand();
-            if(heldItem.getItem() instanceof IItemInventory)
-            {
-                ContainerItemInventory itemInventory = (ContainerItemInventory) container;
-                ContainerEvents.saveInventoryToItemStack(itemInventory.getItemInventory(), heldItem);
-            }
+            // 写回打开界面时的那个物品（悠然服务器魔改）。原来写到关界面时主手的物品上，
+            // 主手换了东西时原物品保留旧内容，取出的东西就多出一份。签名时（MessageSignItem）
+            // 新物品复制的是原物品当时的 NBT，内容已随每次改动写回，不受影响。
+            ((ContainerItemInventory) container).getItemInventory().saveToStack();
         }
-    }
-
-    /**
-     * Saves an IInventory to an ItemStack's NBT.
-     *
-     * @param inventory the inventory to save
-     * @param stack the ItemStack to save the inventory to
-     */
-    private static void saveInventoryToItemStack(ItemInventory inventory, ItemStack stack)
-    {
-        NBTTagCompound tagCompound = new NBTTagCompound();
-        NBTTagList itemList = new NBTTagList();
-        for(int i = 0; i < inventory.getSizeInventory(); i++)
-        {
-            if(!inventory.getStackInSlot(i).isEmpty())
-            {
-                NBTTagCompound slotEntry = new NBTTagCompound();
-                slotEntry.setByte("Slot", (byte) i);
-                inventory.getStackInSlot(i).writeToNBT(slotEntry);
-                itemList.appendTag(slotEntry);
-            }
-        }
-        tagCompound.setTag("Items", itemList);
-        NBTHelper.setCompoundTag(stack, inventory.getName(), tagCompound);
     }
 }
