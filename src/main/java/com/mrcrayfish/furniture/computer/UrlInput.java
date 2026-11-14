@@ -1,12 +1,14 @@
 package com.mrcrayfish.furniture.computer;
 
+import moe.qingu.youran.api.network.DomainNames;
 import moe.qingu.youran.api.network.Ipv6Address;
 
 import javax.annotation.Nullable;
-import java.net.IDN;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -17,7 +19,9 @@ import java.util.regex.Pattern;
  * <li>只写域名或路径（{@code minebay.yr}、{@code test.yr/abc}）时补 {@code http://}；</li>
  * <li>支持 IPv6 地址：{@code http://[fd00::2]:8080/}，也可以只写 {@code [fd00::2]} 或 {@code fd00::2}；</li>
  * <li>只开 {@code http://}、{@code https://}，以及内置页 {@value #HOME}；{@code file:}、{@code ftp:}、{@code javascript:} 等给出明确提示；</li>
- * <li>长度不超过 {@value #MAX_LENGTH}；路径、查询里的空格和非 ASCII 字符按 UTF-8 写成 {@code %XX}，域名转成 IDNA（punycode），去掉 {@code #片段}。</li>
+ * <li>长度不超过 {@value #MAX_LENGTH}；路径、查询里的空格和非 ASCII 字符按 UTF-8 写成 {@code %XX}，去掉 {@code #片段}；</li>
+ * <li>国际化域名（{@code 测试.yr}）转成 A-label（{@code xn--0zwm56d.yr}，见 YouranMod 的 {@link DomainNames}）；给人看时用 {@link #display}
+ * 转回 Unicode，同一级里混用不同文字系统时照主流浏览器的防仿冒做法保留 {@code xn--} 形式。</li>
  * </ul>
  */
 public final class UrlInput
@@ -169,17 +173,10 @@ public final class UrlInput
             String name = colon >= 0 ? authority.substring(0, colon) : authority;
             if(colon >= 0)
                 portText = authority.substring(colon + 1);
-            String ascii;
-            try
-            {
-                ascii = IDN.toASCII(name, IDN.ALLOW_UNASSIGNED).toLowerCase(Locale.ROOT);
-            }
-            catch(IllegalArgumentException e)
-            {
+            // 国际化域名：转成 A-label（xn--…），请求、DNS、证书都用它（服主 11-14）；转不了算格式不对
+            String ascii = DomainNames.tryToAscii(name);
+            if(ascii == null)
                 return Result.fail(Error.MALFORMED, null);
-            }
-            if(ascii.endsWith("."))
-                ascii = ascii.substring(0, ascii.length() - 1);
             if(ascii.isEmpty() || ascii.length() > 253 || !HOST_NAME.matcher(ascii).matches())
                 return Result.fail(Error.MALFORMED, null);
             host = ascii;
@@ -307,6 +304,43 @@ public final class UrlInput
         int colon = authority.lastIndexOf(':');
         String host = colon >= 0 ? authority.substring(0, colon) : authority;
         return host.isEmpty() ? null : host.toLowerCase(Locale.ROOT);
+    }
+
+    /**
+     * 给人看的网址：主机名转回 Unicode（混用文字系统的那一级保留 {@code xn--}，防仿冒）；路径、查询原样。
+     * 不是 http / https 网址时原样返回。
+     */
+    public static String display(@Nullable String url)
+    {
+        if(url == null)
+            return "";
+        String host = hostOf(url);
+        if(host == null || host.startsWith("["))
+            return url;
+        String shown = DomainNames.toDisplay(host);
+        if(shown.equals(host))
+            return url;
+        int start = url.indexOf("://") + 3;
+        return url.substring(0, start) + shown + url.substring(start + host.length());
+    }
+
+    /** 连接信息里写的主机名：Unicode 写法（连接信息里两种写法都列出来，所以混用文字系统的也转，不按防仿冒保留 xn--） */
+    public static String unicodeHost(String host)
+    {
+        return host.startsWith("[") ? host : DomainNames.toUnicode(host);
+    }
+
+    /** 证书备用名：A-label 的后面括上 Unicode 写法 */
+    public static List<String> certificateNames(List<String> sans)
+    {
+        List<String> out = new ArrayList<>();
+        for(String s : sans)
+        {
+            String name = s.startsWith("DNS:") ? s.substring(4) : null;
+            String unicode = name != null && name.contains("xn--") ? DomainNames.toUnicode(name) : null;
+            out.add(unicode == null || unicode.equals(name) ? s : s + "（" + unicode + "）");
+        }
+        return out;
     }
 
     /** 两个网址是不是同一主机（不管协议、端口）：页面里的图片只从页面所在的网站取 */

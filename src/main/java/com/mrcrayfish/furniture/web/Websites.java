@@ -23,7 +23,8 @@ public final class Websites
 
     /**
      * @param hostKey 主机登记名，写成“模组 ID:名字”（如 {@code cfm:minebay}）；同一个名字以后拿到的地址不变
-     * @param domain  域名（如 {@code minebay.yr}）
+     * @param domain  域名（如 {@code minebay.yr}）；国际化域名可以直接写 Unicode（如 {@code 商店.悠然.yr}），YouranMod 登记时转成 A-label，
+     *                转不了时抛出 {@link IllegalArgumentException}
      */
     public static void register(String hostKey, String domain, WebHandler handler)
     {

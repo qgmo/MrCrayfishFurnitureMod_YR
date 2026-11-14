@@ -454,8 +454,8 @@ public class GuiBrowser extends GuiContainer
         {
             // 旁观：操作者正在地址栏里打的字（服主 11-14），没有就显示当前页面的网址
             TypingSync.Typed typed = ComputerViews.view(computer.getPos()).typed.get(TypingSync.ADDRESS);
-            boolean typing = typed != null && !typed.text.isEmpty() && !typed.text.equals(url);
-            String shown = fontRenderer.trimStringToWidth(typing ? typed.text : url, addrW - 6);
+            boolean typing = typed != null && !typed.text.isEmpty() && !typed.text.equals(UrlInput.display(url));
+            String shown = fontRenderer.trimStringToWidth(typing ? typed.text : UrlInput.display(url), addrW - 6);
             fontRenderer.drawString(shown, addrX + 3, toolbarY + 3, typing ? TEXT : TEXT_DIM);
         }
     }
@@ -732,7 +732,7 @@ public class GuiBrowser extends GuiContainer
             if(n >= 0 && doc.links.containsKey(n))
             {
                 String target = doc.links.get(n);
-                hoverText = target == null ? I18n.format("cfm.browser.link_unsupported") : target;
+                hoverText = target == null ? I18n.format("cfm.browser.link_unsupported") : UrlInput.display(target);
             }
         }
     }
@@ -777,6 +777,14 @@ public class GuiBrowser extends GuiContainer
         PageSnapshot.Connection c = connection();
         String url = currentUrl();
         out.add("§l" + I18n.format("cfm.browser.info.title"));
+        // 主机：国际化域名两种写法都写出来（显示用的 Unicode 与实际用的 A-label）
+        String host = UrlInput.hostOf(url);
+        if(host != null)
+        {
+            String unicode = UrlInput.unicodeHost(host);
+            out.add(unicode.equals(host) ? I18n.format("cfm.browser.info.host", host)
+                    : I18n.format("cfm.browser.info.host_idn", unicode, host));
+        }
         if(c == null)
         {
             out.add(I18n.format(url.startsWith("http://") ? "cfm.browser.info.insecure" : "cfm.browser.info.local"));
@@ -799,7 +807,7 @@ public class GuiBrowser extends GuiContainer
             out.add(I18n.format("cfm.browser.info.issuer", ci.issuer));
             out.add(I18n.format("cfm.browser.info.validity", f.format(ci.notBefore), f.format(ci.notAfter)));
             out.add(I18n.format("cfm.browser.info.sha256", ci.sha256));
-            out.add(I18n.format("cfm.browser.info.san", ci.subjectAltNames.isEmpty() ? "-" : String.join(", ", ci.subjectAltNames)));
+            out.add(I18n.format("cfm.browser.info.san", ci.subjectAltNames.isEmpty() ? "-" : String.join(", ", UrlInput.certificateNames(ci.subjectAltNames))));
         }
         out.add("");
         out.add("§7" + I18n.format("cfm.browser.info.root"));

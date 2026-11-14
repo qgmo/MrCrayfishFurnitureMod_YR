@@ -258,7 +258,7 @@ public final class Browser
         reportedHistory = h;
         Entry cur = current();
         addressEdited = false;
-        address.setText(cur.url);
+        address.setText(UrlInput.display(cur.url));
         load(cur);
     }
 
@@ -298,7 +298,7 @@ public final class Browser
             return;
         }
         addressEdited = false;
-        address.setText(url);
+        address.setText(UrlInput.display(url));
         navigate(new Request(url, "GET", null, null, -1));
     }
 
@@ -328,7 +328,7 @@ public final class Browser
         if(e == null)
             return;
         addressEdited = false;
-        address.setText(e.url);
+        address.setText(UrlInput.display(e.url));
         navigate(new Request(e.url, "GET", null, null, -1));
     }
 
@@ -349,7 +349,7 @@ public final class Browser
         if(!addressEdited || old != null)
         {
             addressEdited = false;
-            address.setText(current().url);
+            address.setText(UrlInput.display(current().url));
         }
         setStatus(Status.IDLE, "");
         reportHistorySoon();
@@ -378,7 +378,7 @@ public final class Browser
         addressEdited = false;
         if(info.post)
         {
-            address.setText(info.action);
+            address.setText(UrlInput.display(info.action));
             navigate(new Request(info.action, "POST", encoded.getBytes(StandardCharsets.US_ASCII), e, form));
         }
         else
@@ -392,7 +392,7 @@ public final class Browser
                 showError(url, BuiltinPages.Error.URL_TOO_LONG, null, false);
                 return;
             }
-            address.setText(r.url);
+            address.setText(UrlInput.display(r.url));
             navigate(new Request(r.url, "GET", null, e, form));
         }
     }
@@ -502,7 +502,7 @@ public final class Browser
             formAccepted(req);
             Request r = new Request(next, keep ? req.method : "GET", keep ? req.body : null, keep ? req.fromEntry : null, keep ? req.fromForm : -1);
             if(!addressEdited || req.fromEntry != null)
-                address.setText(next);
+                address.setText(UrlInput.display(next));
             fetch(s, r, redirects + 1, gen);
             return;
         }
@@ -595,7 +595,7 @@ public final class Browser
     {
         push(new Entry(req.url, html, mode, conn, images, false));
         // 打开成功：地址栏换成实际的网址（失败时才保留敲的原样）
-        address.setText(req.url);
+        address.setText(UrlInput.display(req.url));
         addressEdited = false;
         setStatus(Status.IDLE, "");
     }
@@ -655,7 +655,7 @@ public final class Browser
         waiting = null;
         push(new Entry(url, BuiltinPages.error(ComputerViews.TR, e, url, detail), PageParser.Mode.XHTML, null, Collections.<String, byte[]>emptyMap(), true));
         if(!keepAddress && !addressEdited && !url.isEmpty())
-            address.setText(url);
+            address.setText(UrlInput.display(url));
         setStatus(Status.IDLE, "");
     }
 
@@ -664,7 +664,7 @@ public final class Browser
         push(new Entry(url, html, PageParser.Mode.XHTML, null, Collections.<String, byte[]>emptyMap(), true));
         if(setAddress)
         {
-            address.setText(url);
+            address.setText(UrlInput.display(url));
             addressEdited = false;
         }
         setStatus(Status.IDLE, "");
@@ -805,7 +805,7 @@ public final class Browser
         // 换页面了：旁观者那边的打字记录会清空，从页面上的初始值重新比
         typing.reset();
         typingUpload = -1;
-        typing.baseline(TypingSync.outgoing(TypingSync.ADDRESS, false, e.url));
+        typing.baseline(TypingSync.outgoing(TypingSync.ADDRESS, false, UrlInput.display(e.url)));
         if(data.length > PageSnapshot.MAX_COMPRESSED)
             return;
         int id = ++uploadId;
