@@ -26,6 +26,7 @@ public class PacketHandler
         registerMessage(MessageComputerScroll.class, MessageComputerScroll.class, Side.SERVER);
         registerMessage(MessageComputerView.class, MessageComputerView.class, Side.CLIENT);
         registerMessage(MessageComputerTyping.class, MessageComputerTyping.class, Side.SERVER);
+        registerMessage(MessageComputerHistory.class, MessageComputerHistory.class, Side.SERVER);
         registerMessage(MessageMicrowave.class, MessageMicrowave.class, Side.SERVER);
         registerMessage(MessageWashingMachine.class, MessageWashingMachine.class, Side.SERVER);
         registerMessage(MessageDishwasher.class, MessageDishwasher.class, Side.SERVER);

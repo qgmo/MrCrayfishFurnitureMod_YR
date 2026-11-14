@@ -1,6 +1,7 @@
 package com.mrcrayfish.furniture.client.browser;
 
 import com.mrcrayfish.furniture.MrCrayfishFurnitureMod;
+import com.mrcrayfish.furniture.computer.BrowserHistory;
 import com.mrcrayfish.furniture.computer.PageParser;
 import com.mrcrayfish.furniture.computer.PageSnapshot;
 import com.mrcrayfish.furniture.computer.TypingSync;
@@ -67,6 +68,9 @@ public final class ComputerViews
         public int version;
         /** 操作者正在打的字（框的编号 → 内容；地址栏是 {@link TypingSync#ADDRESS}）；换页面清空 */
         public final Map<Integer, TypingSync.Typed> typed = new HashMap<>();
+        /** 服务端存着的会话（操作者打开时收到；浏览器没有这台电脑的状态时按它恢复，用过就清掉） */
+        @Nullable
+        public BrowserHistory savedHistory;
     }
 
     /** 这台电脑的浏览器（按服务器 + 维度 + 位置，没有就建一个） */
@@ -107,6 +111,10 @@ public final class ComputerViews
             v.scroll = 0;
             v.version++;
             v.typed.clear();
+        }
+        else if(kind == MessageComputerView.HISTORY)
+        {
+            v.savedHistory = BrowserHistory.decode(data);
         }
         else if(kind == MessageComputerView.TYPING)
         {

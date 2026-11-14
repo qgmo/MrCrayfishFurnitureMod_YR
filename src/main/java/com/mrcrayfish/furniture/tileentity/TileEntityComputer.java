@@ -1,6 +1,7 @@
 package com.mrcrayfish.furniture.tileentity;
 
 import com.mrcrayfish.furniture.compat.RegionUse;
+import com.mrcrayfish.furniture.computer.BrowserHistory;
 import com.mrcrayfish.furniture.computer.ComputerNetwork;
 import com.mrcrayfish.furniture.computer.ComputerSync;
 import com.mrcrayfish.furniture.computer.PageFacts;
@@ -52,6 +53,8 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
     private final ApplianceEnergy energy = new ApplianceEnergy(this, AppliancePower.COMPUTER, ApplianceFaces.bottom(), () -> TileEntityUtil.markBlockForUpdate(world, pos));
 
     private boolean switchedOn;
+    /** 会话：当前地址与前进后退历史（进存档，不存网页内容；服主 11-14） */
+    private BrowserHistory history = BrowserHistory.EMPTY;
 
     // ---- 只在内存（服务端），操作者同步给客户端 ----
     @Nullable
@@ -128,6 +131,21 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         return pageId;
     }
 
+    public BrowserHistory getHistory()
+    {
+        return history;
+    }
+
+    /** 操作者报来的会话（已经检查过） */
+    public void setHistory(BrowserHistory h)
+    {
+        if(!h.equals(history))
+        {
+            this.history = h;
+            this.markDirty();
+        }
+    }
+
     public Collection<TypingSync.Typed> getTyped()
     {
         return typed.values();
@@ -197,6 +215,7 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         if(getOperatorPlayer() != null || !RegionUse.canUse(world, player, pos))
             return false;
         setOperator(player);
+        ComputerSync.sendHistory(player, this);
         return true;
     }
 
@@ -334,6 +353,7 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         super.readFromNBT(tagCompound);
         this.switchedOn = tagCompound.getBoolean("PowerOn");
         this.energy.readFromNBT(tagCompound);
+        this.history = BrowserHistory.readFromNBT(tagCompound);
     }
 
     @Override
@@ -342,12 +362,16 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         super.writeToNBT(tagCompound);
         tagCompound.setBoolean("PowerOn", switchedOn);
         this.energy.writeToNBT(tagCompound);
+        this.history.writeToNBT(tagCompound);
         return tagCompound;
     }
 
     private NBTTagCompound syncTag()
     {
         NBTTagCompound tag = this.writeToNBT(new NBTTagCompound());
+        // 会话只给操作者（打开界面时单独发），不随方块更新发给附近所有人
+        tag.removeTag("History");
+        tag.removeTag("HistoryIndex");
         if(operator != null)
         {
             tag.setUniqueId("Operator", operator);

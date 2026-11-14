@@ -30,6 +30,8 @@ public final class ComputerSync
     private static final Map<UUID, RateLimiter> ACTIONS = new HashMap<>();
     /** 每个玩家同步打字的频率 */
     private static final Map<UUID, RateLimiter> TYPING = new HashMap<>();
+    /** 每个玩家报会话（前进后退历史）的频率 */
+    private static final Map<UUID, RateLimiter> HISTORY = new HashMap<>();
     /** 旁观者的玩家临时地址放行页面里图片所在主机的用途（服主 11-14：旁观者自己下载图片） */
     public static final String SPECTATE_PURPOSE = "cfm:spectate";
     /** 放行的有效期；看着的时候每分钟续一次 */
@@ -49,6 +51,18 @@ public final class ComputerSync
         return TYPING.computeIfAbsent(player.getUniqueID(), k -> new RateLimiter(TypingSync.SERVER_RATE, TypingSync.SERVER_BURST)).tryAcquire(now, 1);
     }
 
+    public static boolean allowHistory(EntityPlayerMP player, long now)
+    {
+        return HISTORY.computeIfAbsent(player.getUniqueID(), k -> new RateLimiter(4, 8)).tryAcquire(now, 1);
+    }
+
+    /** 操作者：发存着的会话，他的浏览器没有这台电脑的状态时（重启后、换了人）按它恢复 */
+    public static void sendHistory(EntityPlayerMP player, TileEntityComputer computer)
+    {
+        if(!computer.getHistory().isEmpty())
+            PacketHandler.INSTANCE.sendTo(MessageComputerView.history(computer.getPos(), computer.getHistory()), player);
+    }
+
     public static boolean allowAction(EntityPlayerMP player, long now)
     {
         return ACTIONS.computeIfAbsent(player.getUniqueID(), k -> new RateLimiter(4, 4)).tryAcquire(now, 1);
@@ -59,6 +73,8 @@ public final class ComputerSync
     {
         if(!computer.isOperator(player))
             grant(player, computer);
+        else
+            sendHistory(player, computer);
         byte[] page = computer.getPage();
         PacketHandler.INSTANCE.sendTo(page == null ? MessageComputerView.clear(computer.getPos())
                 : MessageComputerView.page(computer.getPos(), page, computer.getScroll()), player);
@@ -177,6 +193,7 @@ public final class ComputerSync
             SCROLL.remove(event.player.getUniqueID());
             ACTIONS.remove(event.player.getUniqueID());
             TYPING.remove(event.player.getUniqueID());
+            HISTORY.remove(event.player.getUniqueID());
             // 临时地址下线就收回了，放行跟着没了
             SPECTATING.remove(event.player.getUniqueID());
         }

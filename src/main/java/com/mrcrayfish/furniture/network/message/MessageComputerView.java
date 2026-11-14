@@ -1,5 +1,6 @@
 package com.mrcrayfish.furniture.network.message;
 
+import com.mrcrayfish.furniture.computer.BrowserHistory;
 import com.mrcrayfish.furniture.computer.PageSnapshot;
 import com.mrcrayfish.furniture.computer.TypingSync;
 import io.netty.buffer.ByteBuf;
@@ -18,7 +19,7 @@ import java.nio.charset.StandardCharsets;
  */
 public class MessageComputerView implements IMessage, IMessageHandler<MessageComputerView, IMessage>
 {
-    public static final int PAGE = 0, CLEAR = 1, SCROLL = 2, TYPING = 3;
+    public static final int PAGE = 0, CLEAR = 1, SCROLL = 2, TYPING = 3, HISTORY = 4;
 
     private BlockPos pos = BlockPos.ORIGIN;
     private int kind;
@@ -60,6 +61,12 @@ public class MessageComputerView implements IMessage, IMessageHandler<MessageCom
         data[2] = (byte) t.length;
         System.arraycopy(text, 0, data, 3, text.length);
         return new MessageComputerView(pos, TYPING, t.field, data);
+    }
+
+    /** 存着的会话（只发给操作者，给他的浏览器恢复用） */
+    public static MessageComputerView history(BlockPos pos, BrowserHistory h)
+    {
+        return new MessageComputerView(pos, HISTORY, 0, h.encode());
     }
 
     /** 客户端：解出打的字；格式不对返回 null */
