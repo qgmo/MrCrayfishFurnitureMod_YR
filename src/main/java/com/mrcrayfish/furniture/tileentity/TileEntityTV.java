@@ -6,6 +6,7 @@ import com.mrcrayfish.furniture.blocks.BlockAbstractTV;
 import com.mrcrayfish.furniture.client.DownloadUtils;
 import com.mrcrayfish.furniture.client.GifCache;
 import com.mrcrayfish.furniture.client.GifDownloadThread;
+import com.mrcrayfish.furniture.util.TextLimits;
 import com.mrcrayfish.furniture.handler.ConfigurationHandler;
 import com.mrcrayfish.furniture.util.TileEntityUtil;
 import net.minecraft.block.state.IBlockState;
@@ -246,6 +247,13 @@ public class TileEntityTV extends TileEntitySyncClient implements IValueContaine
     @Override
     public String updateEntries(Map<String, String> entries, EntityPlayer player)
     {
+        for(int i = 0; i < 3; i++)
+        {
+            if(!TextLimits.urlLengthOk(entries.get("channel_" + i)))
+            {
+                return "TV channel URL longer than " + TextLimits.MAX_URL_LENGTH;
+            }
+        }
         channels.clear();
         for(int i = 0; i < 3; i++)
         {

@@ -1,9 +1,11 @@
 package com.mrcrayfish.furniture.network.message;
 
 import com.google.common.collect.Maps;
-import com.mrcrayfish.furniture.MrCrayfishFurnitureMod;
 import com.mrcrayfish.furniture.gui.components.ValueComponent;
 import com.mrcrayfish.furniture.tileentity.IValueContainer;
+import com.mrcrayfish.furniture.tileentity.TileEntityPhotoFrame;
+import com.mrcrayfish.furniture.tileentity.TileEntityTV;
+import com.mrcrayfish.furniture.util.RejectLog;
 import com.mrcrayfish.furniture.util.TileEntityUtil;
 import com.mrcrayfish.furniture.network.ServerThread;
 import io.netty.buffer.ByteBuf;
@@ -82,12 +84,19 @@ public class MessageUpdateValueContainer implements IMessage, IMessageHandler<Me
                 return;
 
             TileEntity tileEntity = world.getTileEntity(message.pos);
+            // 被设为“禁止交互”的相框、电视，界面打不开，编辑包也一律拒绝
+            if((tileEntity instanceof TileEntityPhotoFrame && ((TileEntityPhotoFrame) tileEntity).isDisabled())
+                    || (tileEntity instanceof TileEntityTV && ((TileEntityTV) tileEntity).isDisabled()))
+            {
+                RejectLog.log(player, "edit of disabled " + tileEntity.getClass().getSimpleName() + " at " + message.pos);
+                return;
+            }
             if(tileEntity instanceof IValueContainer)
             {
                 String result = ((IValueContainer) tileEntity).updateEntries(message.entryMap, player);
                 if(result != null)
                 {
-                    MrCrayfishFurnitureMod.logger().warn(result);
+                    RejectLog.log(player, result);
                     return;
                 }
                 TileEntityUtil.syncToClient(tileEntity);

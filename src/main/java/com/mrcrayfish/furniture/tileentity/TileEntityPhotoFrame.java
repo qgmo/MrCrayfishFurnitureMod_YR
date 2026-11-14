@@ -4,6 +4,7 @@ import com.google.common.collect.Lists;
 import com.mrcrayfish.furniture.client.DownloadUtils;
 import com.mrcrayfish.furniture.client.ImageCache;
 import com.mrcrayfish.furniture.client.ImageDownloadThread;
+import com.mrcrayfish.furniture.util.TextLimits;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.util.math.BlockPos;
@@ -165,6 +166,10 @@ public class TileEntityPhotoFrame extends TileEntitySyncClient implements IValue
     @Override
     public String updateEntries(Map<String, String> entries, EntityPlayer player)
     {
+        if(!TextLimits.urlLengthOk(entries.get("photo")))
+        {
+            return "photo frame URL longer than " + TextLimits.MAX_URL_LENGTH;
+        }
         this.url = entries.get("photo");
         this.stretch = Boolean.valueOf(entries.get("stretch"));
         this.markDirty();
