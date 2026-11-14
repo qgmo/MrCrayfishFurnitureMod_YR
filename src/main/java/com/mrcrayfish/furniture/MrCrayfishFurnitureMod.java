@@ -77,6 +77,10 @@ public class MrCrayfishFurnitureMod
     {
         MinecraftForge.EVENT_BUS.register(new PlayerEvents());
         MinecraftForge.EVENT_BUS.register(new SneakLeftClick());
+        MinecraftForge.EVENT_BUS.register(new com.mrcrayfish.furniture.computer.ComputerSync.Events());
+
+        /* 游戏内网站（悠然服务器魔改）：MineBay 搬到 minebay.yr */
+        com.mrcrayfish.furniture.web.minebay.MineBaySite.register();
 
         /* GUI Handler Registering */
         NetworkRegistry.INSTANCE.registerGuiHandler(this, new GuiHandler());

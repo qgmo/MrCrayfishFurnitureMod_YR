@@ -45,23 +45,11 @@ public class BlockComputer extends BlockFurnitureTile
     @Override
     public boolean onBlockActivated(World worldIn, BlockPos pos, IBlockState state, EntityPlayer playerIn, EnumHand hand, EnumFacing facing, float hitX, float hitY, float hitZ)
     {
+        // 悠然服务器魔改：谁都能打开；第一个打开（且有使用权）的人操作，其他人旁观（见 TileEntityComputer）
         TileEntity tile_entity = worldIn.getTileEntity(pos);
-
-        if(tile_entity instanceof TileEntityComputer)
+        if(tile_entity instanceof TileEntityComputer && !worldIn.isRemote)
         {
-            TileEntityComputer computer = (TileEntityComputer) tile_entity;
-            if(!computer.isTrading())
-            {
-                computer.setTrading(true);
-                playerIn.openGui(MrCrayfishFurnitureMod.instance, 0, worldIn, pos.getX(), pos.getY(), pos.getZ());
-            }
-            else
-            {
-                if(!worldIn.isRemote)
-                {
-                    playerIn.sendMessage(new TextComponentTranslation("cfm.message.computer"));
-                }
-            }
+            playerIn.openGui(MrCrayfishFurnitureMod.instance, 0, worldIn, pos.getX(), pos.getY(), pos.getZ());
         }
         return true;
     }

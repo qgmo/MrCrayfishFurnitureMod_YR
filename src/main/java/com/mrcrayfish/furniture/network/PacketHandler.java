@@ -20,9 +20,11 @@ public class PacketHandler
         registerMessage(MessageEmptyBin.class, MessageEmptyBin.class, Side.SERVER);
         registerMessage(MessageFart.class, MessageFart.class, Side.SERVER);
         registerMessage(MessageFillBath.class, MessageFillBath.class, Side.CLIENT);
-        registerMessage(MessageMineBayBrowse.class, MessageMineBayBrowse.class, Side.SERVER);
-        registerMessage(MessageMineBayBuy.class, MessageMineBayBuy.class, Side.SERVER);
-        registerMessage(MessageMineBayClosed.class, MessageMineBayClosed.class, Side.SERVER);
+        // 电脑（悠然服务器魔改）：原来 MineBay 的三个包换成浏览器的四个
+        registerMessage(MessageComputerAction.class, MessageComputerAction.class, Side.SERVER);
+        registerMessage(MessageComputerPage.class, MessageComputerPage.class, Side.SERVER);
+        registerMessage(MessageComputerScroll.class, MessageComputerScroll.class, Side.SERVER);
+        registerMessage(MessageComputerView.class, MessageComputerView.class, Side.CLIENT);
         registerMessage(MessageMicrowave.class, MessageMicrowave.class, Side.SERVER);
         registerMessage(MessageWashingMachine.class, MessageWashingMachine.class, Side.SERVER);
         registerMessage(MessageDishwasher.class, MessageDishwasher.class, Side.SERVER);

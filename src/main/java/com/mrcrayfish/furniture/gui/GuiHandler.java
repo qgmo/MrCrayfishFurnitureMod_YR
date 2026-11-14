@@ -126,7 +126,7 @@ public class GuiHandler implements IGuiHandler
         }
         if(tileEntity instanceof TileEntityComputer)
         {
-            return new GuiComputer(player.inventory, (TileEntityComputer) tileEntity);
+            return new com.mrcrayfish.furniture.client.browser.GuiBrowser(player.inventory, (TileEntityComputer) tileEntity);
         }
         if(tileEntity instanceof TileEntityPrinter)
         {
