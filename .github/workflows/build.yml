@@ -21,11 +21,23 @@ jobs:
           distribution: temurin
           java-version: 25
 
+      # 家具 fork 依赖 YouranMod（游戏内网络），先构建它的 dev jar
+      - name: Checkout YouranMod
+        uses: actions/checkout@v4.1.1
+        with:
+          repository: qgmo/YouranMod
+          ref: master
+          path: youranmod
+
+      - name: Build YouranMod
+        working-directory: youranmod
+        run: chmod +x gradlew && ./gradlew jar
+
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
       - name: Execute Gradle build
-        run: ./gradlew build
+        run: ./gradlew build -Pyouranmod_jar=youranmod/build/libs/youranmod-2.0.0-dev.jar
 
       - name: Upload built mod JAR
         uses: actions/upload-artifact@v4.3.0

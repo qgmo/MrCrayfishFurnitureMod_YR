@@ -24,3 +24,6 @@ run
 classes
 logs
 .vscode
+
+# 本地的依赖 jar（YouranMod dev jar 等）
+libs/

@@ -53,7 +53,14 @@ configurations {
     // 打进模组 jar 的库（只有 Java 类；本地库不打包，玩家第一次用时按平台下载，见 client.tv.NativeLibs）
     shade
     implementation.extendsFrom shade
+    // 浏览器内核 openhtmltopdf（LGPL-2.1 或更高，纯 Java，Java 8）：类原样打进模组 jar，许可证放在 META-INF/openhtmltopdf/
+    embed
+    implementation.extendsFrom(embed)
 }
+
+// YouranMod（悠然服务器模组，游戏内网络）：家具 fork 直接依赖它。它没有发布到 Maven，用它构建出来的 dev jar（未混淆）编译、
+// 跑开发环境与单元测试；路径用 -Pyouranmod_jar=... 指定，默认 libs/youranmod-dev.jar（不进仓库）
+def youranmodJar = file(providers.gradleProperty('youranmod_jar').getOrElse('libs/youranmod-dev.jar'))
 
 dependencies {
     // 电视播放视频：JavaCV / JavaCPP / FFmpeg 的 Java 部分（Apache-2.0；FFmpeg 本地库是 LGPL 版）。
@@ -61,6 +68,10 @@ dependencies {
     shade('org.bytedeco:javacv:1.5.14') { transitive = false }
     shade('org.bytedeco:javacpp:1.5.14') { transitive = false }
     shade('org.bytedeco:ffmpeg:8.1.2-1.5.14') { transitive = false }
+
+    embed 'at.datenwort.openhtmltopdf:openhtmltopdf-core:1.1.4'
+    embed 'at.datenwort.openhtmltopdf:openhtmltopdf-java2d:1.1.4'
+    implementation files(youranmodJar)
 
     compileOnly rfg.deobf('CraftTweaker2:CraftTweaker2-API:1.12-4.1.20.675')
     compileOnly rfg.deobf('CraftTweaker2:CraftTweaker2-MC1120-Main:1.12-4.1.20.675')
@@ -91,6 +102,15 @@ jar {
         exclude 'module-info.class', 'META-INF/**', '**/package-info.class'
         // Maven 插件、OpenCL 内核等用不到的部分
         exclude 'org/bytedeco/javacpp/tools/*Mojo*', 'org/bytedeco/javacv/*.cl'
+    }
+    // openhtmltopdf 原样并进来（不改包名）；它的许可证、说明改放到 META-INF/openhtmltopdf/ 下
+    from({ configurations.embed.collect { zipTree(it) } }) {
+        exclude 'META-INF/MANIFEST.MF', 'META-INF/maven/**', 'META-INF/*.SF', 'META-INF/*.RSA', 'META-INF/*.DSA'
+        eachFile { f ->
+            if (f.path.startsWith('META-INF/')) {
+                f.path = 'META-INF/openhtmltopdf/' + f.path.substring('META-INF/'.length())
+            }
+        }
     }
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     manifest {

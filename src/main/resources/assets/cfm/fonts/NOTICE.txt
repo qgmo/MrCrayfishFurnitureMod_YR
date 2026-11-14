@@ -1,0 +1,4 @@
+YR Sans SC（YRSansSC-Regular.ttf、YRSansSC-Bold.ttf）是 Noto Sans SC（Google Fonts 的 NotoSansSC[wght].ttf，版本 2.004）
+的修改版：取字重 400、700 两个实例，只留 GB2312 全部字符、ASCII、拉丁-1 补充和常用标点符号，并按 SIL Open Font License 1.1
+的要求改了字体名（不使用保留名 "Source"）。原字体 Copyright 2014-2021 Adobe (http://www.adobe.com/)，许可证见同目录的 OFL.txt。
+家具模组浏览器的网页字体，只随模组发布、不单独出售。
