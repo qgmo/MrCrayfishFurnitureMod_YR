@@ -25,7 +25,8 @@ import java.util.UUID;
 /**
  * MineBay 的存档数据（主世界的 {@code data/cfm_minebay.dat}，服务端主线程）：每个玩家的购物车、订单记录，与下一个订单号。
  * 购物车、订单都按玩家 UUID 存，和在哪台电脑上买无关；下线、关电脑、换电脑都还在。
- * 另存：开出去还没发完货的 pay.yr 收款单（{@link PayOrders}）、每件限量商品的库存（{@link Stock.State}，全服统一）。
+ * 另存：开出去还没发完货的 pay.yr 收款单（{@link PayOrders}）、每件限量商品的库存（{@link Stock.State}，全服统一）、
+ * 帐号设置“操作前必须验证身份”。
  * 和钱、库存有关的改动用 {@link #saveNow} 当场写盘（不等世界自动保存）。
  */
 public class MineBayData extends WorldSavedData
@@ -39,6 +40,8 @@ public class MineBayData extends WorldSavedData
     private long nextOrder = 1;
     private PayOrders payOrders = new PayOrders();
     private final Map<String, Stock.State> stock = new LinkedHashMap<>();
+    /** 帐号设置“操作前必须验证身份”打开了的玩家（服主 11-15；默认关闭） */
+    private final java.util.Set<UUID> verify = new java.util.LinkedHashSet<>();
 
     public MineBayData(String name)
     {
@@ -63,6 +66,18 @@ public class MineBayData extends WorldSavedData
             storage.setData(NAME, d);
         }
         return d;
+    }
+
+    /** 这个玩家开了“操作前必须验证身份”没有 */
+    public boolean verifyRequired(UUID player)
+    {
+        return verify.contains(player);
+    }
+
+    public void setVerifyRequired(UUID player, boolean on)
+    {
+        if(on ? verify.add(player) : verify.remove(player))
+            markDirty();
     }
 
     /** 这个玩家的购物车（没有时给一个空的，不存进去） */
@@ -211,6 +226,14 @@ public class MineBayData extends WorldSavedData
         carts.clear();
         orders.clear();
         stock.clear();
+        verify.clear();
+        NBTTagList vl = nbt.getTagList("verify", Constants.NBT.TAG_COMPOUND);
+        for(int i = 0; i < vl.tagCount() && i < MAX_PLAYERS; i++)
+        {
+            NBTTagCompound t = vl.getCompoundTagAt(i);
+            if(t.hasUniqueId("id"))
+                verify.add(t.getUniqueId("id"));
+        }
         payOrders = PayOrders.read(nbt.getTagList("pay", Constants.NBT.TAG_COMPOUND));
         NBTTagCompound st = nbt.getCompoundTag("stock");
         for(String k : st.getKeySet())
@@ -257,6 +280,10 @@ public class MineBayData extends WorldSavedData
         for(Map.Entry<String, Stock.State> e : stock.entrySet())
             st.setTag(e.getKey(), e.getValue().write());
         nbt.setTag("stock", st);
+        NBTTagList vl = new NBTTagList();
+        for(UUID u : verify)
+            vl.appendTag(tag(u));
+        nbt.setTag("verify", vl);
         return nbt;
     }
 

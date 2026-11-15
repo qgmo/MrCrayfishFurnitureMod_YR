@@ -55,7 +55,7 @@ class ReachTest
     {
         String u = IdLogin.authorizeUrl("https", "st", "verifier");
         assertTrue(u.startsWith("https://id.yr/authorize?response_type=code&client_id=https%3A%2F%2Fminebay.yr%2F&redirect_uri=https%3A%2F%2Fminebay.yr%2Flogin%2Fcallback"), u);
-        assertTrue(u.contains("&scope=position") && u.contains("code_challenge_method=S256"));
+        assertTrue(u.contains("&scope=position+verify") && u.contains("code_challenge_method=S256"), "要位置与验证身份两项");
         // RFC 7636 附录 B 的例子
         assertEquals("E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM", IdLogin.challenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"));
         assertTrue(IdLogin.issuerOk(null) && IdLogin.issuerOk("http://id.yr") && !IdLogin.issuerOk("https://evil.yr"));

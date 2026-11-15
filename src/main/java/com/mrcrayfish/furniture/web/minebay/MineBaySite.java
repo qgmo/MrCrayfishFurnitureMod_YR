@@ -9,6 +9,7 @@ import com.mrcrayfish.furniture.web.WebRequest;
 import com.mrcrayfish.furniture.web.WebResponse;
 import com.mrcrayfish.furniture.web.Websites;
 import moe.qingu.youran.api.network.Ipv6Address;
+import moe.qingu.youran.api.network.idyr.IdYrClient;
 import moe.qingu.youran.api.network.location.LocationProof;
 import moe.qingu.youran.api.network.location.LocationProofs;
 import moe.qingu.youran.api.network.location.LocationVerifier;
@@ -84,6 +85,40 @@ public final class MineBaySite implements WebHandler
     private final Map<UUID, Pending> pending = lru(1024);
     /** 主线程：玩家 → 最近一次已经开单的确认码（重复提交时认出来） */
     private final Map<UUID, Done> done = lru(1024);
+    /** 网络线程：编号 → 等 id.yr 验证身份的操作（帐号开了“操作前必须验证身份”时） */
+    private final Map<String, Gate> gates = new ConcurrentHashMap<>();
+    static final int MAX_GATES = 512;
+    /** id.yr 的请求 2 分钟内要打开、确认框 1 分钟 */
+    static final long GATE_TTL_MS = 5 * 60 * 1000L;
+    /** 主线程上要先验证身份时，主线程那一步回这个，网络线程接着去 id.yr 建请求 */
+    static final WebResponse NEED_VERIFY = WebResponse.error(500, "verify");
+
+    /** 一个等验证身份的操作：结算（带着提交的表单与位置证明）或改“操作前必须验证身份” */
+    static final class Gate
+    {
+        final String id;
+        final String sessionId;
+        final long created;
+        /** 结算：提交的表单；改设置：null */
+        @Nullable
+        final Map<String, String> params;
+        @Nullable
+        final LocationProof proof;
+        /** 改设置：要改成开还是关 */
+        final boolean on;
+        volatile String confirmId;
+        final java.util.concurrent.atomic.AtomicBoolean checking = new java.util.concurrent.atomic.AtomicBoolean();
+
+        Gate(String id, String sessionId, long created, @Nullable Map<String, String> params, @Nullable LocationProof proof, boolean on)
+        {
+            this.id = id;
+            this.sessionId = sessionId;
+            this.created = created;
+            this.params = params;
+            this.proof = proof;
+            this.on = on;
+        }
+    }
 
     private static <K, V> Map<K, V> lru(int max)
     {
@@ -105,15 +140,18 @@ public final class MineBaySite implements WebHandler
         final String name;
         final String accessToken;
         final long tokenExpires;
+        /** 登录用的协议（client_id 的协议；验证身份跳回来的网址要和它一样） */
+        final String scheme;
         volatile long lastSeen;
 
-        Login(String id, IdLogin.Token t, long now)
+        Login(String id, IdLogin.Token t, long now, String scheme)
         {
             this.id = id;
             this.uuid = t.uuid;
             this.name = t.name;
             this.accessToken = t.accessToken;
             this.tokenExpires = t.expiresAt;
+            this.scheme = scheme;
             this.lastSeen = now;
         }
 
@@ -185,7 +223,8 @@ public final class MineBaySite implements WebHandler
         HOME("/", false), ITEM("/item", false), CART("/cart", false), CART_ADD("/cart/add", true), CART_UPDATE("/cart/update", true),
         CHECKOUT("/checkout", false), CHECKOUT_POST("/checkout", true), ORDERS("/orders", false), ORDER("/order", false), HELP("/help", false),
         LOGIN("/login", false), CALLBACK("/login/callback", false), LOGOUT("/logout", true), PAID("/paid", false), UNPAID("/unpaid", false),
-        SUPPORT("/support", false), SUPPORT_POST("/support", true);
+        SUPPORT("/support", false), SUPPORT_POST("/support", true), ACCOUNT("/account", false), SECURITY("/account/security", true),
+        VERIFIED("/verified", false);
 
         final String path;
         final boolean post;
@@ -269,6 +308,10 @@ public final class MineBaySite implements WebHandler
         }
         if(route == Route.CHECKOUT_POST && tokenOk && login != null)
             return checkoutPost(request, params, context, login, token, scheme);
+        if(route == Route.SECURITY && tokenOk && login != null)
+            return security(request, params, context, login, token, scheme);
+        if(route == Route.VERIFIED)
+            return verified(request, params, context, login, token, scheme);
         return context.onMainThread(() -> main(request, route, s -> handleMain(route, params, s, tokenOk), login, token, scheme));
     }
 
@@ -363,6 +406,7 @@ public final class MineBaySite implements WebHandler
             return;
         sessions.values().removeIf(l -> !l.alive(now));
         logins.values().removeIf(l -> now - l.created > LOGIN_TTL_MS);
+        gates.values().removeIf(g -> now - g.created > GATE_TTL_MS);
     }
 
     /** 只许跳回 MineBay 自己的路径 */
@@ -412,7 +456,7 @@ public final class MineBaySite implements WebHandler
             }
             if(sessions.size() >= MAX_SESSIONS)
                 return page(503, "Service Unavailable", MineBayPages.problem(anon, "太忙了", "登录的人太多，请稍后再试。"));
-            Login s = new Login(randomText(24), t, System.currentTimeMillis());
+            Login s = new Login(randomText(24), t, System.currentTimeMillis(), l.scheme);
             sessions.put(s.id, s);
             MrCrayfishFurnitureMod.logger().info("MineBay: {} logged in with id.yr (from {})", t.name, r.remoteAddress);
             return WebResponse.seeOther(l.next).withHeader("Set-Cookie", cookie(s.id, l.scheme.equals("https"), -1));
@@ -481,8 +525,108 @@ public final class MineBaySite implements WebHandler
                 MrCrayfishFurnitureMod.logger().info("MineBay: refused checkout of {}: {}", login.name, far);
                 return checkoutRefused(params, s, far, 403);
             }
+            if(s.ok() && s.data.verifyRequired(login.uuid))
+                return NEED_VERIFY;
             return checkoutPostMain(params, s, System.currentTimeMillis());
-        }, login, token, scheme)));
+        }, login, token, scheme))).thenCompose(resp -> resp != NEED_VERIFY ? done(resp)
+                : askVerify(r, context, login, token, scheme, new Gate(randomText(18), login.id, System.currentTimeMillis(), new HashMap<>(params), p, false),
+                "在 MineBay 下单", Collections.singletonList("收货人：" + login.name + "（登录的帐号）")));
+    }
+
+    // ---------------------------------------------------------------- 操作前必须验证身份（网络线程）
+
+    /** 打开、关闭“操作前必须验证身份”：两个方向都要验证身份（只有帐号本人能改） */
+    private CompletableFuture<WebResponse> security(WebRequest r, Map<String, String> params, WebContext context, Login login, String token, String scheme)
+    {
+        boolean on = "1".equals(params.get("verify"));
+        return askVerify(r, context, login, token, scheme, new Gate(randomText(18), login.id, System.currentTimeMillis(), null, null, on),
+                (on ? "打开" : "关闭") + "操作前验证身份", java.util.Arrays.asList("MineBay 帐号：" + login.name,
+                        on ? "打开后下单前都要 " + login.name + " 本人确认" : "关闭后，坐在这台电脑前的人就能下单"));
+    }
+
+    /** 请 id.yr 验证身份（只有登录的角色本人同意才通过），把浏览器 303 过去；建不了时回原来的页面说明 */
+    private CompletableFuture<WebResponse> askVerify(WebRequest r, WebContext context, Login login, String token, String scheme, Gate g, String title, List<String> items)
+    {
+        NetStack stack = context.stack();
+        if(stack == null || gates.size() >= MAX_GATES)
+            return refused(r, context, login, token, scheme, g, stack == null ? "现在验证不了身份，请稍后再试。" : "现在太忙，请稍后再试。");
+        gates.put(g.id, g);
+        String back = login.scheme + "://" + DOMAIN + "/verified?g=" + g.id;
+        IdYrClient.Ask ask = IdYrClient.Ask.verify(title, items, moe.qingu.youran.api.network.ConfirmRequest.Purpose.ACTION, r.remoteAddress, back, g.id);
+        return IdLogin.client(stack, context.hasTls()).ask(login.accessToken, ask).handle((t, e) ->
+        {
+            if(t == null)
+                return null;
+            g.confirmId = t.id;
+            return WebResponse.seeOther(t.url);
+        }).thenCompose(resp ->
+        {
+            if(resp != null)
+                return done(resp);
+            gates.remove(g.id);
+            return refused(r, context, login, token, scheme, g, "建不了验证请求（登录可能过期了），请稍后再试或重新登录。");
+        });
+    }
+
+    /** 没通过：结算回新的确认页（购物车原样），改设置回帐号设置页 */
+    private CompletableFuture<WebResponse> refused(WebRequest r, WebContext context, Login login, String token, String scheme, Gate g, String why)
+    {
+        return context.onMainThread(() -> main(r, Route.VERIFIED, s -> g.params != null ? checkoutRefused(g.params, s, why + "没有下单。", 403)
+                : accountPage(403, "Forbidden", s, MineBayPages.Notice.bad(why + "设置没有改。")), login, token, scheme));
+    }
+
+    /** id.yr 验证完跳回来（{@code /verified?g=编号}）：向 id.yr 核对（网址里带的结果不算数），通过了接着做 */
+    private CompletableFuture<WebResponse> verified(WebRequest r, Map<String, String> params, WebContext context, @Nullable Login login, String token, String scheme)
+    {
+        String gid = params.get("g");
+        Gate g = gid == null ? null : gates.get(gid);
+        NetStack stack = context.stack();
+        if(g == null || login == null || !g.sessionId.equals(login.id) || g.confirmId == null || stack == null)
+            return context.onMainThread(() -> main(r, Route.VERIFIED, s -> page(404, "Not Found", MineBayPages.problem(s.viewer(), "验证已经结束",
+                    "这次验证已经结束或过期了，请回去重新操作。")), login, token, scheme));
+        if(!g.checking.compareAndSet(false, true))
+            return context.onMainThread(() -> main(r, Route.VERIFIED, s -> page(200, "OK", MineBayPages.waitVerify(s.viewer(), g.id)), login, token, scheme));
+        return IdLogin.client(stack, context.hasTls()).result(login.accessToken, g.confirmId).handle((out, e) ->
+        {
+            if(out == null)
+            {
+                MrCrayfishFurnitureMod.logger().warn("MineBay: id.yr confirm result for {} failed: {}", login.name, cause(e));
+                return IdYrClient.reasonText("unavailable", true);
+            }
+            if(out.status == IdYrClient.Outcome.Status.PENDING)
+                return "";
+            return out.approved() ? null : out.text(true);
+        }).thenCompose(why ->
+        {
+            if("".equals(why))
+            {
+                g.checking.set(false);
+                return context.onMainThread(() -> main(r, Route.VERIFIED, s -> page(200, "OK", MineBayPages.waitVerify(s.viewer(), g.id)), login, token, scheme));
+            }
+            gates.remove(g.id);
+            if(why != null)
+                return refused(r, context, login, token, scheme, g, why);
+            if(g.params == null)
+                return context.onMainThread(() -> main(r, Route.VERIFIED, s ->
+                {
+                    s.data.setVerifyRequired(login.uuid, g.on);
+                    s.data.saveNow(FMLCommonHandler.instance().getMinecraftServerInstance());
+                    MrCrayfishFurnitureMod.logger().info("MineBay: {} turned {} verify-before-checkout", login.name, g.on ? "on" : "off");
+                    return WebResponse.seeOther("/account?r=" + (g.on ? "on" : "off"));
+                }, login, token, scheme));
+            // 结算：验证完再现查一次位置（中间可能走开了），再开单
+            LocationProof p = g.proof;
+            return IdLogin.position(stack, context.hasTls(), login.accessToken).handle((pos, e2) -> pos).thenCompose(pos -> context.onMainThread(() ->
+                    main(r, Route.VERIFIED, s ->
+                    {
+                        if(pos == null)
+                            return checkoutRefused(g.params, s, "查不到 " + login.name + " 的位置（id.yr），暂时不能下单。", 403);
+                        String far = Reach.check(login.name, pos, p.dimension, p.x, p.y, p.z);
+                        if(far != null)
+                            return checkoutRefused(g.params, s, far, 403);
+                        return checkoutPostMain(g.params, s, System.currentTimeMillis());
+                    }, login, token, scheme)));
+        });
     }
 
     static String locationError(String code)
@@ -601,6 +745,8 @@ public final class MineBaySite implements WebHandler
             case HELP: return WebResponse.xhtml(MineBayPages.help(s.viewer()));
             case SUPPORT: return supportPage(200, "OK", s, null, "", "1".equals(params.get("all")));
             case SUPPORT_POST: return supportPost(params, s);
+            case ACCOUNT: return account(params, s);
+            case SECURITY: return loginNeeded(s, "/account");
             default: return notFound(s);
         }
     }
@@ -643,6 +789,25 @@ public final class MineBaySite implements WebHandler
             default:
                 return supportPage(503, "Service Unavailable", s, MineBayPages.Notice.bad("客服太忙了，请稍后再试。"), typed, false);
         }
+    }
+
+    // ---------------------------------------------------------------- 帐号设置
+
+    private static WebResponse account(Map<String, String> params, Session s)
+    {
+        if(!s.ok())
+            return loginNeeded(s, "/account");
+        String r = params.get("r");
+        MineBayPages.Notice n = "on".equals(r) ? MineBayPages.Notice.ok("已打开“操作前必须验证身份”。")
+                : "off".equals(r) ? MineBayPages.Notice.ok("已关闭“操作前必须验证身份”。") : null;
+        return accountPage(200, "OK", s, n);
+    }
+
+    private static WebResponse accountPage(int status, String reason, Session s, @Nullable MineBayPages.Notice notice)
+    {
+        if(!s.ok())
+            return loginNeeded(s, "/account");
+        return page(status, reason, MineBayPages.account(s.viewer(), s.data.verifyRequired(s.login.uuid), notice));
     }
 
     static WebResponse page(int status, String reason, String html)

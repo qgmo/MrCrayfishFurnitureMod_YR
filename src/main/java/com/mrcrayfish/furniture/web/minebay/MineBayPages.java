@@ -596,6 +596,40 @@ public final class MineBayPages
         sb.append("<li>限量商品全服共用库存，卖完要等补货。</li>");
         sb.append("<li>登录跟着电脑走，用完请退出。购物车、订单存在服务器上，换电脑也还在。</li>");
         sb.append("</ul></div></div>\n");
+        sb.append("<div class=\"box\"><div class=\"boxh\">操作前必须验证身份</div><div class=\"boxb\"><ul>");
+        sb.append("<li>默认关闭：坐在登录着的电脑前的人就能下单（扣登录的帐号的钱）。</li>");
+        sb.append("<li>在“帐号设置”里打开后，下单前游戏会弹出 id.yr 的确认框“确认你是 X”，只有你本人同意才下单；别人同意了也不算，购物车不会丢。</li>");
+        sb.append("<li>打开、关闭这一项也要你本人确认。</li>");
+        sb.append("</ul></div></div>\n");
+        end(sb);
+        return sb.toString();
+    }
+
+    /** 帐号设置：操作前必须验证身份 */
+    public static String account(Viewer v, boolean verifyOn, @Nullable Notice notice)
+    {
+        StringBuilder sb = new StringBuilder(4 * 1024);
+        begin(sb, "帐号设置 - MineBay", v, "", null);
+        sb.append("<div class=\"crumbs\"><a href=\"/\">MineBay</a> &#8250; <b>帐号设置</b></div>\n<h2>帐号设置</h2>\n");
+        notice(sb, notice);
+        sb.append("<div class=\"box\"><div class=\"boxh\">安全</div><div class=\"boxb\">");
+        sb.append("<form method=\"post\" action=\"/account/security\"><input type=\"hidden\" name=\"t\" value=\"").append(attr(v.token))
+                .append("\"/><input type=\"hidden\" name=\"verify\" value=\"").append(verifyOn ? "0" : "1").append("\"/>操作前必须验证身份：<b>")
+                .append(verifyOn ? "已打开" : "已关闭").append("</b> <button type=\"submit\" class=\"btn\">").append(verifyOn ? "关闭" : "打开").append("</button></form>");
+        sb.append("<div class=\"dim small\">打开后，下单前要 ").append(Html.escape(v.player == null ? "" : v.player))
+                .append(" 本人在确认框里确认。<a href=\"/help\">说明</a></div>");
+        sb.append("</div></div>\n");
+        end(sb);
+        return sb.toString();
+    }
+
+    /** 等 id.yr 的验证结果（自动刷新） */
+    public static String waitVerify(Viewer v, String gate)
+    {
+        StringBuilder sb = new StringBuilder(2 * 1024);
+        begin(sb, "验证身份 - MineBay", v, "", null, 2);
+        sb.append("<div class=\"empty\"><b>等验证结果</b><br/>要在游戏弹出的确认框里验证身份。<br/><a href=\"/verified?g=").append(attr(gate))
+                .append("\">刷新</a></div>\n");
         end(sb);
         return sb.toString();
     }
@@ -819,7 +853,7 @@ public final class MineBayPages
         // 顶栏用表格分左右（浏览器内核里浮动的元素点不了，原来右边的“我的订单”“帮助”点不了）
         sb.append("<table id=\"topbar\"><tr><td>");
         if(v.player != null)
-            sb.append("你好，<b>").append(Html.escape(v.player)).append("</b> <form method=\"post\" action=\"/logout\" class=\"inl\"><input type=\"hidden\" name=\"t\" value=\"")
+            sb.append("你好，<b>").append(Html.escape(v.player)).append("</b> <a href=\"/account\">帐号设置</a> <form method=\"post\" action=\"/logout\" class=\"inl\"><input type=\"hidden\" name=\"t\" value=\"")
                     .append(attr(v.token)).append("\"/><button type=\"submit\" class=\"lnk\">退出</button></form>");
         else if(v.loginAvailable)
             sb.append("你好！<a href=\"/login\">请登录</a>");
