@@ -104,7 +104,7 @@ public final class SupportText
         return new Reply(clip(text, MAX_REPLY), ticket);
     }
 
-    /** 去掉 HTML 标签、实体写法里的尖括号、控制字符（换行留着）、Markdown 的粗体星号 */
+    /** 去掉 HTML 标签、实体写法里的尖括号、控制字符（换行留着）、格式代码符号 §（留言会进 OP 聊天栏）、Markdown 的粗体星号 */
     static String clean(String s)
     {
         String t = s.replaceAll("(?s)<[^>]*>", "").replace("<", "").replace(">", "").replace("**", "");
@@ -117,7 +117,7 @@ public final class SupportText
                 b.append('\n');
             else if(cp == '\t' || cp == '\r')
                 b.append(' ');
-            else if(!bad(cp))
+            else if(cp != 0xA7 && !bad(cp))
                 b.appendCodePoint(cp);
         }
         return b.toString();

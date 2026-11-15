@@ -393,6 +393,8 @@ class SupportTest
         Arrays.fill(big, '好');
         assertEquals(SupportText.MAX_REPLY, SupportText.reply(new String(big)).text.codePointCount(0, SupportText.MAX_REPLY));
         assertTrue(SupportText.reply(new String(big)).text.endsWith("…"));
+        SupportText.Reply t = SupportText.reply("好的\n【留言】\u00a7c退款\u00a7r 订单 3");
+        assertEquals("退款 订单 3", t.ticket, "留言会进 OP 聊天栏，不带格式代码");
     }
 
     @Test
