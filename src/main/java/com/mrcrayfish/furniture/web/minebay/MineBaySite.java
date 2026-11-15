@@ -184,7 +184,8 @@ public final class MineBaySite implements WebHandler
     {
         HOME("/", false), ITEM("/item", false), CART("/cart", false), CART_ADD("/cart/add", true), CART_UPDATE("/cart/update", true),
         CHECKOUT("/checkout", false), CHECKOUT_POST("/checkout", true), ORDERS("/orders", false), ORDER("/order", false), HELP("/help", false),
-        LOGIN("/login", false), CALLBACK("/login/callback", false), LOGOUT("/logout", true), PAID("/paid", false), UNPAID("/unpaid", false);
+        LOGIN("/login", false), CALLBACK("/login/callback", false), LOGOUT("/logout", true), PAID("/paid", false), UNPAID("/unpaid", false),
+        SUPPORT("/support", false), SUPPORT_POST("/support", true);
 
         final String path;
         final boolean post;
@@ -581,7 +582,8 @@ public final class MineBaySite implements WebHandler
             if(!tokenOk)
                 return page(403, "Forbidden", MineBayPages.problem(s.viewer(), "页面过期了", "请回到上一页刷新后再试。"));
             if(!s.ok())
-                return loginNeeded(s, route == Route.CHECKOUT_POST ? "/checkout" : "/cart");
+                return route == Route.SUPPORT_POST ? supportPage(401, "Unauthorized", s, null, "", false)
+                        : loginNeeded(s, route == Route.CHECKOUT_POST ? "/checkout" : "/cart");
         }
         switch(route)
         {
@@ -597,7 +599,49 @@ public final class MineBaySite implements WebHandler
             case PAID: return paid(params, s);
             case UNPAID: return unpaid(params, s);
             case HELP: return WebResponse.xhtml(MineBayPages.help(s.viewer()));
+            case SUPPORT: return supportPage(200, "OK", s, null, "", "1".equals(params.get("all")));
+            case SUPPORT_POST: return supportPost(params, s);
             default: return notFound(s);
+        }
+    }
+
+    // ---------------------------------------------------------------- 在线客服
+
+    private static WebResponse supportPage(int status, String reason, Session s, @Nullable MineBayPages.Notice notice, String typed, boolean all)
+    {
+        SupportData d = SupportData.get(FMLCommonHandler.instance().getMinecraftServerInstance());
+        boolean in = s.login != null && d != null;
+        List<SupportChat.Message> msgs = in ? d.chat(s.login.uuid).messages() : Collections.<SupportChat.Message>emptyList();
+        boolean waiting = in && Support.waiting(s.login.uuid, s.now);
+        return page(status, reason, MineBayPages.support(s.viewer(), Support.available(), msgs, waiting, notice, typed, SupportConfig.messagesPerHour, all));
+    }
+
+    /** 发一条消息：收下了 303 回客服页（等回答）；没收下回客服页说明原因，填的原样填回去 */
+    private static WebResponse supportPost(Map<String, String> params, Session s)
+    {
+        MinecraftServer server = FMLCommonHandler.instance().getMinecraftServerInstance();
+        SupportData d = SupportData.get(server);
+        String typed = params.get("m") == null ? "" : params.get("m");
+        if(d == null)
+            return supportPage(503, "Service Unavailable", s, MineBayPages.Notice.bad("客服暂时不可用，请稍后再试。"), typed, false);
+        Support.Outcome o = Support.send(server, s.data, d, s.login.uuid, s.login.name, params.get("m"), s.now);
+        switch(o)
+        {
+            case SENT:
+                return WebResponse.seeOther("/support");
+            case UNAVAILABLE:
+                return supportPage(503, "Service Unavailable", s, MineBayPages.Notice.bad("在线客服暂不可用。"), typed, false);
+            case TOO_LONG:
+                return supportPage(422, "Unprocessable Entity", s, MineBayPages.Notice.bad("一条最多 " + SupportText.MAX_MESSAGE + " 个字，请分开发。"), typed, false);
+            case EMPTY_OR_BAD:
+                return supportPage(422, "Unprocessable Entity", s, MineBayPages.Notice.bad("请输入要问的话（不能有特殊字符）。"), typed, false);
+            case BUSY:
+                return supportPage(409, "Conflict", s, MineBayPages.Notice.bad(SupportPrompt.AGENT_NAME + "还在回复上一条，请稍等再发。"), typed, false);
+            case LIMIT:
+                return supportPage(429, "Too Many Requests", s, MineBayPages.Notice.bad("每小时最多问 " + SupportConfig.messagesPerHour + " 条，请约 "
+                        + Support.minutesToWait(d, s.login.uuid, s.now) + " 分钟后再来。"), typed, false);
+            default:
+                return supportPage(503, "Service Unavailable", s, MineBayPages.Notice.bad("客服太忙了，请稍后再试。"), typed, false);
         }
     }
 

@@ -72,6 +72,7 @@ public final class MineBayShop
         });
         PayApi.setDisplayName(ACCOUNT, ACCOUNT_NAME);
         MinecraftForge.EVENT_BUS.register(new Events());
+        MinecraftForge.EVENT_BUS.register(new Support.Events());
     }
 
     static AccountRef account()

@@ -100,6 +100,15 @@ public class MrCrayfishFurnitureMod
         proxy.init();
     }
 
+    /** 服务器启动（独立服务器、单人游戏的内置服务器都有）：MineBay 在线客服读 config/cfm_llm.cfg，登记管理员看留言的命令 */
+    @EventHandler
+    public void serverStarting(net.minecraftforge.fml.common.event.FMLServerStartingEvent event)
+    {
+        com.mrcrayfish.furniture.web.minebay.SupportConfig.load(net.minecraftforge.fml.common.Loader.instance().getConfigDir());
+        com.mrcrayfish.furniture.web.minebay.Support.start();
+        event.registerServerCommand(new com.mrcrayfish.furniture.web.minebay.CommandMineBay());
+    }
+
     @EventHandler
     public void postInit(FMLPostInitializationEvent event)
     {
