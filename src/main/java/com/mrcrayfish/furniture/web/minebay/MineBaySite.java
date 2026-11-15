@@ -1,27 +1,28 @@
 package com.mrcrayfish.furniture.web.minebay;
 
 import com.mrcrayfish.furniture.MrCrayfishFurnitureMod;
-import com.mrcrayfish.furniture.advancement.Triggers;
-import com.mrcrayfish.furniture.computer.ComputerNetwork;
 import com.mrcrayfish.furniture.computer.FormEncoding;
 import com.mrcrayfish.furniture.computer.RateLimiter;
-import com.mrcrayfish.furniture.tileentity.TileEntityComputer;
-import com.mrcrayfish.furniture.util.RejectLog;
 import com.mrcrayfish.furniture.web.WebContext;
 import com.mrcrayfish.furniture.web.WebHandler;
 import com.mrcrayfish.furniture.web.WebRequest;
 import com.mrcrayfish.furniture.web.WebResponse;
 import com.mrcrayfish.furniture.web.Websites;
 import moe.qingu.youran.api.network.Ipv6Address;
-import net.minecraft.entity.player.EntityPlayerMP;
-import net.minecraft.item.ItemStack;
-import net.minecraft.util.NonNullList;
+import moe.qingu.youran.api.network.location.LocationProof;
+import moe.qingu.youran.api.network.location.LocationProofs;
+import moe.qingu.youran.api.network.location.LocationVerifier;
+import moe.qingu.youran.api.network.location.NonceBook;
+import moe.qingu.youran.api.network.stack.NetStack;
+import moe.qingu.youran.api.pay.OrderInfo;
+import net.minecraft.server.MinecraftServer;
 import net.minecraftforge.fml.common.FMLCommonHandler;
-import net.minecraftforge.items.ItemHandlerHelper;
 
 import javax.annotation.Nullable;
+import java.security.PublicKey;
 import java.security.SecureRandom;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -29,42 +30,59 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * MineBay 网站（{@code minebay.yr}，主机登记名 {@value #HOST_KEY}）：做成一个购物网站。
+ * MineBay 网站（{@code minebay.yr}，主机登记名 {@value #HOST_KEY}）：做成一个购物网站，只用游戏内网络的公开接口（服主 11-15）。
  * <ul>
  * <li>页面：首页 / 分类 / 搜索（{@code GET /?c=&q=&s=&p=}）、商品详情（{@code /item?id=}）、购物车（{@code /cart}）、
  * 结算确认（{@code /checkout}，立即购买为 {@code /checkout?buy=&n=}）、我的订单（{@code /orders}、{@code /order?no=}）、帮助（{@code /help}）。</li>
- * <li>改东西的都是 POST：{@code /cart/add}、{@code /cart/update}、{@code /checkout}。成功后 303 跳到结果页；
+ * <li>登录：用 {@code id.yr} 游戏角色一键登录（MineBay 是它的普通 OAuth 网站，见 {@link IdLogin}），登录状态是 MineBay 自己的 Cookie {@value #COOKIE}
+ * （跟着电脑走）。购物车、订单按登录的玩家 UUID 存（{@link MineBayData}）。不登录也能逛。</li>
+ * <li>结算：提交时浏览器带上定位模块签名的电脑位置（{@code <input type="x-yr-location">}，没装定位模块就不能下单）；MineBay 凭 id.yr 的访问令牌现查
+ * 登录的那名玩家在不在线、在哪，比距离（{@link Reach}，8 格内）；谁坐在电脑前操作不管（“相当于老婆帮你买东西”）。然后开 pay.yr 收款单、跳过去付款，
+ * 付款成功的回调里发货（{@link MineBayShop}）。</li>
+ * <li>改东西的都是 POST：{@code /cart/add}、{@code /cart/update}、{@code /checkout}、{@code /logout}。成功后 303 跳到结果页；
  * 失败时直接回一页（4xx）说明原因，玩家填的数量原样填回去（浏览器也保留原页面表单里的内容）。</li>
- * <li>谁在买：按请求的来源地址找回电脑（{@link ComputerNetwork#computerAt}），再找它的操作者：电脑要有电，操作者要开着这台电脑的界面、
- * 在 8 格内。购物车、订单按操作者的 UUID 存在存档里（{@link MineBayData}）。</li>
  * <li>安全：POST 表单带按来源地址发的随机令牌（防别的网站骗点）；结算确认页另发一个一次性的确认码，绑定玩家与确认时的订单内容，
- * 提交时对不上（重复提交、确认后改了购物车或价格）就不扣钱；所有参数先校验；按地址、按玩家限频；扣钱发货在主线程上全有或全无（{@link Checkout}）。</li>
+ * 提交时对不上（重复提交、确认后改了购物车或价格）就不开单；位置证明核对签名、网站、来源地址、时间、一次性随机数；所有参数先校验；按地址、按玩家限频。</li>
  * </ul>
- * 网络线程上只做路由、令牌、按地址限频；其余在主线程（{@link WebContext#onMainThread}）。
+ * 网络线程上只做路由、令牌、登录、按地址限频、核对位置证明、向 id.yr 查位置；其余在主线程（{@link WebContext#onMainThread}）。
  */
 public final class MineBaySite implements WebHandler
 {
     public static final String HOST_KEY = "cfm:minebay";
     public static final String DOMAIN = "minebay.yr";
+    static final String COOKIE = "mbsid";
     static final int MAX_TOKENS = 1024;
+    static final int MAX_SESSIONS = 4096;
+    static final int MAX_LOGINS = 1024;
     /** 确认页的确认码多久失效 */
     static final long CONFIRM_TTL_MS = 10 * 60 * 1000L;
-    /** 一单里最多发几叠物品（防模组回调出错一下子给太多） */
-    static final int MAX_STACKS_PER_ORDER = 512;
+    /** 登录空闲多久失效（最长到 id.yr 的访问令牌过期） */
+    static final long SESSION_IDLE_MS = 30 * 60 * 1000L;
+    static final long LOGIN_TTL_MS = 5 * 60 * 1000L;
+    /** 位置证明最多多旧 */
+    static final long PROOF_MAX_AGE_S = 300;
 
     private final SecureRandom random = new SecureRandom();
     /** 网络线程：来源地址 → 表单令牌 */
-    private final Map<Ipv6Address, String> tokens = lru(MAX_TOKENS);
+    private final Map<Ipv6Address, String> tokens = Collections.synchronizedMap(lru(MAX_TOKENS));
     /** 网络线程：来源地址 → 限频（每秒 10 次，突发 20） */
-    private final Map<Ipv6Address, RateLimiter> addressLimits = lru(MAX_TOKENS);
+    private final Map<Ipv6Address, RateLimiter> addressLimits = Collections.synchronizedMap(lru(MAX_TOKENS));
+    /** 网络线程：Cookie → 登录 */
+    private final Map<String, Login> sessions = new ConcurrentHashMap<>();
+    /** 网络线程：state → 正在登录 */
+    private final Map<String, LoginStart> logins = new ConcurrentHashMap<>();
+    /** 结算页给定位模块的一次性随机数 */
+    private final NonceBook nonces = new NonceBook(CONFIRM_TTL_MS, 4096);
     /** 主线程：玩家 → 看页面限频（每秒 6 次，突发 12）、改东西限频（每秒 3 次，突发 6） */
     private final Map<UUID, RateLimiter> viewLimits = lru(1024);
     private final Map<UUID, RateLimiter> changeLimits = lru(1024);
     /** 主线程：玩家 → 待确认的订单 */
     private final Map<UUID, Pending> pending = lru(1024);
-    /** 主线程：玩家 → 最近一次已经下单的确认码（重复提交时认出来） */
+    /** 主线程：玩家 → 最近一次已经开单的确认码（重复提交时认出来） */
     private final Map<UUID, Done> done = lru(1024);
 
     private static <K, V> Map<K, V> lru(int max)
@@ -77,6 +95,50 @@ public final class MineBaySite implements WebHandler
                 return size() > max;
             }
         };
+    }
+
+    /** 一个登录（Cookie 跟着电脑走：同一台电脑的下一个人看到的也是这个角色） */
+    static final class Login
+    {
+        final String id;
+        final UUID uuid;
+        final String name;
+        final String accessToken;
+        final long tokenExpires;
+        volatile long lastSeen;
+
+        Login(String id, IdLogin.Token t, long now)
+        {
+            this.id = id;
+            this.uuid = t.uuid;
+            this.name = t.name;
+            this.accessToken = t.accessToken;
+            this.tokenExpires = t.expiresAt;
+            this.lastSeen = now;
+        }
+
+        boolean alive(long now)
+        {
+            return now < tokenExpires && now - lastSeen < SESSION_IDLE_MS;
+        }
+    }
+
+    static final class LoginStart
+    {
+        final String verifier;
+        final String scheme;
+        final String next;
+        final Ipv6Address source;
+        final long created;
+
+        LoginStart(String verifier, String scheme, String next, Ipv6Address source, long created)
+        {
+            this.verifier = verifier;
+            this.scheme = scheme;
+            this.next = next;
+            this.source = source;
+            this.created = created;
+        }
     }
 
     static final class Pending
@@ -101,18 +163,19 @@ public final class MineBaySite implements WebHandler
     static final class Done
     {
         final String nonce;
-        final long order;
+        final String url;
 
-        Done(String nonce, long order)
+        Done(String nonce, String url)
         {
             this.nonce = nonce;
-            this.order = order;
+            this.url = url;
         }
     }
 
     public static void register()
     {
         Websites.register(HOST_KEY, DOMAIN, new MineBaySite());
+        MineBayShop.init();
     }
 
     // ---------------------------------------------------------------- 网络线程
@@ -120,7 +183,8 @@ public final class MineBaySite implements WebHandler
     enum Route
     {
         HOME("/", false), ITEM("/item", false), CART("/cart", false), CART_ADD("/cart/add", true), CART_UPDATE("/cart/update", true),
-        CHECKOUT("/checkout", false), CHECKOUT_POST("/checkout", true), ORDERS("/orders", false), ORDER("/order", false), HELP("/help", false);
+        CHECKOUT("/checkout", false), CHECKOUT_POST("/checkout", true), ORDERS("/orders", false), ORDER("/order", false), HELP("/help", false),
+        LOGIN("/login", false), CALLBACK("/login/callback", false), LOGOUT("/logout", true), PAID("/paid", false), UNPAID("/unpaid", false);
 
         final String path;
         final boolean post;
@@ -167,47 +231,79 @@ public final class MineBaySite implements WebHandler
     @Override
     public CompletableFuture<WebResponse> handle(WebRequest request, WebContext context)
     {
-        if(!addressLimits.computeIfAbsent(request.remoteAddress, a -> new RateLimiter(10, 20)).tryAcquire(System.currentTimeMillis(), 1))
-            return CompletableFuture.completedFuture(WebResponse.error(429, "Too Many Requests"));
+        long now = System.currentTimeMillis();
+        RateLimiter al;
+        synchronized(addressLimits)
+        {
+            al = addressLimits.computeIfAbsent(request.remoteAddress, a -> new RateLimiter(10, 20));
+        }
+        if(!al.tryAcquire(now, 1))
+            return done(WebResponse.error(429, "Too Many Requests"));
         if(request.path.equals("/buy"))
         {
             // 改版前的购买表单（还开着旧页面的）：回首页，什么都不买
-            return CompletableFuture.completedFuture(WebResponse.seeOther("/"));
+            return done(WebResponse.seeOther("/"));
         }
         boolean post = request.method.equals("POST");
         if(!post && !request.method.equals("GET"))
-            return CompletableFuture.completedFuture(WebResponse.error(405, "Method Not Allowed"));
+            return done(WebResponse.error(405, "Method Not Allowed"));
         Route route = Route.of(request.path, post);
         if(route == null && Route.exists(request.path))
-            return CompletableFuture.completedFuture(WebResponse.error(405, "Method Not Allowed"));
+            return done(WebResponse.error(405, "Method Not Allowed"));
+        sweep(now);
         String token = tokenFor(request.remoteAddress);
         Map<String, String> params = params(request);
         boolean tokenOk = !post || token.equals(params.get("t"));
-        Ipv6Address from = request.remoteAddress;
-        return context.onMainThread(() ->
+        Login login = session(request, now);
+        String scheme = request.secure ? "https" : "http";
+        if(route == Route.LOGIN)
+            return done(login(request, params, scheme, now));
+        if(route == Route.CALLBACK)
+            return callback(request, params, context, now);
+        if(route == Route.LOGOUT)
         {
-            try
-            {
-                Session s = session(from, token);
-                return route == null ? notFound(s) : handleMain(route, params, s, tokenOk);
-            }
-            catch(RuntimeException e)
-            {
-                MrCrayfishFurnitureMod.logger().error("MineBay: failed to handle {} {}", request.method, request.path, e);
-                return WebResponse.error(500, "Internal Server Error");
-            }
-        });
+            if(tokenOk && login != null)
+                sessions.remove(login.id);
+            return done(WebResponse.seeOther("/").withHeader("Set-Cookie", cookie("", request.secure, 0)));
+        }
+        if(route == Route.CHECKOUT_POST && tokenOk && login != null)
+            return checkoutPost(request, params, context, login, token, scheme);
+        return context.onMainThread(() -> main(request, route, s -> handleMain(route, params, s, tokenOk), login, token, scheme));
+    }
+
+    /** 在主线程上做（出错回 500） */
+    private WebResponse main(WebRequest request, @Nullable Route route, java.util.function.Function<Session, WebResponse> body, @Nullable Login login,
+                             String token, String scheme)
+    {
+        try
+        {
+            Session s = session(login, token, scheme);
+            return route == null ? notFound(s) : body.apply(s);
+        }
+        catch(RuntimeException e)
+        {
+            MrCrayfishFurnitureMod.logger().error("MineBay: failed to handle {} {}", request.method, request.path, e);
+            return WebResponse.error(500, "Internal Server Error");
+        }
+    }
+
+    private static <T> CompletableFuture<T> done(T v)
+    {
+        return CompletableFuture.completedFuture(v);
     }
 
     private String tokenFor(Ipv6Address address)
     {
-        String t = tokens.get(address);
-        if(t == null)
+        synchronized(tokens)
         {
-            t = randomHex();
-            tokens.put(address, t);
+            String t = tokens.get(address);
+            if(t == null)
+            {
+                t = randomHex();
+                tokens.put(address, t);
+            }
+            return t;
         }
-        return t;
     }
 
     private String randomHex()
@@ -220,73 +316,272 @@ public final class MineBaySite implements WebHandler
         return sb.toString();
     }
 
+    private String randomText(int bytes)
+    {
+        byte[] b = new byte[bytes];
+        random.nextBytes(b);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(b);
+    }
+
+    // ---------------------------------------------------------------- 登录（网络线程）
+
+    static String cookie(String value, boolean secure, int maxAge)
+    {
+        return COOKIE + "=" + value + "; Path=/; HttpOnly; SameSite=Lax" + (secure ? "; Secure" : "") + (maxAge >= 0 ? "; Max-Age=" + maxAge : "");
+    }
+
+    @Nullable
+    private Login session(WebRequest r, long now)
+    {
+        String c = r.header("cookie");
+        if(c == null)
+            return null;
+        for(String part : c.split(";"))
+        {
+            String p = part.trim();
+            if(p.startsWith(COOKIE + "="))
+            {
+                Login l = sessions.get(p.substring(COOKIE.length() + 1));
+                if(l == null)
+                    return null;
+                if(!l.alive(now))
+                {
+                    sessions.remove(l.id);
+                    return null;
+                }
+                l.lastSeen = now;
+                return l;
+            }
+        }
+        return null;
+    }
+
+    private void sweep(long now)
+    {
+        if(random.nextInt(32) != 0)
+            return;
+        sessions.values().removeIf(l -> !l.alive(now));
+        logins.values().removeIf(l -> now - l.created > LOGIN_TTL_MS);
+    }
+
+    /** 只许跳回 MineBay 自己的路径 */
+    static String safeNext(@Nullable String n)
+    {
+        if(n == null || !n.startsWith("/") || n.startsWith("//") || n.length() > 200 || !n.matches("[A-Za-z0-9/_.?=&%:-]*"))
+            return "/";
+        return n;
+    }
+
+    private WebResponse login(WebRequest r, Map<String, String> params, String scheme, long now)
+    {
+        String next = safeNext(params.get("next"));
+        if(!IdLogin.available())
+            return page(503, "Service Unavailable", MineBayPages.problem(MineBayPages.Viewer.anonymous(""), "不能登录", "服务器没有开游戏角色登录（id.yr）。"));
+        if(logins.size() >= MAX_LOGINS)
+            return page(503, "Service Unavailable", MineBayPages.problem(MineBayPages.Viewer.anonymous(""), "太忙了", "登录的人太多，请稍后再试。"));
+        String state = randomText(18);
+        String verifier = randomText(36);
+        logins.put(state, new LoginStart(verifier, scheme, next, r.remoteAddress, now));
+        return WebResponse.seeOther(IdLogin.authorizeUrl(scheme, state, verifier));
+    }
+
+    private CompletableFuture<WebResponse> callback(WebRequest r, Map<String, String> q, WebContext context, long now)
+    {
+        String st = q.get("state");
+        LoginStart l = st == null ? null : logins.remove(st);
+        MineBayPages.Viewer anon = MineBayPages.Viewer.anonymous("");
+        if(l == null || now - l.created > LOGIN_TTL_MS)
+            return done(page(400, "Bad Request", MineBayPages.problem(anon, "登录失败", "这次登录过期了，请重新登录。")));
+        if(!l.source.equals(r.remoteAddress))
+            return done(page(403, "Forbidden", MineBayPages.problem(anon, "登录失败", "要在发起登录的那台电脑上完成。")));
+        if(!IdLogin.issuerOk(q.get("iss")))
+            return done(page(400, "Bad Request", MineBayPages.problem(anon, "登录失败", "登录服务对不上。")));
+        if(q.get("error") != null)
+            return done(page(400, "Bad Request", MineBayPages.problem(anon, "登录失败", IdLogin.errorText(q.get("error"), q.get("error_description")))));
+        String code = q.get("code");
+        NetStack stack = context.stack();
+        if(code == null || code.isEmpty() || stack == null)
+            return done(page(400, "Bad Request", MineBayPages.problem(anon, "登录失败", "登录服务没给授权码。")));
+        return IdLogin.exchange(stack, context.hasTls(), l.scheme, code, l.verifier).handle((t, e) ->
+        {
+            if(t == null)
+            {
+                MrCrayfishFurnitureMod.logger().warn("MineBay: id.yr exchange failed: {}", cause(e));
+                return page(502, "Bad Gateway", MineBayPages.problem(anon, "登录失败", "向 id.yr 兑换失败，请重新登录。"));
+            }
+            if(sessions.size() >= MAX_SESSIONS)
+                return page(503, "Service Unavailable", MineBayPages.problem(anon, "太忙了", "登录的人太多，请稍后再试。"));
+            Login s = new Login(randomText(24), t, System.currentTimeMillis());
+            sessions.put(s.id, s);
+            MrCrayfishFurnitureMod.logger().info("MineBay: {} logged in with id.yr (from {})", t.name, r.remoteAddress);
+            return WebResponse.seeOther(l.next).withHeader("Set-Cookie", cookie(s.id, l.scheme.equals("https"), -1));
+        });
+    }
+
+    private static String cause(@Nullable Throwable e)
+    {
+        Throwable c = e instanceof CompletionException && e.getCause() != null ? e.getCause() : e;
+        return c == null ? "?" : c.toString();
+    }
+
+    // ---------------------------------------------------------------- 结算提交（网络线程 → 主线程）
+
+    /**
+     * 提交结算：先在网络线程上核对位置证明、凭访问令牌向 id.yr 现查位置，再到主线程上比距离、查库存、开 pay.yr 收款单。
+     */
+    private CompletableFuture<WebResponse> checkoutPost(WebRequest r, Map<String, String> params, WebContext context, Login login, String token, String scheme)
+    {
+        long now = System.currentTimeMillis();
+        String loc = params.get("loc");
+        LocationProof proof = null;
+        String problem;
+        if(loc == null)
+            problem = "页面过期了，请回到购物车重新结算。";
+        else if(loc.startsWith("error:"))
+            problem = locationError(loc.substring(6).trim());
+        else
+        {
+            PublicKey key = LocationProofs.publicKey();
+            if(key == null)
+                problem = "定位服务现在不可用，暂时不能下单。";
+            else
+            {
+                LocationVerifier.Result v = new LocationVerifier(key, PROOF_MAX_AGE_S).verify(loc, DOMAIN, r.remoteAddress, n -> nonces.consume(n, now), now / 1000);
+                proof = v.proof;
+                problem = v.ok() ? null : "电脑的位置证明核对不上（" + v.reason + "），没有下单。请刷新确认页再试。";
+            }
+        }
+        NetStack stack = context.stack();
+        if(problem != null || stack == null)
+        {
+            String why = problem != null ? problem : "现在查不了位置，暂时不能下单。";
+            return context.onMainThread(() -> main(r, Route.CHECKOUT_POST, s -> checkoutRefused(params, s, why, 403), login, token, scheme));
+        }
+        LocationProof p = proof;
+        return IdLogin.position(stack, context.hasTls(), login.accessToken).handle((pos, e) ->
+        {
+            if(pos != null)
+                return new Object[]{null, pos};
+            Throwable c = e instanceof CompletionException && e.getCause() != null ? e.getCause() : e;
+            if(c instanceof IdLogin.TokenExpired)
+            {
+                sessions.remove(login.id);
+                return new Object[]{"登录过期了，请重新登录。购物车还在。", null};
+            }
+            MrCrayfishFurnitureMod.logger().warn("MineBay: id.yr userinfo for {} failed: {}", login.name, cause(e));
+            return new Object[]{"查不到 " + login.name + " 的位置（id.yr），暂时不能下单。", null};
+        }).thenCompose(x -> context.onMainThread(() -> main(r, Route.CHECKOUT_POST, s ->
+        {
+            if(x[0] != null)
+                return checkoutRefused(params, s, (String) x[0], 403);
+            String far = Reach.check(login.name, (IdLogin.Position) x[1], p.dimension, p.x, p.y, p.z);
+            if(far != null)
+            {
+                MrCrayfishFurnitureMod.logger().info("MineBay: refused checkout of {}: {}", login.name, far);
+                return checkoutRefused(params, s, far, 403);
+            }
+            return checkoutPostMain(params, s, System.currentTimeMillis());
+        }, login, token, scheme)));
+    }
+
+    static String locationError(String code)
+    {
+        switch(code)
+        {
+            case "no_locator":
+                return "这台电脑没有定位模块，不能下单。";
+            case "denied":
+                return "你没有同意提供电脑的位置，没有下单。";
+            case "timeout":
+                return "位置确认框超时了，没有下单。";
+            case "operator_changed":
+            case "no_operator":
+                return "确认位置时离开了电脑或换了人，没有下单。";
+            case "busy":
+                return "已经有一个确认框开着，先处理那个。";
+            default:
+                return "拿不到电脑的位置（" + code + "），没有下单。";
+        }
+    }
+
     // ---------------------------------------------------------------- 主线程
 
-    /** 这次请求是谁发的 */
+    /** 这次请求是谁（主线程上的样子） */
     static final class Session
     {
-        /** 能买东西的操作者；电脑没电、人走远、没人操作时为 null */
+        /** 登录的玩家；没登录为 null */
         @Nullable
-        final EntityPlayerMP player;
-        /** player 为 null 的原因 */
-        final String why;
+        final Login login;
         @Nullable
         final MineBayData data;
         final String token;
+        final String scheme;
+        final long now;
 
-        Session(@Nullable EntityPlayerMP player, String why, @Nullable MineBayData data, String token)
+        Session(@Nullable Login login, @Nullable MineBayData data, String token, String scheme, long now)
         {
-            this.player = player;
-            this.why = why;
+            this.login = login;
             this.data = data;
             this.token = token;
+            this.scheme = scheme;
+            this.now = now;
+        }
+
+        boolean ok()
+        {
+            return login != null && data != null;
+        }
+
+        long remaining(Listing l)
+        {
+            return data == null ? -1 : data.remaining(l.id, l.stock, now, login == null ? null : login.uuid);
         }
 
         MineBayPages.Viewer viewer()
         {
-            return new MineBayPages.Viewer(player == null ? null : player.getName(), player == null || data == null ? 0 : data.cart(player.getUniqueID()).totalQuantity(), token);
+            return new MineBayPages.Viewer(login == null ? null : login.name, !ok() ? 0 : data.cart(login.uuid).totalQuantity(), token, new MineBayPages.StockView()
+            {
+                @Override
+                public long remaining(Listing l)
+                {
+                    return Session.this.remaining(l);
+                }
+
+                @Override
+                public String refill(Listing l)
+                {
+                    Stock.State st = data == null ? null : data.stock(l.id, l.stock, now);
+                    return st == null ? "" : Stock.describeWait(st, now);
+                }
+            }, IdLogin.available());
         }
     }
 
-    static Session session(Ipv6Address from, String token)
+    static Session session(@Nullable Login login, String token, String scheme)
     {
         MineBayData data = MineBayData.get(FMLCommonHandler.instance().getMinecraftServerInstance());
-        TileEntityComputer computer = ComputerNetwork.computerAt(from);
-        if(computer == null)
-            return new Session(null, "只有家具电脑能在 MineBay 买东西。", data, token);
-        EntityPlayerMP player = computer.getOperatorPlayer();
-        if(player == null)
-            return new Session(null, "这台电脑现在没有人在操作：要开着电脑的界面才能买东西。", data, token);
-        if(!computer.getAppliance().isRunning())
-            return new Session(null, "电脑没电了。", data, token);
-        if(player.getDistanceSq(computer.getPos().getX() + 0.5, computer.getPos().getY() + 0.5, computer.getPos().getZ() + 0.5) > 64.0)
-            return new Session(null, "离电脑太远了。", data, token);
-        return new Session(player, "", data, token);
+        return new Session(login, data, token, scheme, System.currentTimeMillis());
     }
 
     private WebResponse handleMain(Route route, Map<String, String> params, Session s, boolean tokenOk)
     {
-        long now = System.currentTimeMillis();
-        if(s.player != null)
+        long now = s.now;
+        if(s.login != null)
         {
             Map<UUID, RateLimiter> limits = route.post ? changeLimits : viewLimits;
-            RateLimiter l = limits.computeIfAbsent(s.player.getUniqueID(), k -> route.post ? new RateLimiter(3, 6) : new RateLimiter(6, 12));
+            RateLimiter l = limits.computeIfAbsent(s.login.uuid, k -> route.post ? new RateLimiter(3, 6) : new RateLimiter(6, 12));
             if(!l.tryAcquire(now, 1))
             {
-                RejectLog.log(s.player, "MineBay requests too fast (" + route + ")");
-                return page(429, "Too Many Requests", MineBayPages.problem(s.viewer(), "操作太快了", "请过一两秒再试。你填的内容没有丢：按“后退”回到原来的页面再提交一次。"));
+                MrCrayfishFurnitureMod.logger().info("MineBay: requests of {} too fast ({})", s.login.name, route);
+                return page(429, "Too Many Requests", MineBayPages.problem(s.viewer(), "操作太快了", "请过一两秒再试。填的内容没有丢，按“后退”再提交。"));
             }
         }
         if(route.post)
         {
             if(!tokenOk)
-            {
-                if(s.player != null)
-                    RejectLog.log(s.player, "MineBay form with a bad token (" + route + ")");
-                return page(403, "Forbidden", MineBayPages.problem(s.viewer(), "页面过期了", "这个请求不是从 MineBay 当前的页面发出的，没有处理。请回到上一页刷新后再试。"));
-            }
-            if(s.player == null || s.data == null)
-                return page(403, "Forbidden", MineBayPages.problem(s.viewer(), "现在不能买东西", s.why.isEmpty() ? "服务器还没准备好。" : s.why));
+                return page(403, "Forbidden", MineBayPages.problem(s.viewer(), "页面过期了", "请回到上一页刷新后再试。"));
+            if(!s.ok())
+                return loginNeeded(s, route == Route.CHECKOUT_POST ? "/checkout" : "/cart");
         }
         switch(route)
         {
@@ -296,9 +591,11 @@ public final class MineBaySite implements WebHandler
             case CART_ADD: return cartAdd(params, s);
             case CART_UPDATE: return cartUpdate(params, s);
             case CHECKOUT: return checkout(params, s, now);
-            case CHECKOUT_POST: return checkoutPost(params, s, now);
+            case CHECKOUT_POST: return checkoutPostMain(params, s, now);
             case ORDERS: return orders(params, s);
             case ORDER: return order(params, s);
+            case PAID: return paid(params, s);
+            case UNPAID: return unpaid(params, s);
             case HELP: return WebResponse.xhtml(MineBayPages.help(s.viewer()));
             default: return notFound(s);
         }
@@ -307,6 +604,11 @@ public final class MineBaySite implements WebHandler
     static WebResponse page(int status, String reason, String html)
     {
         return WebResponse.xhtml(status, reason, html);
+    }
+
+    private static WebResponse loginNeeded(Session s, String next)
+    {
+        return page(401, "Unauthorized", MineBayPages.loginNeeded(s.viewer(), next));
     }
 
     private static WebResponse notFound(Session s)
@@ -358,11 +660,13 @@ public final class MineBaySite implements WebHandler
 
     private static int inCart(Session s, String id)
     {
-        return s.player == null || s.data == null ? 0 : s.data.cart(s.player.getUniqueID()).quantityOf(id);
+        return !s.ok() ? 0 : s.data.cart(s.login.uuid).quantityOf(id);
     }
 
     private static WebResponse cart(Map<String, String> params, Session s)
     {
+        if(!s.ok())
+            return loginNeeded(s, "/cart");
         MineBayPages.Notice notice = null;
         String r = params.get("r");
         if("added".equals(r))
@@ -374,15 +678,25 @@ public final class MineBaySite implements WebHandler
             notice = MineBayPages.Notice.ok("数量改好了。");
         else if("removed".equals(r))
             notice = MineBayPages.Notice.ok("已从购物车删除。");
+        else if("unpaid".equals(r))
+            notice = MineBayPages.Notice.bad("没有付款，订单已取消。购物车原样保留。");
         return cartPage(200, "OK", s, notice, Collections.<String, String>emptyMap());
+    }
+
+    private static Checkout.Plan cartPlan(Session s, Catalog catalog)
+    {
+        return Checkout.plan(s.data.cart(s.login.uuid).lines(), catalog::listing, id ->
+        {
+            Listing l = catalog.listing(id);
+            return l == null ? -1 : s.remaining(l);
+        });
     }
 
     private static WebResponse cartPage(int status, String reason, Session s, @Nullable MineBayPages.Notice notice, Map<String, String> typed)
     {
         Catalog catalog = Catalog.get();
-        Cart cart = s.player == null || s.data == null ? new Cart() : s.data.cart(s.player.getUniqueID());
-        Checkout.Plan plan = Checkout.plan(cart.lines(), catalog::listing);
-        return page(status, reason, MineBayPages.cart(s.viewer(), cart, catalog::listing, plan, notice, typed));
+        Cart cart = s.data.cart(s.login.uuid);
+        return page(status, reason, MineBayPages.cart(s.viewer(), cart, catalog::listing, cartPlan(s, catalog), notice, typed));
     }
 
     private static WebResponse cartAdd(Map<String, String> params, Session s)
@@ -400,7 +714,7 @@ public final class MineBaySite implements WebHandler
             return page(422, "Unprocessable Entity", MineBayPages.item(s.viewer(), l, inCart(s, id), MineBayPages.Notice.bad("数量要填 1 到 " + max + " 之间的整数。"), typed));
         if("buy".equals(params.get("go")))
             return WebResponse.seeOther("/checkout?buy=" + urlPart(id) + "&n=" + n);
-        UUID uuid = s.player.getUniqueID();
+        UUID uuid = s.login.uuid;
         Cart cart = s.data.cartForChange(uuid);
         if(cart == null)
             return page(503, "Service Unavailable", MineBayPages.problem(s.viewer(), "购物车暂时用不了", "服务器上存的购物车太多了，请告诉服主。"));
@@ -411,10 +725,10 @@ public final class MineBaySite implements WebHandler
             case OK:
                 return WebResponse.seeOther("/cart?r=added&id=" + urlPart(id));
             case FULL:
-                return cartPage(409, "Conflict", s, MineBayPages.Notice.bad("购物车满了（最多 " + Cart.MAX_LINES + " 种商品），没有加进去。先结算或删掉一些再加。"), Collections.<String, String>emptyMap());
+                return cartPage(409, "Conflict", s, MineBayPages.Notice.bad("购物车满了（最多 " + Cart.MAX_LINES + " 种），没有加进去。"), Collections.<String, String>emptyMap());
             case TOO_MANY:
                 return page(409, "Conflict", MineBayPages.item(s.viewer(), l, inCart(s, id),
-                        MineBayPages.Notice.bad("购物车里已有 " + cart.quantityOf(id) + " 份，这件最多放 " + max + " 份，没有加进去。"), typed));
+                        MineBayPages.Notice.bad("购物车里已有 " + cart.quantityOf(id) + " 份，这件最多 " + max + " 份，没有加进去。"), typed));
             default:
                 return page(422, "Unprocessable Entity", MineBayPages.item(s.viewer(), l, inCart(s, id), MineBayPages.Notice.bad("数量要填 1 到 " + max + " 之间的整数。"), typed));
         }
@@ -425,7 +739,7 @@ public final class MineBaySite implements WebHandler
         String id = params.get("id");
         if(!ShopParams.isProductId(id))
             return badRequest(s, "商品编号不对。");
-        UUID uuid = s.player.getUniqueID();
+        UUID uuid = s.login.uuid;
         Cart cart = s.data.cart(uuid);
         if(cart.quantityOf(id) == 0)
             return cartPage(409, "Conflict", s, MineBayPages.Notice.bad("购物车里没有这件商品（可能已经删掉或买走了）。"), Collections.<String, String>emptyMap());
@@ -445,12 +759,12 @@ public final class MineBaySite implements WebHandler
             case "set":
             {
                 if(l == null)
-                    return cartPage(409, "Conflict", s, MineBayPages.Notice.bad("这件商品已经下架，不能改数量，只能删除。"), Collections.<String, String>emptyMap());
+                    return cartPage(409, "Conflict", s, MineBayPages.Notice.bad("这件商品已经下架，只能删除。"), Collections.<String, String>emptyMap());
                 String typed = params.get("n");
                 int max = Cart.limit(l.maxPerOrder);
                 int n = ShopParams.quantity(typed, max);
                 if(n < 0 || cart.set(id, n, l.maxPerOrder) != Cart.Change.OK)
-                    return cartPage(422, "Unprocessable Entity", s, MineBayPages.Notice.bad("数量要填 1 到 " + max + " 之间的整数（不想要了请点“删除”）。"),
+                    return cartPage(422, "Unprocessable Entity", s, MineBayPages.Notice.bad("数量要填 1 到 " + max + " 之间的整数（不要了请点“删除”）。"),
                             Collections.singletonMap(id, typed == null ? "" : typed));
                 s.data.cartChanged(uuid);
                 return WebResponse.seeOther("/cart?r=updated");
@@ -460,115 +774,184 @@ public final class MineBaySite implements WebHandler
         }
     }
 
-    private WebResponse checkout(Map<String, String> params, Session s, long now)
+    /** 结算确认要的：买哪些（购物车或立即购买的一件）；参数不对时 {@link #error} 不为 null */
+    private static final class Wanted
     {
-        if(s.player == null || s.data == null)
-            return page(403, "Forbidden", MineBayPages.problem(s.viewer(), "现在不能结算", s.why.isEmpty() ? "服务器还没准备好。" : s.why));
-        Catalog catalog = Catalog.get();
-        String buy = params.get("buy");
+        @Nullable
         Checkout.Plan plan;
-        int qty = 0;
+        @Nullable
+        String buy;
+        int qty;
+        @Nullable
+        WebResponse error;
+    }
+
+    private static Wanted wanted(Map<String, String> params, Session s, @Nullable String buy, int qtyIfKnown)
+    {
+        Wanted w = new Wanted();
+        Catalog catalog = Catalog.get();
         if(buy != null)
         {
             if(!ShopParams.isProductId(buy))
-                return badRequest(s, "商品编号不对。");
+            {
+                w.error = badRequest(s, "商品编号不对。");
+                return w;
+            }
             Listing l = catalog.listing(buy);
             if(l == null)
-                return goneItem(s);
-            qty = ShopParams.quantity(params.get("n"), Cart.limit(l.maxPerOrder));
+            {
+                w.error = goneItem(s);
+                return w;
+            }
+            int qty = qtyIfKnown > 0 ? qtyIfKnown : ShopParams.quantity(params.get("n"), Cart.limit(l.maxPerOrder));
             if(qty < 0)
-                return badRequest(s, "数量要填 1 到 " + Cart.limit(l.maxPerOrder) + " 之间的整数。");
-            plan = Checkout.single(l, qty);
-            if(plan == null)
-                return badRequest(s, "这件商品现在买不了。");
+            {
+                w.error = badRequest(s, "数量要填 1 到 " + Cart.limit(l.maxPerOrder) + " 之间的整数。");
+                return w;
+            }
+            long left = s.remaining(l);
+            w.plan = Checkout.single(l, qty, left);
+            if(w.plan == null)
+            {
+                w.error = page(409, "Conflict", MineBayPages.item(s.viewer(), l, inCart(s, buy),
+                        MineBayPages.Notice.bad(left >= 0 && left < qty ? "库存只剩 " + left + " 份。" : "这件商品现在买不了。"), Integer.toString(qty)));
+                return w;
+            }
+            w.buy = buy;
+            w.qty = qty;
         }
         else
-        {
-            plan = Checkout.plan(s.data.cart(s.player.getUniqueID()).lines(), catalog::listing);
-            if(plan.isEmpty())
-                return WebResponse.seeOther("/cart");
-        }
-        return checkoutPage(200, "OK", s, plan, buy, qty, null, now);
+            w.plan = cartPlan(s, catalog);
+        return w;
+    }
+
+    private WebResponse checkout(Map<String, String> params, Session s, long now)
+    {
+        if(!s.ok())
+            return loginNeeded(s, "/checkout" + (params.get("buy") != null ? "?buy=" + urlPart(params.get("buy")) + "&n=" + urlPart(String.valueOf(params.get("n"))) : ""));
+        Wanted w = wanted(params, s, params.get("buy"), -1);
+        if(w.error != null)
+            return w.error;
+        if(w.plan.isEmpty())
+            return WebResponse.seeOther("/cart");
+        return checkoutPage(200, "OK", s, w.plan, w.buy, w.qty, null, now);
     }
 
     private WebResponse checkoutPage(int status, String reason, Session s, Checkout.Plan plan, @Nullable String buy, int qty, @Nullable MineBayPages.Notice notice, long now)
     {
-        Catalog catalog = Catalog.get();
-        Map<String, Long> have = new HashMap<>();
-        for(String cur : plan.totals.keySet())
-            have.put(cur, count(s.player, currencyOf(catalog, plan, cur)));
-        String nonce = null;
-        if(plan.affordable(c -> have.getOrDefault(c, 0L)))
+        String k = null;
+        String loc = null;
+        if(!plan.isEmpty())
         {
-            nonce = randomHex();
-            pending.put(s.player.getUniqueID(), new Pending(nonce, plan.signature, buy, qty, now));
+            k = randomHex();
+            loc = nonces.issue(now);
+            pending.put(s.login.uuid, new Pending(k, plan.signature, buy, qty, now));
         }
         else
-            pending.remove(s.player.getUniqueID());
-        return page(status, reason, MineBayPages.checkout(s.viewer(), plan, catalog::listing, have, nonce, buy, notice));
+            pending.remove(s.login.uuid);
+        return page(status, reason, MineBayPages.checkout(s.viewer(), plan, Catalog.get()::listing, k, loc, buy, notice));
     }
 
-    private WebResponse checkoutPost(Map<String, String> params, Session s, long now)
+    /** 提交被拒（位置、距离、登录）：回一张新的确认页说明原因，购物车原样 */
+    private WebResponse checkoutRefused(Map<String, String> params, Session s, String why, int status)
     {
-        UUID uuid = s.player.getUniqueID();
+        if(!s.ok())
+            return loginNeeded(s, "/checkout");
+        Pending p = pending.get(s.login.uuid);
+        Wanted w = wanted(params, s, p == null ? null : p.buyId, p == null ? -1 : p.buyQuantity);
+        if(w.error != null)
+            return w.error;
+        if(w.plan.isEmpty())
+            return page(status, "Forbidden", MineBayPages.problem(s.viewer(), "没有下单", why));
+        return checkoutPage(status, status == 403 ? "Forbidden" : "Conflict", s, w.plan, w.buy, w.qty, MineBayPages.Notice.bad(why), s.now);
+    }
+
+    private WebResponse checkoutPostMain(Map<String, String> params, Session s, long now)
+    {
+        if(!s.ok())
+            return loginNeeded(s, "/checkout");
+        UUID uuid = s.login.uuid;
         String k = params.get("k");
         Done d = done.get(uuid);
         if(k != null && d != null && d.nonce.equals(k))
-            return WebResponse.seeOther("/orders?done=" + d.order);
+            return WebResponse.seeOther(d.url);
         Pending p = pending.get(uuid);
         if(k == null || p == null || !p.nonce.equals(k) || now - p.created > CONFIRM_TTL_MS)
         {
-            RejectLog.log(s.player, "MineBay checkout with a stale or unknown confirmation");
-            return page(409, "Conflict", MineBayPages.problem(s.viewer(), "确认页过期了", "这张确认页已经失效（超过 10 分钟，或者之后又打开过别的确认页）。什么都没有扣，请重新结算。"));
+            MrCrayfishFurnitureMod.logger().info("MineBay: checkout of {} with a stale or unknown confirmation", s.login.name);
+            return page(409, "Conflict", MineBayPages.problem(s.viewer(), "确认页过期了", "这张确认页已经失效，没有下单。请重新结算。"));
         }
         pending.remove(uuid);
         Catalog catalog = Catalog.get();
-        Cart cart = s.data.cart(uuid);
-        Checkout.Plan plan = p.buyId == null ? Checkout.plan(cart.lines(), catalog::listing) : Checkout.single(catalog.listing(p.buyId), p.buyQuantity);
-        if(plan == null || plan.isEmpty())
-            return page(409, "Conflict", MineBayPages.problem(s.viewer(), "没有能买的商品", "确认之后商品下架了，或者购物车被改空了。什么都没有扣。"));
+        Wanted w = wanted(params, s, p.buyId, p.buyQuantity);
+        if(w.error != null)
+            return w.error;
+        Checkout.Plan plan = w.plan;
+        if(plan.isEmpty())
+            return page(409, "Conflict", MineBayPages.problem(s.viewer(), "没有能买的商品", "确认之后商品下架、卖完了，或者购物车被改空了。没有下单。"));
         if(!plan.signature.equals(p.signature))
-            return checkoutPage(409, "Conflict", s, plan, p.buyId, p.buyQuantity, MineBayPages.Notice.bad("确认之后购物车或价格变了，这次没有下单、什么都没有扣。请核对下面的新订单，再确认一次。"), now);
-        PlayerTill till = new PlayerTill(s.player, catalog, plan);
-        Checkout.Outcome outcome = Checkout.run(plan, till);
-        switch(outcome)
+            return checkoutPage(409, "Conflict", s, plan, p.buyId, p.buyQuantity, MineBayPages.Notice.bad("确认之后购物车、价格或库存变了，没有下单。请核对后再确认一次。"), now);
+        MinecraftServer server = FMLCommonHandler.instance().getMinecraftServerInstance();
+        MineBayShop.Opened o = MineBayShop.open(server, s.data, catalog, uuid, s.login.name, plan, p.buyId == null, s.scheme, now);
+        if(o.url == null)
+            return checkoutPage(409, "Conflict", s, plan, p.buyId, p.buyQuantity, MineBayPages.Notice.bad(o.error), now);
+        done.put(uuid, new Done(k, o.url));
+        return WebResponse.seeOther(o.url);
+    }
+
+    /** pay.yr 付完跳回来（{@code ?order=单号&status=…}；网址里的 status 不可信，照 pay.yr 的状态） */
+    private static WebResponse paid(Map<String, String> params, Session s)
+    {
+        String id = params.get("order");
+        if(id == null || !id.matches("ord_[a-z0-9]{16}"))
+            return badRequest(s, "单号不对。");
+        MinecraftServer server = FMLCommonHandler.instance().getMinecraftServerInstance();
+        PayOrders.Entry e = s.data == null ? null : s.data.payOrders().get(id);
+        if(e != null && e.state() == PayOrders.State.OPEN && MineBayShop.status(id) == OrderInfo.Status.PAID)
+            MineBayShop.paid(server, s.data, e);
+        if(s.ok())
         {
-            case OK:
-            {
-                List<Orders.Item> items = new ArrayList<>();
-                for(Checkout.Item i : plan.items)
-                {
-                    Listing l = (Listing) i.offer;
-                    items.add(new Orders.Item(l.id, l.icon, l.count, l.name, l.sortName, i.quantity, l.currency, i.cost));
-                }
-                Orders.Order order = s.data.record(uuid, System.currentTimeMillis(), items);
-                if(p.buyId == null)
-                {
-                    cart.removeBought(plan.quantities());
-                    s.data.cartChanged(uuid);
-                }
-                done.put(uuid, new Done(k, order.number));
-                s.player.inventoryContainer.detectAndSendChanges();
-                Triggers.trigger(Triggers.MINEBAY_PURCHASE, s.player);
-                MrCrayfishFurnitureMod.logger().info("MineBay: {} placed order {}: {} paid {}", s.player.getName(), MineBayPages.number(order.number), plan.quantities(), plan.totals);
-                return WebResponse.seeOther("/orders?done=" + order.number);
-            }
-            case POOR:
-                return checkoutPage(402, "Payment Required", s, plan, p.buyId, p.buyQuantity, MineBayPages.Notice.bad("背包里的钱不够，这一单没有下。什么都没有扣。"), now);
-            default:
-                MrCrayfishFurnitureMod.logger().warn("MineBay: order of {} could not be prepared: {}", s.player.getName(), plan.quantities());
-                return page(500, "Internal Server Error", MineBayPages.problem(s.viewer(), "这一单没能完成", "有商品现在发不了货。这一单没有下，什么都没有扣，购物车原样保留。"));
+            Orders.Order o = s.data.orders(s.login.uuid).findByPay(id);
+            if(o != null)
+                return WebResponse.seeOther("/orders?done=" + o.number);
         }
+        if(e != null && e.state() == PayOrders.State.OPEN)
+            return page(402, "Payment Required", MineBayPages.unpaid(s.viewer(), e.checkoutUrl));
+        if(e != null)
+            return page(200, "OK", MineBayPages.problem(s.viewer(), "付款成功", "东西会发给 " + e.buyerName + "（不在线时等上线再发）。"));
+        return page(404, "Not Found", MineBayPages.problem(s.viewer(), "找不到这张单", "只能看自己的订单。"));
+    }
+
+    /** pay.yr 上点了“返回网站”：取消这张还没付的单（放回库存），购物车原样 */
+    private static WebResponse unpaid(Map<String, String> params, Session s)
+    {
+        String id = params.get("order");
+        if(id == null || !id.matches("ord_[a-z0-9]{16}"))
+            return badRequest(s, "单号不对。");
+        if(!s.ok())
+            return loginNeeded(s, "/cart");
+        PayOrders.Entry e = s.data.payOrders().get(id);
+        if(e != null && e.buyer.equals(s.login.uuid))
+        {
+            MinecraftServer server = FMLCommonHandler.instance().getMinecraftServerInstance();
+            MineBayShop.cancel(server, s.data, e);
+        }
+        Orders.Order o = s.data.orders(s.login.uuid).findByPay(id);
+        if(o != null)
+            return WebResponse.seeOther("/orders?done=" + o.number);
+        return WebResponse.seeOther("/cart?r=unpaid");
     }
 
     private static WebResponse orders(Map<String, String> params, Session s)
     {
+        if(!s.ok())
+            return loginNeeded(s, "/orders");
         int p = ShopParams.page(params.get("p"));
         if(p < 0)
             return badRequest(s, "页码要是 1 到 " + ShopParams.MAX_PAGE + " 的整数。");
         long highlight = -1;
         MineBayPages.Notice notice = null;
-        List<Orders.Order> list = s.player == null || s.data == null ? Collections.<Orders.Order>emptyList() : s.data.orders(s.player.getUniqueID()).list();
+        List<Orders.Order> list = s.data.orders(s.login.uuid).list();
         if(params.containsKey("done"))
         {
             long no = ShopParams.orderNumber(params.get("done"));
@@ -579,7 +962,7 @@ public final class MineBaySite implements WebHandler
                 if(o.number == no)
                 {
                     highlight = no;
-                    notice = MineBayPages.Notice.ok("下单成功！订单号 " + MineBayPages.number(no) + "，东西已经放进你的背包（背包满了的话掉在脚边）。");
+                    notice = MineBayPages.Notice.ok("付款成功！订单 " + MineBayPages.number(no) + " 的东西已经发给 " + s.login.name + "（背包满了掉在脚边）。");
                 }
             }
         }
@@ -591,9 +974,11 @@ public final class MineBaySite implements WebHandler
         long no = ShopParams.orderNumber(params.get("no"));
         if(no < 0)
             return badRequest(s, "订单号不对。");
-        Orders.Order o = s.player == null || s.data == null ? null : s.data.orders(s.player.getUniqueID()).find(no);
+        if(!s.ok())
+            return loginNeeded(s, "/orders");
+        Orders.Order o = s.data.orders(s.login.uuid).find(no);
         if(o == null)
-            return page(404, "Not Found", MineBayPages.problem(s.viewer(), "找不到这张订单", "只能看自己最近 " + Orders.MAX_ORDERS + " 单（要开着电脑的界面）。"));
+            return page(404, "Not Found", MineBayPages.problem(s.viewer(), "找不到这张订单", "只能看自己最近 " + Orders.MAX_ORDERS + " 单。"));
         return WebResponse.xhtml(MineBayPages.orderDetail(s.viewer(), o));
     }
 
@@ -602,160 +987,9 @@ public final class MineBaySite implements WebHandler
         return FormEncoding.encode(Collections.singletonList(FormEncoding.field("x", s))).substring(2);
     }
 
-    // ---------------------------------------------------------------- 付款、发货
-
-    private static ItemStack currencyOf(Catalog catalog, Checkout.Plan plan, String currency)
+    /** 测试用 */
+    int sessionCount()
     {
-        for(Checkout.Item i : plan.items)
-        {
-            Catalog.Entry e = catalog.byId.get(i.offer.id());
-            if(e != null && i.offer.currency().equals(currency))
-                return e.currency;
-        }
-        return ItemStack.EMPTY;
-    }
-
-    static long count(EntityPlayerMP player, ItemStack currency)
-    {
-        if(currency.isEmpty())
-            return 0;
-        long have = 0;
-        for(ItemStack s : player.inventory.mainInventory)
-        {
-            if(matches(s, currency))
-                have += s.getCount();
-        }
-        return have;
-    }
-
-    static boolean matches(ItemStack stack, ItemStack currency)
-    {
-        if(stack.isEmpty() || stack.getItem() != currency.getItem())
-            return false;
-        return !currency.getHasSubtypes() || stack.getMetadata() == currency.getMetadata();
-    }
-
-    /** 按最大堆叠数拆开（最多拆出 MAX_STACKS_PER_ORDER + 1 叠，多了由调用方拒绝） */
-    static List<ItemStack> split(ItemStack unit, long total)
-    {
-        List<ItemStack> out = new ArrayList<>();
-        int max = Math.max(1, unit.getMaxStackSize());
-        long left = total;
-        while(left > 0 && out.size() <= MAX_STACKS_PER_ORDER)
-        {
-            ItemStack s = unit.copy();
-            int n = (int) Math.min(max, left);
-            s.setCount(n);
-            out.add(s);
-            left -= n;
-        }
-        return out;
-    }
-
-    /** 结算时的游戏状态：操作者的背包 */
-    static final class PlayerTill implements Checkout.Till<ItemStack>
-    {
-        final EntityPlayerMP player;
-        final Catalog catalog;
-        final Checkout.Plan plan;
-        int stacks;
-
-        PlayerTill(EntityPlayerMP player, Catalog catalog, Checkout.Plan plan)
-        {
-            this.player = player;
-            this.catalog = catalog;
-            this.plan = plan;
-        }
-
-        @Override
-        public long have(String currency)
-        {
-            return count(player, currencyOf(catalog, plan, currency));
-        }
-
-        @Nullable
-        @Override
-        public List<ItemStack> prepare(Checkout.Item item)
-        {
-            Catalog.Entry e = catalog.byId.get(item.offer.id());
-            if(e == null)
-                return null;
-            List<ItemStack> out = new ArrayList<>();
-            if(e.delivery != null)
-            {
-                List<ItemStack> made = e.delivery.prepare(player, item.quantity);
-                if(made == null)
-                    return null;
-                for(ItemStack s : made)
-                {
-                    if(s != null && !s.isEmpty())
-                        out.addAll(split(s.copy(), s.getCount()));
-                }
-            }
-            else if(!e.item.isEmpty())
-                out.addAll(split(e.item, (long) e.item.getCount() * item.quantity));
-            stacks += out.size();
-            if(stacks > MAX_STACKS_PER_ORDER)
-            {
-                MrCrayfishFurnitureMod.logger().warn("MineBay: order for {} would hand out more than {} stacks", player.getName(), MAX_STACKS_PER_ORDER);
-                return null;
-            }
-            return out;
-        }
-
-        @Override
-        public long take(String currency, long amount)
-        {
-            ItemStack cur = currencyOf(catalog, plan, currency);
-            NonNullList<ItemStack> inv = player.inventory.mainInventory;
-            long left = amount;
-            for(int i = 0; i < inv.size() && left > 0; i++)
-            {
-                ItemStack s = inv.get(i);
-                if(matches(s, cur))
-                {
-                    int take = (int) Math.min(left, s.getCount());
-                    s.shrink(take);
-                    left -= take;
-                }
-            }
-            player.inventory.markDirty();
-            return amount - left;
-        }
-
-        @Override
-        public void refund(String currency, long amount)
-        {
-            ItemStack cur = currencyOf(catalog, plan, currency);
-            if(cur.isEmpty())
-                return;
-            ItemStack unit = cur.copy();
-            unit.setCount(1);
-            for(ItemStack s : split(unit, amount))
-                ItemHandlerHelper.giveItemToPlayer(player, s);
-        }
-
-        @Override
-        public void give(Checkout.Item item, List<ItemStack> goods)
-        {
-            for(ItemStack s : goods)
-                ItemHandlerHelper.giveItemToPlayer(player, s.copy());
-        }
-
-        @Override
-        public void delivered(Checkout.Item item, List<ItemStack> goods)
-        {
-            Catalog.Entry e = catalog.byId.get(item.offer.id());
-            if(e == null || e.delivery == null)
-                return;
-            try
-            {
-                e.delivery.delivered(player, item.quantity, Collections.unmodifiableList(goods));
-            }
-            catch(RuntimeException ex)
-            {
-                MrCrayfishFurnitureMod.logger().error("MineBay: delivery callback of {} failed after delivery", item.offer.id(), ex);
-            }
-        }
+        return sessions.size();
     }
 }

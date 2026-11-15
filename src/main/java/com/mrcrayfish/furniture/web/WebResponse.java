@@ -45,7 +45,15 @@ public final class WebResponse
                 Collections.singletonMap("Location", location));
     }
 
-    public static WebResponse error(int status, String reason)
+    /** 加一个首部（如 {@code Set-Cookie}），返回新的回应 */
+    public WebResponse withHeader(String name, String value)
+    {
+        Map<String, String> h = new LinkedHashMap<>(headers);
+        h.put(name, value);
+        return new WebResponse(status, reason, contentType, body, h);
+    }
+
+        public static WebResponse error(int status, String reason)
     {
         return new WebResponse(status, reason, XHTML, errorPage(status, reason).getBytes(StandardCharsets.UTF_8), Collections.<String, String>emptyMap());
     }

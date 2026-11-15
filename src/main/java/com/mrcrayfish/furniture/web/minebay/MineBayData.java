@@ -8,14 +8,25 @@ import net.minecraft.world.storage.MapStorage;
 import net.minecraft.world.storage.WorldSavedData;
 import net.minecraftforge.common.util.Constants;
 
+import com.mrcrayfish.furniture.MrCrayfishFurnitureMod;
+import net.minecraft.nbt.CompressedStreamTools;
+
 import javax.annotation.Nullable;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 
 /**
  * MineBay 的存档数据（主世界的 {@code data/cfm_minebay.dat}，服务端主线程）：每个玩家的购物车、订单记录，与下一个订单号。
  * 购物车、订单都按玩家 UUID 存，和在哪台电脑上买无关；下线、关电脑、换电脑都还在。
+ * 另存：开出去还没发完货的 pay.yr 收款单（{@link PayOrders}）、每件限量商品的库存（{@link Stock.State}，全服统一）。
+ * 和钱、库存有关的改动用 {@link #saveNow} 当场写盘（不等世界自动保存）。
  */
 public class MineBayData extends WorldSavedData
 {
@@ -26,6 +37,8 @@ public class MineBayData extends WorldSavedData
     private final Map<UUID, Cart> carts = new HashMap<>();
     private final Map<UUID, Orders> orders = new HashMap<>();
     private long nextOrder = 1;
+    private PayOrders payOrders = new PayOrders();
+    private final Map<String, Stock.State> stock = new LinkedHashMap<>();
 
     public MineBayData(String name)
     {
@@ -92,7 +105,19 @@ public class MineBayData extends WorldSavedData
     /** 记一单（订单号在这里分配）；人数到上限时不记，返回的订单照样有号 */
     public Orders.Order record(UUID player, long time, java.util.List<Orders.Item> items)
     {
-        Orders.Order order = new Orders.Order(nextOrder++, time, items);
+        return record(player, new Orders.Order(nextOrder++, time, items));
+    }
+
+    /** 分一个订单号（开 pay.yr 收款单时） */
+    public long nextOrderNumber()
+    {
+        markDirty();
+        return nextOrder++;
+    }
+
+    /** 记一单（号已经分好）；人数到上限时不记 */
+    public Orders.Order record(UUID player, Orders.Order order)
+    {
         Orders o = orders.get(player);
         if(o == null && orders.size() < MAX_PLAYERS)
         {
@@ -105,11 +130,95 @@ public class MineBayData extends WorldSavedData
         return order;
     }
 
+    public PayOrders payOrders()
+    {
+        return payOrders;
+    }
+
+    /** 这件商品的库存，补到 {@code now}（设置变了照规则调整）；不限量的返回 null */
+    @Nullable
+    public Stock.State stock(String productId, @Nullable Stock.Spec spec, long now)
+    {
+        if(spec == null)
+            return null;
+        Stock.State old = stock.get(productId);
+        Stock.State st = Stock.advance(old, spec, now);
+        if(st != old)
+        {
+            stock.put(productId, st);
+            markDirty();
+        }
+        return st;
+    }
+
+    /** 还能下单的份数：库存减去还没付的单预留的；不限量为 -1 */
+    public long remaining(String productId, @Nullable Stock.Spec spec, long now)
+    {
+        return remaining(productId, spec, now, null);
+    }
+
+    /** 同上，但不算 {@code viewer} 自己那张还没付的单（他再结算时那张会先取消） */
+    public long remaining(String productId, @Nullable Stock.Spec spec, long now, @Nullable UUID viewer)
+    {
+        Stock.State st = stock(productId, spec, now);
+        if(st == null)
+            return -1;
+        long reserved = payOrders.reserved(productId);
+        PayOrders.Entry own = viewer == null ? null : payOrders.openOf(viewer);
+        if(own != null)
+            reserved -= own.quantities().getOrDefault(productId, 0);
+        return Math.max(0, Stock.available(st) - reserved);
+    }
+
+    /**
+     * 当场写盘（{@code data/cfm_minebay.dat}，先写临时文件再改名），不等世界自动保存：开单、付款、发货这几步之后调用，
+     * 崩了以后照存档里的状态对账（见 {@link MineBayShop}）。写不了只记日志（世界保存时还会再写）。
+     */
+    public void saveNow(@Nullable MinecraftServer server)
+    {
+        World overworld = server == null ? null : server.getWorld(0);
+        if(overworld == null)
+            return;
+        File f = overworld.getSaveHandler().getMapFileFromName(NAME);
+        if(f == null)
+            return;
+        File tmp = new File(f.getPath() + ".tmp");
+        try
+        {
+            NBTTagCompound root = new NBTTagCompound();
+            root.setTag("data", writeToNBT(new NBTTagCompound()));
+            // writeCompressed 会关掉传进去的流，先写进内存再写文件、同步到盘
+            java.io.ByteArrayOutputStream buf = new java.io.ByteArrayOutputStream();
+            CompressedStreamTools.writeCompressed(root, buf);
+            try(FileOutputStream out = new FileOutputStream(tmp))
+            {
+                buf.writeTo(out);
+                out.getChannel().force(true);
+            }
+            Files.move(tmp.toPath(), f.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            setDirty(false);
+        }
+        catch(IOException | RuntimeException e)
+        {
+            MrCrayfishFurnitureMod.logger().error("MineBay: could not save {} right away (will be saved with the world)", f, e);
+            markDirty();
+        }
+    }
+
     @Override
     public void readFromNBT(NBTTagCompound nbt)
     {
         carts.clear();
         orders.clear();
+        stock.clear();
+        payOrders = PayOrders.read(nbt.getTagList("pay", Constants.NBT.TAG_COMPOUND));
+        NBTTagCompound st = nbt.getCompoundTag("stock");
+        for(String k : st.getKeySet())
+        {
+            Stock.State s = Stock.State.read(st.getCompoundTag(k));
+            if(s != null && ShopParams.isProductId(k))
+                stock.put(k, s);
+        }
         nextOrder = Math.max(1, nbt.getLong("next"));
         NBTTagList players = nbt.getTagList("players", Constants.NBT.TAG_COMPOUND);
         for(int i = 0; i < players.tagCount() && i < MAX_PLAYERS * 2; i++)
@@ -143,6 +252,11 @@ public class MineBayData extends WorldSavedData
         for(NBTTagCompound t : byPlayer.values())
             list.appendTag(t);
         nbt.setTag("players", list);
+        nbt.setTag("pay", payOrders.write());
+        NBTTagCompound st = new NBTTagCompound();
+        for(Map.Entry<String, Stock.State> e : stock.entrySet())
+            st.setTag(e.getKey(), e.getValue().write());
+        nbt.setTag("stock", st);
         return nbt;
     }
 

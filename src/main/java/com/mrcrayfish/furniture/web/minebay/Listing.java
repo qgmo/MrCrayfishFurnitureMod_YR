@@ -54,10 +54,20 @@ public final class Listing implements Checkout.Offer
     public final int maxPerOrder;
     /** 商品说明，每行若干段 */
     public final List<List<Part>> description;
+    /** 库存规则；不限量为 null */
+    @Nullable
+    public final Stock.Spec stock;
 
     public Listing(String id, int seq, String category, String icon, int count, @Nullable String name, String sortName, String searchText,
                    String currency, long price, int maxPerOrder, List<List<Part>> description)
     {
+        this(id, seq, category, icon, count, name, sortName, searchText, currency, price, maxPerOrder, description, null);
+    }
+
+    public Listing(String id, int seq, String category, String icon, int count, @Nullable String name, String sortName, String searchText,
+                   String currency, long price, int maxPerOrder, List<List<Part>> description, @Nullable Stock.Spec stock)
+    {
+        this.stock = stock;
         this.id = id;
         this.seq = seq;
         this.category = category;

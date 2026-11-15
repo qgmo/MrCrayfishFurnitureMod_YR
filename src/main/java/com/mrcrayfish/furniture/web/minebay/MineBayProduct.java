@@ -48,6 +48,9 @@ public final class MineBayProduct
     public final int maxPerOrder;
     public final List<String> description;
     public final List<String> keywords;
+    /** 库存（全服统一）；不限量为 null */
+    @Nullable
+    public final Stock.Spec stock;
 
     private MineBayProduct(Builder b)
     {
@@ -62,6 +65,7 @@ public final class MineBayProduct
         this.maxPerOrder = b.maxPerOrder;
         this.description = Collections.unmodifiableList(new ArrayList<>(b.description));
         this.keywords = Collections.unmodifiableList(new ArrayList<>(b.keywords));
+        this.stock = b.stock;
     }
 
     /** @param id 商品编号，写成“模组ID:名字”（小写字母、数字、{@code _ . - /}），以后不要改：玩家购物车里记的是它 */
@@ -85,6 +89,8 @@ public final class MineBayProduct
         private int maxPerOrder = Cart.MAX_QUANTITY;
         private final List<String> description = new ArrayList<>();
         private final List<String> keywords = new ArrayList<>();
+        @Nullable
+        private Stock.Spec stock;
 
         private Builder(String id)
         {
@@ -144,6 +150,16 @@ public final class MineBayProduct
         public Builder description(String line)
         {
             this.description.add(line);
+            return this;
+        }
+
+        /**
+         * 限量（全服统一，按现实时间）：每月最多卖 {@code perMonth} 份（1–100000）。{@link Stock.Rule#DAILY} 每天补上限的 1/30（连续补，
+         * 卖完要等补回来）；{@link Stock.Rule#MONTHLY} 每个现实月 1 日补满、平时不补。不调用就不限量。
+         */
+        public Builder stock(int perMonth, Stock.Rule rule)
+        {
+            this.stock = new Stock.Spec(perMonth, rule);
             return this;
         }
 

@@ -12,8 +12,8 @@ import java.util.Map;
 
 /**
  * 网站收到的一个 HTTP 请求（在网络线程上交给 {@link WebHandler}）。
- * {@link #remoteAddress} 是游戏内网络里发请求的设备地址（家具电脑就是这台电脑那一格的地址，服务器的网卡校验过源地址），
- * 可以用 {@code ComputerNetwork.computerAt} 在主线程上找到那台电脑与它的操作者。
+ * {@link #remoteAddress} 是游戏内网络里发请求的设备地址（家具电脑就是这台电脑那一格的地址，服务器的网卡校验过源地址）。
+ * 要知道是谁在用、电脑在哪，走公开接口：{@code id.yr} 一键登录、定位模块的位置证明（和玩家自己搭的网站一样）。
  */
 public final class WebRequest
 {

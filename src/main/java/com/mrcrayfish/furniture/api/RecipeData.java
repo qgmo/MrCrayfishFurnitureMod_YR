@@ -20,6 +20,12 @@ public class RecipeData
     private int price;
 
     /**
+     * MineBay 限量（悠然服务器魔改）：每月最多卖几份（0 为不限）与补货规则（{@code daily} / {@code monthly}）
+     */
+    private int stock;
+    private String restock;
+
+    /**
      * Blender Variables
      */
     private String name;
@@ -73,6 +79,24 @@ public class RecipeData
     {
         this.price = price;
         return this;
+    }
+
+    /** MineBay 限量：每月 {@code perMonth} 份，补货规则 {@code daily}（每天补 1/30）或 {@code monthly}（每月 1 日补满） */
+    public RecipeData setStock(int perMonth, String restock)
+    {
+        this.stock = perMonth;
+        this.restock = restock;
+        return this;
+    }
+
+    public int getStock()
+    {
+        return stock;
+    }
+
+    public String getRestock()
+    {
+        return restock;
     }
 
     public RecipeData setColour(int red, int green, int blue)
@@ -248,6 +272,11 @@ public class RecipeData
             {
                 data.setPrice((Integer) price);
             }
+        }
+        if(params.get("stock") instanceof Integer)
+        {
+            Object r = params.get("restock");
+            data.setStock((Integer) params.get("stock"), r instanceof String ? (String) r : "daily");
         }
         if(params.containsKey("ingredients"))
         {

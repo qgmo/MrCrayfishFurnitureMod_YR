@@ -51,12 +51,21 @@ public final class Orders
         /** 下单时间（毫秒） */
         public final long time;
         public final List<Item> items;
+        /** 付款的 pay.yr 收款单号（改接 pay.yr 以前的订单为 null） */
+        @Nullable
+        public final String payId;
 
         public Order(long number, long time, List<Item> items)
+        {
+            this(number, time, items, null);
+        }
+
+        public Order(long number, long time, List<Item> items, @Nullable String payId)
         {
             this.number = number;
             this.time = time;
             this.items = Collections.unmodifiableList(new ArrayList<>(items));
+            this.payId = payId;
         }
 
         /** 按货币合计（按出现顺序） */
@@ -74,6 +83,17 @@ public final class Orders
     public List<Order> list()
     {
         return Collections.unmodifiableList(orders);
+    }
+
+    @Nullable
+    public Order findByPay(String payId)
+    {
+        for(Order o : orders)
+        {
+            if(payId.equals(o.payId))
+                return o;
+        }
+        return null;
     }
 
     @Nullable
@@ -102,22 +122,9 @@ public final class Orders
             NBTTagCompound t = new NBTTagCompound();
             t.setLong("no", o.number);
             t.setLong("time", o.time);
-            NBTTagList items = new NBTTagList();
-            for(Item i : o.items)
-            {
-                NBTTagCompound it = new NBTTagCompound();
-                it.setString("id", i.id);
-                it.setString("icon", i.icon);
-                it.setInteger("count", i.count);
-                if(i.name != null)
-                    it.setString("name", i.name);
-                it.setString("sort", i.sortName);
-                it.setInteger("n", i.quantity);
-                it.setString("cur", i.currency);
-                it.setLong("cost", i.cost);
-                items.appendTag(it);
-            }
-            t.setTag("items", items);
+            if(o.payId != null)
+                t.setString("pay", o.payId);
+            t.setTag("items", writeItems(o.items));
             list.appendTag(t);
         }
         return list;
@@ -129,16 +136,41 @@ public final class Orders
         for(int i = 0; i < list.tagCount() && out.orders.size() < MAX_ORDERS; i++)
         {
             NBTTagCompound t = list.getCompoundTagAt(i);
-            NBTTagList items = t.getTagList("items", Constants.NBT.TAG_COMPOUND);
-            List<Item> parsed = new ArrayList<>();
-            for(int j = 0; j < items.tagCount() && parsed.size() < Cart.MAX_LINES; j++)
-            {
-                NBTTagCompound it = items.getCompoundTagAt(j);
-                parsed.add(new Item(it.getString("id"), it.getString("icon"), it.getInteger("count"), it.hasKey("name", Constants.NBT.TAG_STRING) ? it.getString("name") : null,
-                        it.getString("sort"), it.getInteger("n"), it.getString("cur"), it.getLong("cost")));
-            }
-            out.orders.add(new Order(t.getLong("no"), t.getLong("time"), parsed));
+            List<Item> parsed = readItems(t.getTagList("items", Constants.NBT.TAG_COMPOUND));
+            out.orders.add(new Order(t.getLong("no"), t.getLong("time"), parsed, t.hasKey("pay", Constants.NBT.TAG_STRING) ? t.getString("pay") : null));
         }
         return out;
+    }
+
+    static NBTTagList writeItems(List<Item> items)
+    {
+        NBTTagList list = new NBTTagList();
+        for(Item i : items)
+        {
+            NBTTagCompound it = new NBTTagCompound();
+            it.setString("id", i.id);
+            it.setString("icon", i.icon);
+            it.setInteger("count", i.count);
+            if(i.name != null)
+                it.setString("name", i.name);
+            it.setString("sort", i.sortName);
+            it.setInteger("n", i.quantity);
+            it.setString("cur", i.currency);
+            it.setLong("cost", i.cost);
+            list.appendTag(it);
+        }
+        return list;
+    }
+
+    static List<Item> readItems(NBTTagList items)
+    {
+        List<Item> parsed = new ArrayList<>();
+        for(int j = 0; j < items.tagCount() && parsed.size() < Cart.MAX_LINES; j++)
+        {
+            NBTTagCompound it = items.getCompoundTagAt(j);
+            parsed.add(new Item(it.getString("id"), it.getString("icon"), it.getInteger("count"), it.hasKey("name", Constants.NBT.TAG_STRING) ? it.getString("name") : null,
+                    it.getString("sort"), it.getInteger("n"), it.getString("cur"), it.getLong("cost")));
+        }
+        return parsed;
     }
 }
