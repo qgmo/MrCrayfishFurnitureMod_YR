@@ -99,9 +99,17 @@ public final class PageDocument
         public final int form;
         public final int maxLength;
         public final boolean disabled;
+        /** 位置字段（隐藏字段；{@link #value} 是网站给的随机数，提交时换成位置证明） */
+        public final boolean location;
 
         Control(int n, Kind kind, String name, String value, boolean checked, List<String> optionValues, List<String> optionLabels, int selected, int form, int maxLength, boolean disabled)
         {
+            this(n, kind, name, value, checked, optionValues, optionLabels, selected, form, maxLength, disabled, false);
+        }
+
+        Control(int n, Kind kind, String name, String value, boolean checked, List<String> optionValues, List<String> optionLabels, int selected, int form, int maxLength, boolean disabled, boolean location)
+        {
+            this.location = location;
             this.n = n;
             this.kind = kind;
             this.name = name;
@@ -207,6 +215,9 @@ public final class PageDocument
     }
 
     static final Pattern LANG_KEY = Pattern.compile("[A-Za-z0-9._-]{1,128}");
+    /** 位置字段的类型（悠然服务器的约定，见 {@code Browser#submitForm}） */
+    public static final String LOCATION_TYPE = "x-yr-location";
+    static final String LOCATION_ATTR = "data-yr-location";
 
     static String local(Node n)
     {
@@ -285,15 +296,42 @@ public final class PageDocument
                     continue;
                 }
                 Element el = c;
+                // 位置字段的标记只由浏览器自己加（页面自己写的不算）
+                c.removeAttribute(LOCATION_ATTR);
+                Element locationLabel = null;
                 if(tag.equals("input"))
                 {
                     String type = c.getAttribute("type").toLowerCase(Locale.ROOT);
                     if(type.equals("submit") || type.equals("reset") || type.equals("button") || type.equals("image"))
                         el = toButton(c, type);
+                    else if(type.equals(LOCATION_TYPE))
+                        locationLabel = toLocationField(c);
                 }
                 visit(el);
                 walk(el);
+                if(locationLabel != null)
+                    visit(locationLabel);
             }
+        }
+
+        /**
+         * 位置字段（{@code <input type="x-yr-location" name="…" value="网站给的随机数" />}，悠然服务器的约定）：
+         * 改成隐藏字段（提交时浏览器先请服务器签位置，再把证明或 {@code error:代号} 填进去），后面加一句说明给人看。
+         */
+        private Element toLocationField(Element input)
+        {
+            input.setAttribute("type", "hidden");
+            input.setAttribute(LOCATION_ATTR, "1");
+            Element label = dom.createElementNS(XHTML_NS, "span");
+            label.setAttribute("style", "color: #2b4f81;");
+            String text = lang.apply("cfm.browser.location.field");
+            label.appendChild(dom.createTextNode(text != null ? text : "[提交时附上这台电脑的位置（要先在确认框里同意）]"));
+            Node next = input.getNextSibling();
+            if(next == null)
+                input.getParentNode().appendChild(label);
+            else
+                input.getParentNode().insertBefore(label, next);
+            return label;
         }
 
         private Element toButton(Element input, String type)
@@ -464,7 +502,8 @@ public final class PageDocument
             String ml = e.getAttribute("maxlength");
             if(ml.matches("\\d{1,4}"))
                 maxLength = Math.max(0, Math.min(maxLength, Integer.parseInt(ml)));
-            controls.add(new Control(n, kind, e.getAttribute("name"), value, e.hasAttribute("checked"), values, labels, selected, form, maxLength, e.hasAttribute("disabled")));
+            controls.add(new Control(n, kind, e.getAttribute("name"), value, e.hasAttribute("checked"), values, labels, selected, form, maxLength,
+                    e.hasAttribute("disabled"), kind == Kind.HIDDEN && e.hasAttribute(LOCATION_ATTR)));
         }
 
         private void injectStyles(Element root)

@@ -842,3 +842,5 @@ cfm.browser.panel.peripheral=定位模块
 cfm.browser.panel.peripheral.hint=外设槽：放 YouranMod 的定位模块，网站经你同意后能拿到这台电脑签了名的位置
 cfm.browser.panel.peripheral.operator=你是操作者，可以放、拿
 cfm.browser.panel.peripheral.not_operator=只有操作者能放、拿
+cfm.browser.location.field=[提交时附上这台电脑的位置（要先在确认框里同意）]
+cfm.browser.status.location=等你在确认框里决定要不要给网站这台电脑的位置……

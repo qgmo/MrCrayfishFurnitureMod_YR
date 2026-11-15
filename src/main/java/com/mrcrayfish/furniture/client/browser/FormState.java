@@ -88,6 +88,12 @@ public final class FormState
      */
     List<Map.Entry<String, String>> fields(PageDocument doc, int form, int submitter)
     {
+        return fields(doc, form, submitter, java.util.Collections.<Integer, String>emptyMap());
+    }
+
+    /** 同上，{@code overrides} 里有的控件（按编号）用给的值（位置字段换成证明） */
+    List<Map.Entry<String, String>> fields(PageDocument doc, int form, int submitter, Map<Integer, String> overrides)
+    {
         List<Map.Entry<String, String>> out = new ArrayList<>();
         for(PageDocument.Control c : doc.controls)
         {
@@ -104,7 +110,7 @@ public final class FormState
                     break;
                 }
                 case HIDDEN:
-                    out.add(FormEncoding.field(c.name, c.value));
+                    out.add(FormEncoding.field(c.name, overrides.containsKey(c.n) ? overrides.get(c.n) : c.value));
                     break;
                 case CHECKBOX:
                 case RADIO:

@@ -380,4 +380,36 @@ class PageDocumentTest
         PageDocument d = PageDocument.parse(page.getBytes(StandardCharsets.UTF_8), "https://minebay.yr/", id -> null, lang::get, 600);
         assertEquals("精准采集|原文|坏键|有子元素", d.dom.getElementsByTagNameNS("*", "p").item(0).getTextContent());
     }
+
+    @Test
+    void locationField() throws Exception
+    {
+        String page = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>t</title></head><body>"
+                + "<form action=\"https://shop.yr/checkout\" method=\"post\"><p>"
+                + "<input type=\"x-yr-location\" name=\"loc\" value=\"nonce-12345678\"/>"
+                + "<input type=\"hidden\" name=\"fake\" value=\"v\" data-yr-location=\"1\"/>"
+                + "<input type=\"text\" name=\"q\"/><input type=\"submit\" value=\"go\"/></p></form></body></html>";
+        PageDocument d = parse(page);
+        PageDocument.Control loc = null;
+        PageDocument.Control fake = null;
+        for(PageDocument.Control c : d.controls)
+        {
+            if(c.name.equals("loc"))
+                loc = c;
+            if(c.name.equals("fake"))
+                fake = c;
+        }
+        assertNotNull(loc);
+        assertEquals(PageDocument.Kind.HIDDEN, loc.kind, "画成隐藏字段");
+        assertTrue(loc.location);
+        assertEquals("nonce-12345678", loc.value, "值是网站给的随机数");
+        assertFalse(fake.location, "页面自己写的标记不算");
+        assertTrue(d.dom.getDocumentElement().getTextContent().contains("位置"), "后面加了一句说明");
+        FormState f = new FormState();
+        f.init(d);
+        assertEquals("[loc=nonce-12345678, fake=v, q=]", f.fields(d, 0, -1).toString(), "不换时照原值");
+        Map<Integer, String> proof = new HashMap<>();
+        proof.put(loc.n, "youran-location-proof v1\n...");
+        assertEquals("[loc=youran-location-proof v1\n..., fake=v, q=]", f.fields(d, 0, -1, proof).toString());
+    }
 }

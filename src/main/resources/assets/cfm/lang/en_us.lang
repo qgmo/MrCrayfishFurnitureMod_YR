@@ -852,3 +852,5 @@ cfm.browser.panel.peripheral=Locator
 cfm.browser.panel.peripheral.hint=Peripheral slot: holds a YouranMod locator module, so websites can get a signed location of this computer with your consent
 cfm.browser.panel.peripheral.operator=You are the operator and can put it in or take it out
 cfm.browser.panel.peripheral.not_operator=Only the operator can put it in or take it out
+cfm.browser.location.field=[This computer's location is attached when submitting (you will be asked first)]
+cfm.browser.status.location=Waiting for you to decide in the confirmation box whether to share this computer's location...

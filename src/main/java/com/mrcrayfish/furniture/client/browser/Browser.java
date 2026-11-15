@@ -17,6 +17,8 @@ import com.mrcrayfish.furniture.network.message.MessageComputerPage;
 import com.mrcrayfish.furniture.network.message.MessageComputerScroll;
 import com.mrcrayfish.furniture.network.message.MessageComputerTyping;
 import moe.qingu.youran.api.network.ClientNic;
+import moe.qingu.youran.api.network.location.ClientLocation;
+import moe.qingu.youran.api.network.location.LocationResult;
 import moe.qingu.youran.api.network.stack.HttpClient;
 import moe.qingu.youran.api.network.stack.NetworkException;
 import net.minecraft.client.Minecraft;
@@ -390,7 +392,12 @@ public final class Browser
             requestRender();
     }
 
-    /** 提交表单（{@code submitter} 是按下的按钮编号；回车提交时为第一个提交按钮或 -1） */
+    /**
+     * 提交表单（{@code submitter} 是按下的按钮编号；回车提交时为第一个提交按钮或 -1）。
+     * 表单里有位置字段（{@code <input type="x-yr-location">}）时，先请服务器给这台电脑签位置（服务器先弹系统确认框问操作者），
+     * 把证明全文填进那个字段（拿不到时填 {@code error:代号}，如 {@code error:no_locator}、{@code error:denied}），再提交。
+     * 位置签给表单要提交到的那个网站（action 的主机）。
+     */
     public void submitForm(int form, int submitter)
     {
         replacing = null;
@@ -404,7 +411,42 @@ public final class Browser
             showError("", BuiltinPages.Error.UNSUPPORTED_SCHEME, "", false);
             return;
         }
-        String encoded = FormEncoding.encode(e.forms.fields(page.document, form, submitter));
+        List<PageDocument.Control> location = new ArrayList<>();
+        for(PageDocument.Control c : page.document.controls)
+        {
+            if(c.form == form && c.location && !c.disabled && !c.name.isEmpty())
+                location.add(c);
+        }
+        if(location.isEmpty())
+        {
+            doSubmit(e, page, info, form, submitter, Collections.<Integer, String>emptyMap());
+            return;
+        }
+        String site = UrlInput.hostOf(info.action);
+        int gen = ++generation;
+        waiting = null;
+        setStatus(Status.LOADING, ComputerViews.TR.t("cfm.browser.status.location"));
+        Map<Integer, CompletableFuture<LocationResult>> asks = new LinkedHashMap<>();
+        for(PageDocument.Control c : location)
+            asks.put(c.n, ClientLocation.request(site == null ? "" : site, c.value));
+        CompletableFuture.allOf(asks.values().toArray(new CompletableFuture<?>[0])).whenComplete((v, err) -> Minecraft.getMinecraft().addScheduledTask(() ->
+        {
+            if(gen != generation || current() != e || rendered() != page)
+                return;
+            Map<Integer, String> values = new HashMap<>();
+            for(Map.Entry<Integer, CompletableFuture<LocationResult>> a : asks.entrySet())
+            {
+                LocationResult r = a.getValue().getNow(LocationResult.of(LocationResult.Status.UNAVAILABLE));
+                values.put(a.getKey(), r.ok() ? r.proof : "error:" + r.status.code);
+            }
+            setStatus(Status.IDLE, "");
+            doSubmit(e, page, info, form, submitter, values);
+        }));
+    }
+
+    private void doSubmit(Entry e, RenderedPage page, PageDocument.FormInfo info, int form, int submitter, Map<Integer, String> overrides)
+    {
+        String encoded = FormEncoding.encode(e.forms.fields(page.document, form, submitter, overrides));
         addressEdited = false;
         if(info.post)
         {
