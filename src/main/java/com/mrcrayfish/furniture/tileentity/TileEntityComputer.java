@@ -51,7 +51,7 @@ import java.util.UUID;
  * </ul>
  * 原来的 MineBay 改成了游戏内网站（{@code minebay.yr}），这里不再有交易的槽位；旧存档槽里剩的东西会掉出来。
  */
-public class TileEntityComputer extends TileEntityFurniture implements ITickable, IAppliance
+public class TileEntityComputer extends TileEntityFurniture implements ITickable, IAppliance, moe.qingu.youran.api.peripheral.PeripheralHost
 {
     private final ApplianceEnergy energy = new ApplianceEnergy(this, AppliancePower.COMPUTER, ApplianceFaces.bottom(), () -> TileEntityUtil.markBlockForUpdate(world, pos));
 
@@ -137,6 +137,20 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
     public int getPageId()
     {
         return pageId;
+    }
+
+    /** YouranMod 外设接口：装着的外设（服务端） */
+    @Override
+    public java.util.List<ItemStack> installedPeripherals()
+    {
+        return peripherals.installed();
+    }
+
+    /** 家具电脑只收定位模块 */
+    @Override
+    public boolean acceptsPeripheral(String kind)
+    {
+        return moe.qingu.youran.api.peripheral.Peripherals.KIND_LOCATOR.equals(kind);
     }
 
     public ComputerPeripherals getPeripherals()

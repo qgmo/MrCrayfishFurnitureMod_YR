@@ -1,6 +1,8 @@
 package com.mrcrayfish.furniture.computer;
 
 import moe.qingu.youran.api.network.DeviceCapability;
+import moe.qingu.youran.api.peripheral.PeripheralItem;
+import moe.qingu.youran.api.peripheral.Peripherals;
 import net.minecraft.init.Bootstrap;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
@@ -13,7 +15,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/** 电脑的外设槽：只收定位模块、能力跟着装没装走、存档 */
+/** 电脑的外设槽：只收定位模块（按外设接口的种类认）、能力按外设报的能力算、存档 */
 class ComputerPeripheralsTest
 {
     static Item locator;
@@ -23,8 +25,9 @@ class ComputerPeripheralsTest
     static void items()
     {
         Bootstrap.register();
-        locator = new Item().setRegistryName("youranmod", "locator_module");
-        other = new Item().setRegistryName("youranmod", "floppy_disk");
+        // 外设接口（YouranMod api.peripheral）：定位模块是种类 locator、能力 location 的外设；软驱是别的外设，家具电脑不收
+        locator = new PeripheralItem(Peripherals.KIND_LOCATOR, 16, Peripherals.CAP_LOCATION).setRegistryName("youranmod", "locator_module");
+        other = new PeripheralItem(Peripherals.KIND_FLOPPY, 16).setRegistryName("youranmod", "floppy_drive");
     }
 
     @Test

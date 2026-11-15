@@ -1,20 +1,24 @@
 package com.mrcrayfish.furniture.computer;
 
 import moe.qingu.youran.api.network.DeviceCapability;
-import moe.qingu.youran.api.network.location.LocatorModule;
+import moe.qingu.youran.api.peripheral.Peripherals;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.nbt.NBTTagList;
 import net.minecraftforge.common.util.Constants;
 
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.EnumSet;
+import java.util.List;
 import java.util.Set;
 
 /**
  * 电脑的外设槽（悠然服务器魔改，服主 11-15）：插在电脑上的外设物品，现在只有一格，放 YouranMod 的定位模块。
  * 外设决定设备在 YouranMod 设备表里声明哪些能力（{@link #capabilities()}）；“装没装某种外设”的判断只在这里。
  * 外设物品没有状态（定位模块可以堆叠，槽里只放一个）。存档在方块实体 NBT 的 {@value #TAG} 里。
- * 以后 YouranMod 的统一外设接口（{@code api.peripheral}）合进来后，{@link #accepts}、{@link #capabilities} 改成问外设接口。
+ * 走 YouranMod 的统一外设接口（{@code api.peripheral}）：家具电脑只收定位模块这一种外设（种类 {@code locator}），
+ * 能力按外设物品报的能力算（{@code location} → {@link DeviceCapability#LOCATION}）。
  */
 public final class ComputerPeripherals
 {
@@ -35,13 +39,25 @@ public final class ComputerPeripherals
     /** 这一格能不能放这个物品（是认得的外设） */
     public static boolean accepts(int slot, ItemStack stack)
     {
-        return slot >= 0 && slot < SLOTS && LocatorModule.is(stack);
+        return slot >= 0 && slot < SLOTS && isPeripheral(stack);
     }
 
     /** 是不是认得的外设（Shift 点击时找格子用） */
     public static boolean isPeripheral(ItemStack stack)
     {
-        return LocatorModule.is(stack);
+        return Peripherals.KIND_LOCATOR.equals(Peripherals.kind(stack));
+    }
+
+    /** 装着的外设（空格不算） */
+    public List<ItemStack> installed()
+    {
+        List<ItemStack> list = new ArrayList<>();
+        for(ItemStack s : slots)
+        {
+            if(!s.isEmpty())
+                list.add(s);
+        }
+        return list;
     }
 
     public ItemStack get(int slot)
@@ -74,11 +90,8 @@ public final class ComputerPeripherals
     public Set<DeviceCapability> capabilities()
     {
         EnumSet<DeviceCapability> set = EnumSet.noneOf(DeviceCapability.class);
-        for(ItemStack s : slots)
-        {
-            if(LocatorModule.is(s))
-                set.add(DeviceCapability.LOCATION);
-        }
+        if(Peripherals.hasCapability(Arrays.asList(slots), Peripherals.CAP_LOCATION))
+            set.add(DeviceCapability.LOCATION);
         return set;
     }
 
