@@ -231,7 +231,10 @@ class MineBayPagesTest
         assertTrue(html.contains("答 29<br/>第二行"));
         assertFalse(html.contains("问 &lt;b&gt;20&lt;/b&gt;"), "默认只显示最近几条");
         assertTrue(html.contains("显示全部记录（61 条）"));
-        assertTrue(html.contains("href=\"/support\" class=\"kf\">联系客服"), "角落的联系客服");
+        assertFalse(html.contains("问 &lt;b&gt;26&lt;/b&gt;"), "默认只显示最近 " + MineBayPages.SUPPORT_RECENT + " 条");
+        assertTrue(MineBayPages.list(VIEWER, many(3), many(3), null, "", ShopParams.Sort.DEFAULT, 1, null).contains("href=\"/support\" class=\"kf\">联系客服"),
+                "商城页面角落的联系客服");
+        assertTrue(html.contains("返回 MineBay"));
         assertTrue(d.forms.stream().anyMatch(f -> f.post && f.action.equals("https://minebay.yr/support")));
 
         String all = MineBayPages.support(VIEWER, true, msgs, false, MineBayPages.Notice.bad("每小时最多问 20 条"), "我填的 \"字\"", 20, true);

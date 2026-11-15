@@ -601,7 +601,7 @@ public final class MineBayPages
     }
 
     /** 客服页默认显示最近几条（多的点“全部记录”看） */
-    public static final int SUPPORT_RECENT = 8;
+    public static final int SUPPORT_RECENT = 6;
 
     /**
      * 在线客服页（服主 11-15：老式网站的“在线客服”）：上面对话记录，下面输入框 +“发送”；客服正在回复时显示“小 Bay 正在输入……”并每 2 秒自动刷新。
@@ -613,19 +613,24 @@ public final class MineBayPages
     public static String support(Viewer v, boolean available, List<SupportChat.Message> messages, boolean waiting, @Nullable Notice notice, String typed,
                                  int perHour, boolean all)
     {
+        // 单独的客服页（像当年弹出来的“在线客服”小窗口）：不带商城的页头，对话与输入框一屏看得到
         StringBuilder sb = new StringBuilder(16 * 1024);
-        begin(sb, "在线客服 - MineBay", v, "", null, waiting ? 2 : 0);
-        sb.append("<div class=\"crumbs\"><a href=\"/\">MineBay</a> &#8250; <b>在线客服</b></div>\n");
-        sb.append("<table class=\"kfhead\"><tr><td><b class=\"kft\">MineBay 在线客服</b>&#160;&#160;<span class=\"dim small\">客服：").append(SupportPrompt.AGENT_NAME)
-                .append("</span></td><td class=\"r\"><span class=\"kfon\">").append(available ? "&#9679; 在线" : "&#9675; 离线").append("</span></td></tr></table>\n");
+        sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+        sb.append("<html xmlns=\"http://www.w3.org/1999/xhtml\" xml:lang=\"zh-CN\"><head><title>在线客服 - MineBay</title>\n");
+        if(waiting)
+            sb.append("<meta http-equiv=\"refresh\" content=\"2\"/>\n");
+        sb.append("<style type=\"text/css\">\n").append(CSS).append("</style></head><body>\n");
+        sb.append("<table class=\"kfhead\"><tr><td><a href=\"/\" class=\"logo small\"><span class=\"l1\">M</span><span class=\"l2\">i</span><span class=\"l3\">n</span><span class=\"l4\">e</span>")
+                .append("<span class=\"l5\">B</span><span class=\"l6\">a</span><span class=\"l7\">y</span></a> <b class=\"kft\">在线客服</b></td><td class=\"r\"><span class=\"dim\">客服：")
+                .append(SupportPrompt.AGENT_NAME).append("</span> <span class=\"").append(available ? "kfon\">&#9679; 在线" : "kfoff\">&#9675; 暂不可用")
+                .append("</span> <span class=\"sep\">|</span> <a href=\"/\">返回 MineBay</a></td></tr></table>\n<div id=\"kfmain\">\n");
         notice(sb, notice);
         if(v.player == null)
         {
             sb.append("<div class=\"empty\">登录后才能联系客服（对话记录跟着帐号走）。");
             if(v.loginAvailable)
                 sb.append("<form method=\"get\" action=\"/login\"><input type=\"hidden\" name=\"next\" value=\"/support\"/><button type=\"submit\" class=\"btn buy big\">用游戏角色登录</button></form>");
-            sb.append("<br/><a href=\"/help\">先看看帮助</a></div>\n");
-            end(sb);
+            sb.append("</div>\n</div></body></html>\n");
             return sb.toString();
         }
         sb.append("<div class=\"kflog\">\n");
@@ -650,16 +655,14 @@ public final class MineBayPages
         sb.append("</div>\n");
         if(!available)
         {
-            sb.append("<div class=\"empty\">在线客服暂不可用。有问题请先看<a href=\"/help\">帮助</a>，或联系服主。</div>\n");
-            end(sb);
+            sb.append("<div class=\"empty\">在线客服暂不可用。有问题请先看<a href=\"/help\">帮助</a>，或联系服主。</div>\n</div></body></html>\n");
             return sb.toString();
         }
         sb.append("<form method=\"post\" action=\"/support\" class=\"kfform\"><input type=\"hidden\" name=\"t\" value=\"").append(attr(v.token))
                 .append("\"/><input type=\"text\" class=\"kfin\" name=\"m\" maxlength=\"").append(SupportText.MAX_MESSAGE).append("\" value=\"").append(attr(typed))
                 .append("\"/> <button type=\"submit\" class=\"btn go\">发送</button></form>\n");
-        sb.append("<p class=\"dim small\">").append(SupportPrompt.AGENT_NAME).append("只能解答问题，不能退款、改订单。每小时最多问 ").append(perHour)
-                .append(" 条，一条最多 ").append(SupportText.MAX_MESSAGE).append(" 个字。</p>\n");
-        end(sb);
+        sb.append("<div class=\"dim small\">").append(SupportPrompt.AGENT_NAME).append(" 只能解答问题，不能退款、改订单。每小时最多问 ").append(perHour)
+                .append(" 条，一条最多 ").append(SupportText.MAX_MESSAGE).append(" 个字。</div>\n</div></body></html>\n");
         return sb.toString();
     }
 
@@ -928,8 +931,9 @@ public final class MineBayPages
             + "table.oi { width: 100%; border-collapse: collapse; } table.oi td { padding: 3px 8px; border-top: 1px solid #f0f0f0; vertical-align: middle; }\n"
             + ".i24 { display: inline-block; width: 24px; height: 24px; }\n"
             + ".more { padding: 3px 8px; font-size: 12px; background: #fafafa; }\n"
-            + "table.kfhead { width: 100%; border-collapse: collapse; background: #eef3fd; border: 1px solid #c8d6f5; margin-bottom: 6px; } table.kfhead td { padding: 5px 8px; }\n"
-            + ".kft { color: #2a50c8; font-size: 15px; } .kfon { color: #2b8a3e; font-size: 12px; } a.kf { color: #e53238; font-weight: bold; }\n"
+            + "table.kfhead { width: 100%; border-collapse: collapse; background: #eef3fd; border-bottom: 2px solid #2a50c8; } table.kfhead td { padding: 4px 10px; font-size: 12px; }\n"
+            + "a.logo.small { font-size: 18px; letter-spacing: -1px; } .kft { color: #2a50c8; font-size: 15px; } .kfon { color: #2b8a3e; } .kfoff { color: #999; }\n"
+            + "a.kf { color: #e53238; font-weight: bold; } #kfmain { padding: 6px 10px; }\n"
             + ".kflog { border: 1px solid #ccc; background: #fbfbfb; padding: 6px 8px; margin-bottom: 6px; }\n"
             + ".kfmsg { margin: 4px 0 8px 0; } .kfme { color: #0654ba; font-weight: bold; } .kfbay { color: #e53238; font-weight: bold; }\n"
             + ".kftext { padding: 2px 0 0 12px; line-height: 18px; } .kfnote { color: #888; font-size: 12px; margin: 4px 0; }\n"

@@ -636,7 +636,7 @@ public final class MineBaySite implements WebHandler
             case EMPTY_OR_BAD:
                 return supportPage(422, "Unprocessable Entity", s, MineBayPages.Notice.bad("请输入要问的话（不能有特殊字符）。"), typed, false);
             case BUSY:
-                return supportPage(409, "Conflict", s, MineBayPages.Notice.bad(SupportPrompt.AGENT_NAME + "还在回复上一条，请稍等再发。"), typed, false);
+                return supportPage(409, "Conflict", s, MineBayPages.Notice.bad(SupportPrompt.AGENT_NAME + " 还在回复上一条，请稍等再发。"), typed, false);
             case LIMIT:
                 return supportPage(429, "Too Many Requests", s, MineBayPages.Notice.bad("每小时最多问 " + SupportConfig.messagesPerHour + " 条，请约 "
                         + Support.minutesToWait(d, s.login.uuid, s.now) + " 分钟后再来。"), typed, false);

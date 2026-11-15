@@ -26,7 +26,7 @@ public final class Support
     static final long HOUR = 3600_000L;
     /** 等回答最多等多久（两个接口各一次超时再多留一点）；过了就当没回复 */
     static final long STALE_MS = 2 * 120_000L + 10_000L;
-    public static final String CANNOT_REPLY = "（" + SupportPrompt.AGENT_NAME + "暂时没能回复，这条不算次数，请稍后再试。）";
+    public static final String CANNOT_REPLY = "（" + SupportPrompt.AGENT_NAME + " 暂时没能回复，这条不算次数，请稍后再试。）";
 
     /** 帐号 → 开始等回答的时间 */
     private static final Map<UUID, Long> PENDING = new HashMap<>();
