@@ -616,7 +616,7 @@ public final class MineBayPages
         StringBuilder sb = new StringBuilder(16 * 1024);
         begin(sb, "在线客服 - MineBay", v, "", null, waiting ? 2 : 0);
         sb.append("<div class=\"crumbs\"><a href=\"/\">MineBay</a> &#8250; <b>在线客服</b></div>\n");
-        sb.append("<table class=\"kfhead\"><tr><td><b class=\"kft\">MineBay 在线客服</b> <span class=\"dim small\">客服：").append(SupportPrompt.AGENT_NAME)
+        sb.append("<table class=\"kfhead\"><tr><td><b class=\"kft\">MineBay 在线客服</b>&#160;&#160;<span class=\"dim small\">客服：").append(SupportPrompt.AGENT_NAME)
                 .append("</span></td><td class=\"r\"><span class=\"kfon\">").append(available ? "&#9679; 在线" : "&#9675; 离线").append("</span></td></tr></table>\n");
         notice(sb, notice);
         if(v.player == null)
@@ -813,7 +813,8 @@ public final class MineBayPages
         if(refreshSeconds > 0)
             sb.append("<meta http-equiv=\"refresh\" content=\"").append(refreshSeconds).append("\"/>\n");
         sb.append("<style type=\"text/css\">\n").append(CSS).append("</style></head><body>\n");
-        sb.append("<div id=\"topbar\"><span class=\"links\"><a href=\"/orders\">我的订单</a> <span class=\"sep\">|</span> <a href=\"/help\">帮助</a> <span class=\"sep\">|</span> <a href=\"/support\" class=\"kf\">联系客服</a></span>");
+        // 顶栏用表格分左右（浏览器内核里浮动的元素点不了，原来右边的“我的订单”“帮助”点不了）
+        sb.append("<table id=\"topbar\"><tr><td>");
         if(v.player != null)
             sb.append("你好，<b>").append(Html.escape(v.player)).append("</b> <form method=\"post\" action=\"/logout\" class=\"inl\"><input type=\"hidden\" name=\"t\" value=\"")
                     .append(attr(v.token)).append("\"/><button type=\"submit\" class=\"lnk\">退出</button></form>");
@@ -821,7 +822,7 @@ public final class MineBayPages
             sb.append("你好！<a href=\"/login\">请登录</a>");
         else
             sb.append("你好！");
-        sb.append("</div>\n");
+        sb.append("</td><td class=\"links\"><a href=\"/orders\">我的订单</a> <span class=\"sep\">|</span> <a href=\"/help\">帮助</a> <span class=\"sep\">|</span> <a href=\"/support\" class=\"kf\">联系客服</a></td></tr></table>\n");
         sb.append("<table id=\"head\"><tr><td class=\"logo\"><a href=\"/\" class=\"logo\"><span class=\"l1\">M</span><span class=\"l2\">i</span><span class=\"l3\">n</span><span class=\"l4\">e</span>")
                 .append("<span class=\"l5\">B</span><span class=\"l6\">a</span><span class=\"l7\">y</span></a><div class=\"tag\">方块世界的网上商城</div></td>");
         sb.append("<td class=\"search\"><form method=\"get\" action=\"/\"><input type=\"text\" class=\"q\" name=\"q\" maxlength=\"").append(ShopParams.MAX_QUERY)
@@ -849,8 +850,8 @@ public final class MineBayPages
             "body { margin: 0; background: #ffffff; color: #333; font-size: 13px; }\n"
             + "a { color: #0654ba; text-decoration: none; }\n"
             + ".dim { color: #888; } .small { font-size: 11px; } .sep { color: #ccc; } .r { text-align: right; }\n"
-            + "#topbar { background: #f4f4f4; border-bottom: 1px solid #e2e2e2; padding: 3px 10px; font-size: 12px; color: #555; }\n"
-            + "#topbar .links { float: right; }\n"
+            + "#topbar { width: 100%; border-collapse: collapse; background: #f4f4f4; border-bottom: 1px solid #e2e2e2; font-size: 12px; color: #555; }\n"
+            + "#topbar td { padding: 3px 10px; } #topbar td.links { text-align: right; }\n"
             + "#head { width: 100%; border-collapse: collapse; margin: 6px 0 4px 0; }\n"
             + "#head td { vertical-align: middle; padding: 0 10px; }\n"
             + "td.logo { width: 128px; } a.logo { font-size: 30px; font-weight: bold; letter-spacing: -2px; }\n"
