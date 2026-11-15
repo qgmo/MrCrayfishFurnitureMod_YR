@@ -10,6 +10,11 @@ public class RecipeAPI
 
     public static void addMineBayRecipe(RecipeData itemData, int type)
     {
+        /* 配置里 1.9 以前写法的刷怪蛋（数据值 = 生物编号）转成 1.12 的写法 */
+        ItemStack input = itemData.getInput();
+        ItemStack fixed = LegacySpawnEggs.convert(input);
+        if(fixed != input)
+            itemData.setInput(fixed);
         switch(type)
         {
             case LOCAL:

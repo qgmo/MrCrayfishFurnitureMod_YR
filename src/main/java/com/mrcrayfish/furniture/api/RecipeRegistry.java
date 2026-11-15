@@ -25,6 +25,14 @@ public class RecipeRegistry extends RecipeAPI
         return furnitureRegister;
     }
 
+    /** 马刷怪蛋（1.12 的写法：{@code EntityTag: {id: "minecraft:horse"}}；原模组用的 1.9 以前的数据值 100 在 1.12 认不出生物） */
+    private static ItemStack horseSpawnEgg()
+    {
+        ItemStack egg = new ItemStack(Items.SPAWN_EGG);
+        net.minecraft.item.ItemMonsterPlacer.applyEntityIdToItemStack(egg, new net.minecraft.util.ResourceLocation("minecraft:horse"));
+        return egg;
+    }
+
     public void registerMineBayItem(ItemStack item, ItemStack currency, int price)
     {
         addMineBayRecipe(new RecipeData().setInput(item).setCurrency(currency).setPrice(price), LOCAL);
@@ -1177,7 +1185,7 @@ public class RecipeRegistry extends RecipeAPI
         if(ConfigurationHandler.mine_3)
             RecipeRegistry.getInstance().registerMineBayItem(new ItemStack(Items.SADDLE), new ItemStack(Items.EMERALD), 4);
         if(ConfigurationHandler.mine_4)
-            RecipeRegistry.getInstance().registerMineBayItem(new ItemStack(Items.SPAWN_EGG, 1, 100), new ItemStack(Items.EMERALD), 8);
+            RecipeRegistry.getInstance().registerMineBayItem(horseSpawnEgg(), new ItemStack(Items.EMERALD), 8);
         if(ConfigurationHandler.mine_5)
             RecipeRegistry.getInstance().registerMineBayItem(new ItemStack(Items.DIAMOND_HORSE_ARMOR), new ItemStack(Items.DIAMOND), 8);
         if(ConfigurationHandler.mine_6)
