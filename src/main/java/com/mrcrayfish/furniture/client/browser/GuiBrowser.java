@@ -1,5 +1,6 @@
 package com.mrcrayfish.furniture.client.browser;
 
+import com.mrcrayfish.furniture.computer.CookieJar;
 import com.mrcrayfish.furniture.computer.PageSnapshot;
 import com.mrcrayfish.furniture.computer.TypingSync;
 import com.mrcrayfish.furniture.computer.UrlInput;
@@ -77,6 +78,11 @@ public class GuiBrowser extends GuiContainer
     private boolean panel;
     private boolean info;
     private int infoScroll;
+    /** Cookie 菜单：0 关着，1 开着，2 问“确定清除吗” */
+    private int cookieMenu;
+    private int menuX, menuY, menuW, menuH;
+    /** 菜单里的按钮：[x, y, w, h]；没有时 w 为 0 */
+    private final int[] clearBtn = new int[4], confirmBtn = new int[4], cancelBtn = new int[4];
     private long caretStart = System.currentTimeMillis();
 
     // 当前显示的页面
@@ -184,6 +190,7 @@ public class GuiBrowser extends GuiContainer
         }
         String powerLabel = I18n.format("cfm.browser.power");
         String itemsLabel = I18n.format("cfm.browser.items");
+        String cookiesLabel = I18n.format("cfm.browser.cookies");
         int powerW = fontRenderer.getStringWidth(powerLabel) + 8;
         int itemsW = fontRenderer.getStringWidth(itemsLabel) + 8;
         int right = sx + sw - 4;
@@ -197,12 +204,18 @@ public class GuiBrowser extends GuiContainer
         power.x = items.x - 2 - powerW;
         power.y = toolbarY;
         power.h = tbH;
+        ToolButton cookies = new ToolButton("cookies", cookiesLabel);
+        cookies.w = fontRenderer.getStringWidth(cookiesLabel) + 8;
+        cookies.x = power.x - 2 - cookies.w;
+        cookies.y = toolbarY;
+        cookies.h = tbH;
+        tools.add(cookies);
         tools.add(power);
         tools.add(items);
         lockX = x + 2;
         lockW = Math.max(14, fontRenderer.getStringWidth(I18n.format("cfm.browser.insecure")) + 6);
         addrX = lockX + lockW + 2;
-        addrW = Math.max(40, power.x - 3 - addrX);
+        addrW = Math.max(40, cookies.x - 3 - addrX);
 
         // 物品面板放在右下角（盖在页面上）
         guiLeft = Math.max(0, Math.min(width - xSize, sx + sw - xSize - 6));
@@ -222,6 +235,9 @@ public class GuiBrowser extends GuiContainer
         Browser b = ComputerViews.browser(computer.getPos());
         b.releaseRender();
         spectatorPage = null;
+        // 不操作了：手上这份 Cookie 丢掉（下次成为操作者时服务端再发；服主 11-15）
+        ComputerViews.view(computer.getPos()).cookies = null;
+        cookieMenu = 0;
     }
 
     @Override
@@ -237,6 +253,9 @@ public class GuiBrowser extends GuiContainer
         }
         if(!isOperator())
         {
+            // 旁观者拿不到 Cookie：原来是操作者、被换下来时手上那份也丢掉
+            ComputerViews.view(computer.getPos()).cookies = null;
+            cookieMenu = 0;
             ComputerViews.View v = ComputerViews.view(computer.getPos());
             if(v.version != viewVersion)
             {
@@ -272,7 +291,8 @@ public class GuiBrowser extends GuiContainer
         PageSnapshot snap = spectatorSnapshot;
         if(s == null || s.isClosed() || snap == null)
             return;
-        ImageFetcher.fetch(s, urls, () -> req == spectatorRender && mc.currentScreen == this, got ->
+        // 旁观者没有 Cookie（服主 11-15）
+        ImageFetcher.fetch(s, urls, () -> req == spectatorRender && mc.currentScreen == this, null, got ->
         {
             if(got.isEmpty())
                 return;
@@ -403,7 +423,11 @@ public class GuiBrowser extends GuiContainer
             if(power != null)
                 drawHoveringText(power, mouseX, mouseY);
         }
-        if(info && on)
+        if(cookieMenu > 0 && on)
+        {
+            drawCookieMenu(mouseX, mouseY);
+        }
+        else if(info && on)
         {
             drawInfo();
         }
@@ -427,6 +451,7 @@ public class GuiBrowser extends GuiContainer
                 case "reload": t.enabled = op && b.current() != null; t.label = op && b.status() == Browser.Status.LOADING ? "×" : "↻"; break;
                 case "home": t.enabled = op; break;
                 case "power": t.enabled = op; break;
+                case "cookies": t.visible = op; t.enabled = op; break;
                 default: t.enabled = true;
             }
         }
@@ -470,7 +495,7 @@ public class GuiBrowser extends GuiContainer
             int bg = !t.enabled ? 0xFFD0D3D7 : hover ? 0xFFC9D7F2 : 0xFFF8F9FA;
             if(t.id.equals("power"))
                 bg = computer.isSwitchedOn() ? (hover ? 0xFF5BB974 : 0xFF34A853) : (hover ? 0xFFE8817A : 0xFFD93025);
-            if(t.id.equals("items") && panel)
+            if((t.id.equals("items") && panel) || (t.id.equals("cookies") && cookieMenu > 0))
                 bg = 0xFFAECBFA;
             Gui.drawRect(t.x, t.y, t.x + t.w, t.y + t.h, 0xFF80868B);
             Gui.drawRect(t.x + 1, t.y + 1, t.x + t.w - 1, t.y + t.h - 1, bg);
@@ -850,12 +875,134 @@ public class GuiBrowser extends GuiContainer
         GlStateManager.translate(0, 0, -300);
     }
 
+    // ---- Cookie 菜单（服主 11-15：浏览器里清除这台电脑的 Cookie） ----
+
+    private List<String> cookieMenuLines(int width)
+    {
+        List<String> out = new ArrayList<>();
+        out.add("§l" + I18n.format("cfm.browser.cookies.title"));
+        CookieJar jar = ComputerViews.view(computer.getPos()).cookies;
+        if(jar == null)
+            out.add(I18n.format("cfm.browser.cookies.loading"));
+        else
+        {
+            jar.purge(System.currentTimeMillis());
+            out.add(jar.isEmpty() ? I18n.format("cfm.browser.cookies.none") : I18n.format("cfm.browser.cookies.count", jar.size(), jar.siteCount()));
+        }
+        out.add("");
+        out.add("§7" + I18n.format("cfm.browser.cookies.note"));
+        if(cookieMenu == 2)
+        {
+            out.add("");
+            out.add("§c" + I18n.format("cfm.browser.cookies.confirm"));
+        }
+        return wrap(out, width);
+    }
+
+    private void drawCookieMenu(int mouseX, int mouseY)
+    {
+        menuW = Math.min(vpW - 20, 240);
+        menuX = Math.max(vpX + 4, Math.min(sx + sw - 4 - menuW, vpX + vpW - menuW - 4));
+        menuY = vpY + 2;
+        List<String> lines = cookieMenuLines(menuW - 12);
+        menuH = 8 + lines.size() * 10 + 6 + 14 + 6;
+        GlStateManager.translate(0, 0, 300);
+        Gui.drawRect(menuX - 1, menuY - 1, menuX + menuW + 1, menuY + menuH + 1, 0xFF5F6368);
+        Gui.drawRect(menuX, menuY, menuX + menuW, menuY + menuH, 0xFFFFFFFF);
+        int y = menuY + 5;
+        for(String l : lines)
+        {
+            fontRenderer.drawString(l, menuX + 6, y, TEXT);
+            y += 10;
+        }
+        y += 6;
+        clearBtn[2] = confirmBtn[2] = cancelBtn[2] = 0;
+        if(cookieMenu == 1)
+        {
+            boolean empty = ComputerViews.view(computer.getPos()).cookies == null || ComputerViews.view(computer.getPos()).cookies.isEmpty();
+            String label = I18n.format("cfm.browser.cookies.clear");
+            setRect(clearBtn, menuX + 6, y, fontRenderer.getStringWidth(label) + 10, 14);
+            drawMenuButton(clearBtn, label, !empty, false, mouseX, mouseY);
+        }
+        else
+        {
+            String yes = I18n.format("cfm.browser.cookies.clear_yes");
+            String no = I18n.format("cfm.browser.cookies.clear_no");
+            setRect(confirmBtn, menuX + 6, y, fontRenderer.getStringWidth(yes) + 10, 14);
+            setRect(cancelBtn, confirmBtn[0] + confirmBtn[2] + 6, y, fontRenderer.getStringWidth(no) + 10, 14);
+            drawMenuButton(confirmBtn, yes, true, true, mouseX, mouseY);
+            drawMenuButton(cancelBtn, no, true, false, mouseX, mouseY);
+        }
+        GlStateManager.translate(0, 0, -300);
+    }
+
+    private static void setRect(int[] r, int x, int y, int w, int h)
+    {
+        r[0] = x;
+        r[1] = y;
+        r[2] = w;
+        r[3] = h;
+    }
+
+    private static boolean inRect(int[] r, int mx, int my)
+    {
+        return r[2] > 0 && mx >= r[0] && mx < r[0] + r[2] && my >= r[1] && my < r[1] + r[3];
+    }
+
+    private void drawMenuButton(int[] r, String label, boolean enabled, boolean danger, int mouseX, int mouseY)
+    {
+        boolean hover = enabled && inRect(r, mouseX, mouseY);
+        int bg = !enabled ? 0xFFD0D3D7 : danger ? (hover ? 0xFFE8817A : 0xFFD93025) : (hover ? 0xFFC9D7F2 : 0xFFF8F9FA);
+        Gui.drawRect(r[0], r[1], r[0] + r[2], r[1] + r[3], 0xFF80868B);
+        Gui.drawRect(r[0] + 1, r[1] + 1, r[0] + r[2] - 1, r[1] + r[3] - 1, bg);
+        fontRenderer.drawString(label, r[0] + 5, r[1] + 3, !enabled ? 0xFF9AA0A6 : danger ? 0xFFFFFFFF : TEXT);
+    }
+
+    /** 菜单开着时的点击：点在按钮上照做，点在菜单外关掉菜单 */
+    private void cookieMenuClicked(int mouseX, int mouseY)
+    {
+        CookieJar jar = ComputerViews.view(computer.getPos()).cookies;
+        if(cookieMenu == 1 && inRect(clearBtn, mouseX, mouseY))
+        {
+            if(jar != null && !jar.isEmpty())
+                cookieMenu = 2;
+            return;
+        }
+        if(cookieMenu == 2 && inRect(confirmBtn, mouseX, mouseY))
+        {
+            // 玩家确认过了才清（用户的数据不能自动丢掉）
+            if(jar != null)
+                jar.clear();
+            PacketHandler.INSTANCE.sendToServer(new MessageComputerAction(computer.getPos(), MessageComputerAction.CLEAR_COOKIES));
+            cookieMenu = 1;
+            return;
+        }
+        if(cookieMenu == 2 && inRect(cancelBtn, mouseX, mouseY))
+        {
+            cookieMenu = 1;
+            return;
+        }
+        if(!(mouseX >= menuX && mouseX < menuX + menuW && mouseY >= menuY && mouseY < menuY + menuH))
+            cookieMenu = 0;
+    }
+
     // ---- 输入 ----
 
     @Override
     protected void mouseClicked(int mouseX, int mouseY, int button) throws IOException
     {
         caretStart = System.currentTimeMillis();
+        if(cookieMenu > 0)
+        {
+            boolean onButton = false;
+            for(ToolButton t : tools)
+                onButton |= t.id.equals("cookies") && t.over(mouseX, mouseY);
+            if(onButton)
+                cookieMenu = 0;
+            else
+                cookieMenuClicked(mouseX, mouseY);
+            return;
+        }
         if(info)
         {
             if(!(mouseX >= infoX && mouseX < infoX + infoW && mouseY >= infoY && mouseY < infoY + infoH))
@@ -976,6 +1123,10 @@ public class GuiBrowser extends GuiContainer
             case "items":
                 panel = !panel;
                 break;
+            case "cookies":
+                cookieMenu = cookieMenu == 0 ? 1 : 0;
+                info = false;
+                break;
             case "back":
                 if(b != null) b.back();
                 break;
@@ -1033,6 +1184,11 @@ public class GuiBrowser extends GuiContainer
         caretStart = System.currentTimeMillis();
         if(keyCode == Keyboard.KEY_ESCAPE)
         {
+            if(cookieMenu > 0)
+            {
+                cookieMenu = 0;
+                return;
+            }
             if(info)
             {
                 info = false;

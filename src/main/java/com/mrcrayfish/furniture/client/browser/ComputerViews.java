@@ -2,6 +2,7 @@ package com.mrcrayfish.furniture.client.browser;
 
 import com.mrcrayfish.furniture.MrCrayfishFurnitureMod;
 import com.mrcrayfish.furniture.computer.BrowserHistory;
+import com.mrcrayfish.furniture.computer.CookieJar;
 import com.mrcrayfish.furniture.computer.ItemIcons;
 import com.mrcrayfish.furniture.computer.PageParser;
 import com.mrcrayfish.furniture.computer.PageSnapshot;
@@ -76,6 +77,12 @@ public final class ComputerViews
         /** 服务端存着的会话（操作者打开时收到；浏览器没有这台电脑的状态时按它恢复，用过就清掉） */
         @Nullable
         public BrowserHistory savedHistory;
+        /**
+         * 这台电脑的 Cookie（服主 11-15：存在服务端、跟着电脑走）：成为操作者时服务端发来，浏览器请求时带上、收到的新 Cookie 存进来并交回服务端。
+         * 不是操作者（旁观、关了界面）时为 null。
+         */
+        @Nullable
+        public CookieJar cookies;
     }
 
     /** 这台电脑的浏览器（按服务器 + 维度 + 位置，没有就建一个） */
@@ -120,6 +127,11 @@ public final class ComputerViews
         else if(kind == MessageComputerView.HISTORY)
         {
             v.savedHistory = BrowserHistory.decode(data);
+        }
+        else if(kind == MessageComputerView.COOKIES)
+        {
+            CookieJar jar = CookieJar.decode(data, false, System.currentTimeMillis());
+            v.cookies = jar == null ? new CookieJar() : jar;
         }
         else if(kind == MessageComputerView.TYPING)
         {

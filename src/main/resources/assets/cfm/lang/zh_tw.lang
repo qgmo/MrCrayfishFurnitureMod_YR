@@ -755,6 +755,16 @@ cfm.tv.config.lib_failed_proxy_auth=影片元件：代理認證失敗
 # 電腦瀏覽器（悠然伺服器魔改）
 cfm.browser.power=電源
 cfm.browser.items=物品
+cfm.browser.cookies=Cookie
+cfm.browser.cookies.title=這臺電腦的 Cookie
+cfm.browser.cookies.loading=正在讀取……
+cfm.browser.cookies.none=現在沒有 Cookie。
+cfm.browser.cookies.count=存著 %s 筆，來自 %s 個網站。
+cfm.browser.cookies.note=Cookie 跟著電腦走：你在這裡登入的網站，下一個人用這臺電腦時也是登入著的。離開前請登出，或者清除 Cookie。
+cfm.browser.cookies.clear=清除這臺電腦的 Cookie
+cfm.browser.cookies.confirm=清除以後，這臺電腦上所有網站都會登出。確定清除嗎？
+cfm.browser.cookies.clear_yes=清除
+cfm.browser.cookies.clear_no=取消
 cfm.browser.insecure=不安全
 cfm.browser.off=電腦關著。點右上角的「電源」開機。
 cfm.browser.no_power=沒有電：電腦只從底面進電，也可以在「物品」裡插能量單元卡。

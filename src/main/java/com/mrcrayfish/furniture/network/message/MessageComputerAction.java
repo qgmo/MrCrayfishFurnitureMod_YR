@@ -3,6 +3,8 @@ package com.mrcrayfish.furniture.network.message;
 import com.mrcrayfish.furniture.compat.RegionUse;
 import com.mrcrayfish.furniture.computer.ComputerSync;
 import com.mrcrayfish.furniture.computer.ComputerAccess;
+import com.mrcrayfish.furniture.computer.ComputerCookies;
+import com.mrcrayfish.furniture.computer.CookieJar;
 import com.mrcrayfish.furniture.network.ServerThread;
 import com.mrcrayfish.furniture.tileentity.TileEntityComputer;
 import com.mrcrayfish.furniture.util.RejectLog;
@@ -13,10 +15,10 @@ import net.minecraftforge.fml.common.network.simpleimpl.IMessage;
 import net.minecraftforge.fml.common.network.simpleimpl.IMessageHandler;
 import net.minecraftforge.fml.common.network.simpleimpl.MessageContext;
 
-/** 客户端 → 服务端：电脑的电源开关（操作者）、接管（没人操作时）（悠然服务器魔改） */
+/** 客户端 → 服务端：电脑的电源开关（操作者）、接管（没人操作时）、清除这台电脑的 Cookie（操作者）（悠然服务器魔改） */
 public class MessageComputerAction implements IMessage, IMessageHandler<MessageComputerAction, IMessage>
 {
-    public static final int POWER = 0, CLAIM = 1;
+    public static final int POWER = 0, CLAIM = 1, CLEAR_COOKIES = 2;
 
     private BlockPos pos = BlockPos.ORIGIN;
     private int action;
@@ -76,6 +78,17 @@ public class MessageComputerAction implements IMessage, IMessageHandler<MessageC
             {
                 RejectLog.log(player, "computer claim refused at " + message.pos);
             }
+        }
+        else if(message.action == CLEAR_COOKIES)
+        {
+            // 只有操作者能清（旁观者连 Cookie 都拿不到）；不要求有电，关着机也能清
+            TileEntityComputer computer = ComputerAccess.check(player, message.pos, true, false, "computer clear cookies");
+            if(computer == null)
+                return;
+            CookieJar jar = ComputerCookies.get(computer);
+            jar.clear();
+            ComputerCookies.changed(computer, jar);
+            ComputerSync.sendCookies(player, computer);
         }
         else
         {

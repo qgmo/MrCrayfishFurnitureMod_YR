@@ -14,12 +14,12 @@ import javax.annotation.Nullable;
 import java.nio.charset.StandardCharsets;
 
 /**
- * 服务端 → 客户端：电脑当前的页面（旁观用）、清屏、滚动位置、操作者正在打的字（悠然服务器魔改）。
+ * 服务端 → 客户端：电脑当前的页面（旁观用）、清屏、滚动位置、操作者正在打的字；只发给操作者的会话与 Cookie（悠然服务器魔改）。
  * 页面是压缩的 {@link PageSnapshot}，客户端渲染前再按上限检查。
  */
 public class MessageComputerView implements IMessage, IMessageHandler<MessageComputerView, IMessage>
 {
-    public static final int PAGE = 0, CLEAR = 1, SCROLL = 2, TYPING = 3, HISTORY = 4;
+    public static final int PAGE = 0, CLEAR = 1, SCROLL = 2, TYPING = 3, HISTORY = 4, COOKIES = 5;
 
     private BlockPos pos = BlockPos.ORIGIN;
     private int kind;
@@ -67,6 +67,12 @@ public class MessageComputerView implements IMessage, IMessageHandler<MessageCom
     public static MessageComputerView history(BlockPos pos, BrowserHistory h)
     {
         return new MessageComputerView(pos, HISTORY, 0, h.encode());
+    }
+
+    /** 这台电脑的 Cookie（只发给操作者；{@link com.mrcrayfish.furniture.computer.CookieJar#encode} 的“还剩多久”格式） */
+    public static MessageComputerView cookies(BlockPos pos, byte[] jar)
+    {
+        return new MessageComputerView(pos, COOKIES, 0, jar);
     }
 
     /** 客户端：解出打的字；格式不对返回 null */

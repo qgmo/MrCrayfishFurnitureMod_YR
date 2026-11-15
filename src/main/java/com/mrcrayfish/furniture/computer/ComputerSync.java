@@ -10,6 +10,7 @@ import net.minecraftforge.fml.common.gameevent.PlayerEvent;
 import moe.qingu.youran.api.network.Ipv6Address;
 import moe.qingu.youran.api.network.PlayerAddresses;
 
+import javax.annotation.Nullable;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -32,6 +33,8 @@ public final class ComputerSync
     private static final Map<UUID, RateLimiter> TYPING = new HashMap<>();
     /** 每个玩家报会话（前进后退历史）的频率 */
     private static final Map<UUID, RateLimiter> HISTORY = new HashMap<>();
+    /** 每个玩家报 Cookie 的频率 */
+    private static final Map<UUID, RateLimiter> COOKIES = new HashMap<>();
     /** 旁观者的玩家临时地址放行页面里图片所在主机的用途（服主 11-14：旁观者自己下载图片） */
     public static final String SPECTATE_PURPOSE = "cfm:spectate";
     /** 放行的有效期；看着的时候每分钟续一次 */
@@ -54,6 +57,23 @@ public final class ComputerSync
     public static boolean allowHistory(EntityPlayerMP player, long now)
     {
         return HISTORY.computeIfAbsent(player.getUniqueID(), k -> new RateLimiter(4, 8)).tryAcquire(now, 1);
+    }
+
+    public static boolean allowCookies(EntityPlayerMP player, long now)
+    {
+        return COOKIES.computeIfAbsent(player.getUniqueID(), k -> new RateLimiter(8, 16)).tryAcquire(now, 1);
+    }
+
+    /**
+     * 操作者：发这台电脑的 Cookie（服主 11-15：Cookie 存在服务端、跟着电脑走；协议栈在操作者客户端上，所以交给他用）。
+     * 只在他成为操作者、清除 Cookie 时发；旁观者拿不到。过期时刻按“还剩多久”发，客户端按自己的时钟算。
+     */
+    public static void sendCookies(@Nullable EntityPlayerMP player, TileEntityComputer computer)
+    {
+        if(player == null || !computer.isOperator(player))
+            return;
+        CookieJar jar = ComputerCookies.get(computer);
+        PacketHandler.INSTANCE.sendTo(MessageComputerView.cookies(computer.getPos(), jar.encode(false, System.currentTimeMillis())), player);
     }
 
     /** 操作者：发存着的会话，他的浏览器没有这台电脑的状态时（重启后、换了人）按它恢复 */
@@ -194,6 +214,7 @@ public final class ComputerSync
             ACTIONS.remove(event.player.getUniqueID());
             TYPING.remove(event.player.getUniqueID());
             HISTORY.remove(event.player.getUniqueID());
+            COOKIES.remove(event.player.getUniqueID());
             // 临时地址下线就收回了，放行跟着没了
             SPECTATING.remove(event.player.getUniqueID());
         }

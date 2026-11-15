@@ -2,6 +2,7 @@ package com.mrcrayfish.furniture.client.browser;
 
 import com.mrcrayfish.furniture.client.MediaDecoding;
 import com.mrcrayfish.furniture.computer.BrowserHistory;
+import com.mrcrayfish.furniture.computer.CookieJar;
 import com.mrcrayfish.furniture.computer.FormEncoding;
 import com.mrcrayfish.furniture.computer.PageLimits;
 import com.mrcrayfish.furniture.computer.PageParser;
@@ -10,6 +11,7 @@ import com.mrcrayfish.furniture.computer.PageUploads;
 import com.mrcrayfish.furniture.computer.TypingSync;
 import com.mrcrayfish.furniture.computer.UrlInput;
 import com.mrcrayfish.furniture.network.PacketHandler;
+import com.mrcrayfish.furniture.network.message.MessageComputerCookies;
 import com.mrcrayfish.furniture.network.message.MessageComputerHistory;
 import com.mrcrayfish.furniture.network.message.MessageComputerPage;
 import com.mrcrayfish.furniture.network.message.MessageComputerScroll;
@@ -106,14 +108,32 @@ public final class Browser
         @Nullable
         final Entry fromEntry;
         final int fromForm;
+        /** 发起这次导航的页面所在的站（点链接、提交表单）；地址栏、刷新、前进后退等用户自己发起的为 null（SameSite 用） */
+        @Nullable
+        final String initiator;
+        /** 跳转链上前面已经跨过站 */
+        final boolean crossSite;
 
         Request(String url, String method, @Nullable byte[] body, @Nullable Entry fromEntry, int fromForm)
+        {
+            this(url, method, body, fromEntry, fromForm, null, false);
+        }
+
+        Request(String url, String method, @Nullable byte[] body, @Nullable Entry fromEntry, int fromForm, @Nullable String initiator, boolean crossSite)
         {
             this.url = url;
             this.method = method;
             this.body = body;
             this.fromEntry = fromEntry;
             this.fromForm = fromForm;
+            this.initiator = initiator;
+            this.crossSite = crossSite;
+        }
+
+        /** 这一站是不是跨站请求：跳转链上已经跨过站，或者目标和发起的页面不是一个站 */
+        boolean isCrossSite()
+        {
+            return crossSite || (initiator != null && !initiator.equals(CookieJar.site(UrlInput.hostOf(url))));
         }
     }
 
@@ -299,7 +319,17 @@ public final class Browser
         }
         addressEdited = false;
         address.setText(UrlInput.display(url));
-        navigate(new Request(url, "GET", null, null, -1));
+        navigate(new Request(url, "GET", null, null, -1, initiatorOf(current()), false));
+    }
+
+    /** 页面所在的站（内置页面没有：从主页点的链接算用户自己发起的） */
+    @Nullable
+    private static String initiatorOf(@Nullable Entry e)
+    {
+        if(e == null || e.builtin)
+            return null;
+        String host = UrlInput.hostOf(e.url);
+        return host == null ? null : CookieJar.site(host);
     }
 
     public void back()
@@ -379,7 +409,7 @@ public final class Browser
         if(info.post)
         {
             address.setText(UrlInput.display(info.action));
-            navigate(new Request(info.action, "POST", encoded.getBytes(StandardCharsets.US_ASCII), e, form));
+            navigate(new Request(info.action, "POST", encoded.getBytes(StandardCharsets.US_ASCII), e, form, initiatorOf(e), false));
         }
         else
         {
@@ -393,7 +423,7 @@ public final class Browser
                 return;
             }
             address.setText(UrlInput.display(r.url));
-            navigate(new Request(r.url, "GET", null, e, form));
+            navigate(new Request(r.url, "GET", null, e, form, initiatorOf(e), false));
         }
     }
 
@@ -468,6 +498,10 @@ public final class Browser
         Map<String, String> headers = new LinkedHashMap<>();
         if(req.body != null)
             headers.put("Content-Type", "application/x-www-form-urlencoded");
+        // Cookie：这台电脑的（服务端交给操作者的那份），按 SameSite 规则（顶层导航）
+        String cookie = cookieHeader(req.url, new CookieJar.Context(true, req.method.equals("GET") || req.method.equals("HEAD"), req.isCrossSite()));
+        if(cookie != null)
+            headers.put("Cookie", cookie);
         CompletableFuture<HttpClient.Response> f = HttpClient.send(s.stack(), s.dns(), u, req.method, headers, req.body, PAGE_TIMEOUT_MS, null);
         f.whenComplete((resp, err) -> Minecraft.getMinecraft().addScheduledTask(() ->
         {
@@ -484,6 +518,8 @@ public final class Browser
 
     private void onResponse(ClientNic.Session s, Request req, HttpClient.Response resp, int redirects, int gen)
     {
+        // 响应里的新 Cookie（顶层导航的响应都收，含跳转的每一站）
+        receiveCookies(req.url, resp.headerValues("set-cookie"));
         if(resp.status / 100 == 3 && resp.header("location") != null)
         {
             if(redirects >= MAX_REDIRECTS)
@@ -500,7 +536,10 @@ public final class Browser
             boolean keep = resp.status == 307 || resp.status == 308;
             // 表单已经被服务器收下（跳转就是“处理完了”）：清空它
             formAccepted(req);
-            Request r = new Request(next, keep ? req.method : "GET", keep ? req.body : null, keep ? req.fromEntry : null, keep ? req.fromForm : -1);
+            // SameSite：跳转后发起者仍是原来的页面（没有时算上一站），跨过站就一直算跨站
+            String initiator = req.initiator != null ? req.initiator : CookieJar.site(UrlInput.hostOf(req.url));
+            Request r = new Request(next, keep ? req.method : "GET", keep ? req.body : null, keep ? req.fromEntry : null, keep ? req.fromForm : -1,
+                    initiator, req.isCrossSite());
             if(!addressEdited || req.fromEntry != null)
                 address.setText(UrlInput.display(next));
             fetch(s, r, redirects + 1, gen);
@@ -565,7 +604,7 @@ public final class Browser
             return;
         }
         setStatus(Status.LOADING, ComputerViews.TR.t("cfm.browser.status.images", imageUrls.size()));
-        ImageFetcher.fetch(s, imageUrls, () -> gen == generation, got -> loaded(req, page, pageMode, conn, got));
+        ImageFetcher.fetch(s, imageUrls, () -> gen == generation, imageCookies(req.url), got -> loaded(req, page, pageMode, conn, got));
     }
 
     /** 图片：先看文件头的尺寸，不超限才解码，再存成 PNG 交给内核；不合格返回 null */
@@ -585,6 +624,65 @@ public final class Browser
         {
             return null;
         }
+    }
+
+    // ---- Cookie（服主 11-15：存在服务端、跟着电脑走；操作者打开时服务端交给他，新收到的交回服务端） ----
+
+    /** 这台电脑的 Cookie；还没收到（或者不是操作者）为 null */
+    @Nullable
+    private CookieJar jar()
+    {
+        return ComputerViews.view(pos).cookies;
+    }
+
+    @Nullable
+    private String cookieHeader(String url, CookieJar.Context ctx)
+    {
+        CookieJar jar = jar();
+        return jar == null ? null : jar.header(url, ctx, System.currentTimeMillis());
+    }
+
+    /** 收到 Set-Cookie：先存进本地这份，再原样交给服务端（服务端按同样的规则存） */
+    void receiveCookies(String url, List<String> setCookies)
+    {
+        CookieJar jar = jar();
+        if(jar == null || setCookies.isEmpty())
+            return;
+        long now = System.currentTimeMillis();
+        List<String> accepted = new ArrayList<>();
+        for(String sc : setCookies)
+        {
+            if(jar.set(sc, url, now))
+                accepted.add(sc);
+        }
+        if(accepted.isEmpty())
+            return;
+        for(int from = 0; from < accepted.size(); from += MessageComputerCookies.MAX_LINES)
+        {
+            List<String> part = accepted.subList(from, Math.min(accepted.size(), from + MessageComputerCookies.MAX_LINES));
+            PacketHandler.INSTANCE.sendToServer(new MessageComputerCookies(pos, url, part));
+        }
+    }
+
+    /** 页面里的图片（子资源）：同站的带 Cookie、收 Cookie；跨站的（如 captcha.yr 的验证码）只带 SameSite=None 的、不收 */
+    private ImageFetcher.Cookies imageCookies(String pageUrl)
+    {
+        return new ImageFetcher.Cookies()
+        {
+            @Nullable
+            @Override
+            public String header(String url)
+            {
+                return cookieHeader(url, new CookieJar.Context(false, true, !CookieJar.sameSite(pageUrl, url)));
+            }
+
+            @Override
+            public void received(String url, List<String> setCookies)
+            {
+                if(CookieJar.sameSite(pageUrl, url))
+                    receiveCookies(url, setCookies);
+            }
+        };
     }
 
     private void formAccepted(Request req)

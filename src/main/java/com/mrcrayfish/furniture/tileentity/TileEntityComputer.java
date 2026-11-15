@@ -2,6 +2,7 @@ package com.mrcrayfish.furniture.tileentity;
 
 import com.mrcrayfish.furniture.compat.RegionUse;
 import com.mrcrayfish.furniture.computer.BrowserHistory;
+import com.mrcrayfish.furniture.computer.ComputerCookies;
 import com.mrcrayfish.furniture.computer.ComputerNetwork;
 import com.mrcrayfish.furniture.computer.ComputerSync;
 import com.mrcrayfish.furniture.computer.PageFacts;
@@ -55,6 +56,9 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
     private boolean switchedOn;
     /** 会话：当前地址与前进后退历史（进存档，不存网页内容；服主 11-14） */
     private BrowserHistory history = BrowserHistory.EMPTY;
+    /** 这台电脑的 Cookie 在 {@link ComputerCookies} 里的编号（第一次存 Cookie 时生成；进存档，不发给客户端） */
+    @Nullable
+    private UUID cookieJarId;
 
     // ---- 只在内存（服务端），操作者同步给客户端 ----
     @Nullable
@@ -144,6 +148,22 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
             this.history = h;
             this.markDirty();
         }
+    }
+
+    @Nullable
+    public UUID getCookieJarId()
+    {
+        return cookieJarId;
+    }
+
+    public UUID getOrCreateCookieJarId()
+    {
+        if(cookieJarId == null)
+        {
+            cookieJarId = UUID.randomUUID();
+            markDirty();
+        }
+        return cookieJarId;
     }
 
     public Collection<TypingSync.Typed> getTyped()
@@ -256,7 +276,11 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         this.operator = id;
         this.operatorName = player == null ? "" : player.getName();
         if(id != null)
+        {
             ComputerSync.ungrant(id, this);
+            // Cookie 只交给操作者（协议栈在他的客户端上），旁观者拿不到（服主 11-15）
+            ComputerSync.sendCookies(player, this);
+        }
         if(device != null && !device.isRemoved() && player == null && device.attachedPlayer() != null)
         {
             device.detach();
@@ -354,6 +378,7 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         this.switchedOn = tagCompound.getBoolean("PowerOn");
         this.energy.readFromNBT(tagCompound);
         this.history = BrowserHistory.readFromNBT(tagCompound);
+        this.cookieJarId = tagCompound.hasUniqueId("CookieJarId") ? tagCompound.getUniqueId("CookieJarId") : null;
     }
 
     @Override
@@ -363,15 +388,14 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         tagCompound.setBoolean("PowerOn", switchedOn);
         this.energy.writeToNBT(tagCompound);
         this.history.writeToNBT(tagCompound);
+        if(cookieJarId != null)
+            tagCompound.setUniqueId("CookieJarId", cookieJarId);
         return tagCompound;
     }
 
     private NBTTagCompound syncTag()
     {
-        NBTTagCompound tag = this.writeToNBT(new NBTTagCompound());
-        // 会话只给操作者（打开界面时单独发），不随方块更新发给附近所有人
-        tag.removeTag("History");
-        tag.removeTag("HistoryIndex");
+        NBTTagCompound tag = stripPrivate(this.writeToNBT(new NBTTagCompound()));
         if(operator != null)
         {
             tag.setUniqueId("Operator", operator);
@@ -380,9 +404,23 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         return tag;
     }
 
+    /**
+     * 方块更新发给附近所有人的 NBT 里去掉只给操作者的东西：会话（打开界面时单独发给操作者）、Cookie 的编号（Cookie 本身不在方块实体里，
+     * 只在服务端存档，只交给操作者；服主 11-15）。
+     */
+    public static NBTTagCompound stripPrivate(NBTTagCompound tag)
+    {
+        tag.removeTag("History");
+        tag.removeTag("HistoryIndex");
+        tag.removeTag("CookieJarIdMost");
+        tag.removeTag("CookieJarIdLeast");
+        return tag;
+    }
+
     private void readSync(NBTTagCompound tag)
     {
         this.readFromNBT(tag);
+        this.cookieJarId = null;
         this.operator = tag.hasUniqueId("Operator") ? tag.getUniqueId("Operator") : null;
         this.operatorName = tag.getString("OperatorName");
     }

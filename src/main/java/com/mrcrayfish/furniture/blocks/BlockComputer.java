@@ -2,6 +2,7 @@ package com.mrcrayfish.furniture.blocks;
 
 import com.mrcrayfish.furniture.MrCrayfishFurnitureMod;
 import com.mrcrayfish.furniture.advancement.Triggers;
+import com.mrcrayfish.furniture.computer.ComputerCookies;
 import com.mrcrayfish.furniture.tileentity.TileEntityComputer;
 import net.minecraft.block.SoundType;
 import net.minecraft.block.material.Material;
@@ -52,6 +53,15 @@ public class BlockComputer extends BlockFurnitureTile
             playerIn.openGui(MrCrayfishFurnitureMod.instance, 0, worldIn, pos.getX(), pos.getY(), pos.getZ());
         }
         return true;
+    }
+
+    @Override
+    public void breakBlock(World world, BlockPos pos, IBlockState state)
+    {
+        // 悠然服务器魔改：电脑拆了（含被搬走），这里存的 Cookie 跟着删掉（服主 11-15）
+        if(!world.isRemote)
+            ComputerCookies.remove(world, pos);
+        super.breakBlock(world, pos, state);
     }
 
     @Override

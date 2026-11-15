@@ -745,6 +745,16 @@ cfm.tv.config.lib_failed_proxy_auth=Video component: proxy login failed
 # Computer browser (Youran server fork)
 cfm.browser.power=Power
 cfm.browser.items=Items
+cfm.browser.cookies=Cookies
+cfm.browser.cookies.title=Cookies on this computer
+cfm.browser.cookies.loading=Loading...
+cfm.browser.cookies.none=No cookies.
+cfm.browser.cookies.count=%s cookies from %s sites.
+cfm.browser.cookies.note=Cookies stay with the computer: sites you log in to here are still logged in for the next person who uses it. Log out before you leave, or clear the cookies.
+cfm.browser.cookies.clear=Clear this computer's cookies
+cfm.browser.cookies.confirm=All sites on this computer will be logged out. Clear anyway?
+cfm.browser.cookies.clear_yes=Clear
+cfm.browser.cookies.clear_no=Cancel
 cfm.browser.insecure=Not secure
 cfm.browser.off=The computer is off. Press "Power" at the top right to turn it on.
 cfm.browser.no_power=No power: the computer takes power from below only, or insert a power cell card under "Items".
