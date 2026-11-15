@@ -83,7 +83,29 @@ public final class ComputerViews
          */
         @Nullable
         public CookieJar cookies;
+        /** 操作者画板里画的（画板编号 → 像素；旁观时显示）；换页面清空 */
+        public final Map<Integer, CanvasView> canvases = new HashMap<>();
     }
+
+    /** 旁观时看到的一张画板 */
+    public static final class CanvasView
+    {
+        public final int width;
+        public final int height;
+        public final byte[] pixels;
+        /** 每收到一张加一（界面据此重做贴图） */
+        public final int version;
+
+        CanvasView(int width, int height, byte[] pixels, int version)
+        {
+            this.width = width;
+            this.height = height;
+            this.pixels = pixels;
+            this.version = version;
+        }
+    }
+
+    private static int canvasVersion;
 
     /** 这台电脑的浏览器（按服务器 + 维度 + 位置，没有就建一个） */
     public static Browser browser(BlockPos pos)
@@ -116,6 +138,7 @@ public final class ComputerViews
             v.scroll = scroll;
             v.version++;
             v.typed.clear();
+            v.canvases.clear();
         }
         else if(kind == MessageComputerView.CLEAR)
         {
@@ -123,6 +146,17 @@ public final class ComputerViews
             v.scroll = 0;
             v.version++;
             v.typed.clear();
+            v.canvases.clear();
+        }
+        else if(kind == MessageComputerView.CANVAS)
+        {
+            if(data.length < 4 || (!v.canvases.containsKey(scroll) && v.canvases.size() >= PageDocument.MAX_CONTROLS))
+                return;
+            int w = (data[0] & 0xFF) << 8 | (data[1] & 0xFF);
+            int h = (data[2] & 0xFF) << 8 | (data[3] & 0xFF);
+            byte[] px = com.mrcrayfish.furniture.computer.PixelCanvas.fromSync(java.util.Arrays.copyOfRange(data, 4, data.length), w, h);
+            if(px != null)
+                v.canvases.put(scroll, new CanvasView(w, h, px, ++canvasVersion));
         }
         else if(kind == MessageComputerView.HISTORY)
         {

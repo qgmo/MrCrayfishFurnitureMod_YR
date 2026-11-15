@@ -20,17 +20,21 @@ import java.util.function.Function;
  */
 public final class PageFacts
 {
-    public static final PageFacts NONE = new PageFacts(Collections.<Ipv6Address>emptySet(), Collections.<Integer, Boolean>emptyMap());
+    public static final PageFacts NONE = new PageFacts(Collections.<Ipv6Address>emptySet(), Collections.<Integer, Boolean>emptyMap(),
+            Collections.<Integer, int[]>emptyMap());
 
     /** 图片所在的主机 */
     public final Set<Ipv6Address> imageHosts;
     /** 文本框（单行、多行、密码）的编号 → 是不是密码框（同步打字时用，见 {@link TypingSync}） */
     public final Map<Integer, Boolean> textFields;
+    /** 画板的编号 → {宽, 高}（同步画板内容时用，见 {@link CanvasSync}） */
+    public final Map<Integer, int[]> canvases;
 
-    private PageFacts(Set<Ipv6Address> imageHosts, Map<Integer, Boolean> textFields)
+    private PageFacts(Set<Ipv6Address> imageHosts, Map<Integer, Boolean> textFields, Map<Integer, int[]> canvases)
     {
         this.imageHosts = Collections.unmodifiableSet(imageHosts);
         this.textFields = Collections.unmodifiableMap(textFields);
+        this.canvases = Collections.unmodifiableMap(canvases);
     }
 
     /**
@@ -47,12 +51,15 @@ public final class PageFacts
                 hosts.add(a);
         }
         Map<Integer, Boolean> fields = new HashMap<>();
+        Map<Integer, int[]> canvases = new HashMap<>();
         for(PageDocument.Control c : d.controls)
         {
             if(c.isTextual())
                 fields.put(c.n, c.kind == PageDocument.Kind.PASSWORD);
+            else if(c.kind == PageDocument.Kind.CANVAS)
+                canvases.put(c.n, new int[]{c.canvasWidth, c.canvasHeight});
         }
-        return new PageFacts(hosts, fields);
+        return new PageFacts(hosts, fields, canvases);
     }
 
     @Nullable

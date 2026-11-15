@@ -150,7 +150,9 @@ public final class PageDocument
 
     public enum Kind
     {
-        TEXT, PASSWORD, HIDDEN, CHECKBOX, RADIO, SELECT, TEXTAREA, SUBMIT, RESET, BUTTON
+        TEXT, PASSWORD, HIDDEN, CHECKBOX, RADIO, SELECT, TEXTAREA, SUBMIT, RESET, BUTTON,
+        /** 画板（{@code <input type="x-yr-canvas">}）：{@link Control#value} 是页面给的初始图（data URL，可以为空） */
+        CANVAS
     }
 
     public static final class Control
@@ -169,6 +171,9 @@ public final class PageDocument
         public final boolean disabled;
         /** 位置字段（隐藏字段；{@link #value} 是网站给的随机数，提交时换成位置证明） */
         public final boolean location;
+        /** 画板的宽、高（像素）；不是画板为 0 */
+        public final int canvasWidth;
+        public final int canvasHeight;
 
         Control(int n, Kind kind, String name, String value, boolean checked, List<String> optionValues, List<String> optionLabels, int selected, int form, int maxLength, boolean disabled)
         {
@@ -177,6 +182,13 @@ public final class PageDocument
 
         Control(int n, Kind kind, String name, String value, boolean checked, List<String> optionValues, List<String> optionLabels, int selected, int form, int maxLength, boolean disabled, boolean location)
         {
+            this(n, kind, name, value, checked, optionValues, optionLabels, selected, form, maxLength, disabled, location, 0, 0);
+        }
+
+        Control(int n, Kind kind, String name, String value, boolean checked, List<String> optionValues, List<String> optionLabels, int selected, int form, int maxLength, boolean disabled, boolean location, int canvasWidth, int canvasHeight)
+        {
+            this.canvasWidth = canvasWidth;
+            this.canvasHeight = canvasHeight;
             this.location = location;
             this.n = n;
             this.kind = kind;
@@ -287,6 +299,12 @@ public final class PageDocument
     /** 位置字段的类型（悠然服务器的约定，见 {@code Browser#submitForm}） */
     public static final String LOCATION_TYPE = "x-yr-location";
     static final String LOCATION_ATTR = "data-yr-location";
+    /**
+     * 画板的类型（悠然服务器的约定，服主 11-15）：{@code <input type="x-yr-canvas" name="…" width="宽" height="高" [value="data:image/png;base64,…"] />}。
+     * 浏览器显示成像素画板，提交时字段值是 PNG 的 data URL（见 {@code computer.PixelCanvas}）。
+     */
+    public static final String CANVAS_TYPE = "x-yr-canvas";
+    static final String CANVAS_ATTR = "data-yr-canvas";
 
     static String local(Node n)
     {
@@ -373,8 +391,9 @@ public final class PageDocument
                     continue;
                 }
                 Element el = c;
-                // 位置字段的标记只由浏览器自己加（页面自己写的不算）
+                // 位置字段、画板的标记只由浏览器自己加（页面自己写的不算）
                 c.removeAttribute(LOCATION_ATTR);
+                c.removeAttribute(CANVAS_ATTR);
                 Element locationLabel = null;
                 if(tag.equals("input"))
                 {
@@ -383,6 +402,8 @@ public final class PageDocument
                         el = toButton(c, type);
                     else if(type.equals(LOCATION_TYPE))
                         locationLabel = toLocationField(c);
+                    else if(type.equals(CANVAS_TYPE))
+                        el = toCanvas(c);
                 }
                 visit(el);
                 walk(el);
@@ -409,6 +430,46 @@ public final class PageDocument
             else
                 input.getParentNode().insertBefore(label, next);
             return label;
+        }
+
+        /**
+         * 画板：换成一个定好大小的方块（宽高 = 像素 × 显示倍数），界面在它上面画像素、点它打开编辑器。尺寸不对时换成一句说明，不算控件。
+         */
+        private Element toCanvas(Element input)
+        {
+            int w = canvasSide(input.getAttribute("width"));
+            int h = canvasSide(input.getAttribute("height"));
+            Element box = dom.createElementNS(XHTML_NS, "span");
+            if(!moe.qingu.youran.api.image.DyePng.validSize(w, h))
+            {
+                String text = lang.apply("cfm.browser.canvas.bad_size");
+                box.appendChild(dom.createTextNode(text != null ? text : "[画板尺寸不对]"));
+                box.setAttribute("style", "color: #b02e26;");
+                input.getParentNode().replaceChild(box, input);
+                return box;
+            }
+            int z = com.mrcrayfish.furniture.computer.PixelCanvas.previewZoom(w, h);
+            for(int i = 0; i < input.getAttributes().getLength(); i++)
+            {
+                Node a = input.getAttributes().item(i);
+                String an = a.getNodeName().toLowerCase(Locale.ROOT);
+                if(an.equals("name") || an.equals("value") || an.equals("disabled") || an.equals("id") || an.equals("class"))
+                    box.setAttribute(an, a.getNodeValue());
+            }
+            box.setAttribute(CANVAS_ATTR, w + "x" + h);
+            box.setAttribute("style", "display: inline-block; width: " + w * z + "px; height: " + h * z
+                    + "px; border: 1px solid #767676; background: #f4f4f4; vertical-align: top; margin: 0; padding: 0;");
+            input.getParentNode().replaceChild(box, input);
+            return box;
+        }
+
+        /** 宽、高的写法：1–4 位数字；没写为默认 64，写得不对为 0 */
+        private static int canvasSide(String v)
+        {
+            String t = v == null ? "" : v.trim();
+            if(t.isEmpty())
+                return com.mrcrayfish.furniture.computer.PixelCanvas.DEFAULT_SIZE;
+            return t.matches("\\d{1,4}") ? Integer.parseInt(t) : 0;
         }
 
         private Element toButton(Element input, String type)
@@ -490,6 +551,10 @@ public final class PageDocument
                 case "textarea":
                     control(e, tag);
                     break;
+                case "span":
+                    if(e.hasAttribute(CANVAS_ATTR))
+                        control(e, "canvas");
+                    break;
                 default:
                     break;
             }
@@ -513,6 +578,9 @@ public final class PageDocument
             String type = e.getAttribute("type").toLowerCase(Locale.ROOT);
             switch(tag)
             {
+                case "canvas":
+                    kind = Kind.CANVAS;
+                    break;
                 case "button":
                     kind = type.equals("reset") ? Kind.RESET : type.equals("button") ? Kind.BUTTON : Kind.SUBMIT;
                     break;
@@ -579,8 +647,15 @@ public final class PageDocument
             String ml = e.getAttribute("maxlength");
             if(ml.matches("\\d{1,4}"))
                 maxLength = Math.max(0, Math.min(maxLength, Integer.parseInt(ml)));
+            int cw = 0, ch = 0;
+            if(kind == Kind.CANVAS)
+            {
+                String[] wh = e.getAttribute(CANVAS_ATTR).split("x");
+                cw = Integer.parseInt(wh[0]);
+                ch = Integer.parseInt(wh[1]);
+            }
             controls.add(new Control(n, kind, e.getAttribute("name"), value, e.hasAttribute("checked"), values, labels, selected, form, maxLength,
-                    e.hasAttribute("disabled"), kind == Kind.HIDDEN && e.hasAttribute(LOCATION_ATTR)));
+                    e.hasAttribute("disabled"), kind == Kind.HIDDEN && e.hasAttribute(LOCATION_ATTR), cw, ch));
         }
 
         private void injectStyles(Element root)

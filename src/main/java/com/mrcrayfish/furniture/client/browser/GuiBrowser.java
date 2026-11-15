@@ -2,6 +2,7 @@ package com.mrcrayfish.furniture.client.browser;
 
 import com.mrcrayfish.furniture.computer.CookieJar;
 import com.mrcrayfish.furniture.computer.PageSnapshot;
+import com.mrcrayfish.furniture.computer.PixelCanvas;
 import com.mrcrayfish.furniture.computer.TypingSync;
 import com.mrcrayfish.furniture.computer.UrlInput;
 import com.mrcrayfish.furniture.gui.ApplianceGui;
@@ -33,6 +34,7 @@ import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -99,6 +101,17 @@ public class GuiBrowser extends GuiContainer
     private double spectatorScroll;
 
     private String hoverText = "";
+    /** 画板编辑器（操作者点了网页里的画板时开着；服主 11-15） */
+    @Nullable
+    private CanvasEditor editor;
+    @Nullable
+    private Browser.Entry editorEntry;
+    /** 页面上每张画板的贴图（按控件编号） */
+    private final Map<Integer, CanvasTexture> canvasTextures = new HashMap<>();
+    /** 旁观者：页面给的初始图（按控件编号；换页面重建） */
+    private final Map<Integer, PixelCanvas> spectatorCanvases = new HashMap<>();
+    @Nullable
+    private RenderedPage spectatorCanvasPage;
 
     public GuiBrowser(InventoryPlayer inventoryPlayer, TileEntityComputer computer)
     {
@@ -241,6 +254,30 @@ public class GuiBrowser extends GuiContainer
         // 不操作了：手上这份 Cookie 丢掉（下次成为操作者时服务端再发；服主 11-15）
         ComputerViews.view(computer.getPos()).cookies = null;
         cookieMenu = 0;
+        // 画板：只关编辑器、丢贴图，画的东西在表单里留着
+        closeEditor();
+        for(CanvasTexture t : canvasTextures.values())
+            t.dispose();
+        canvasTextures.clear();
+    }
+
+    private void closeEditor()
+    {
+        if(editor != null)
+            editor.dispose();
+        editor = null;
+        editorEntry = null;
+    }
+
+    /** 编辑器还该不该开着：还是操作者、开着机、还在那一页、那张画板还在 */
+    private boolean editorValid()
+    {
+        if(editor == null || editor.closed)
+            return false;
+        Browser b = browser();
+        if(b == null || !screenOn() || b.current() != editorEntry || b.rendered() == null)
+            return false;
+        return editorEntry.forms.canvas(editor.control) == editor.canvas;
     }
 
     @Override
@@ -411,6 +448,10 @@ public class GuiBrowser extends GuiContainer
             Gui.drawRect(sx + 2, toolbarY - 2, sx + sw - 2, toolbarY + 16, TOOLBAR);
             Gui.drawRect(vpX, vpY, vpX + vpW + 5, vpY + vpH, 0xFFFFFFFF);
             drawPage(p, mouseX, mouseY);
+            if(editor != null && !editorValid())
+                closeEditor();
+            if(editor != null)
+                editor.draw(vpX, vpY, vpW + 5, vpH, mouseX, mouseY, zLevel);
             drawToolbar(mouseX, mouseY);
             drawStatus(mouseX, mouseY);
         }
@@ -724,6 +765,13 @@ public class GuiBrowser extends GuiContainer
                         Gui.drawRect(x1 + 2, y1 + 2, Math.max(x1 + 3, x2 - 2), Math.max(y1 + 3, y2 - 2), 0xFF1A73E8);
                     break;
                 }
+                case CANVAS:
+                {
+                    drawCanvasPreview(p, c, forms, x1 + 1, y1 + 1, x2 - 1, y2 - 1);
+                    if(b != null && !c.disabled && mouseX >= x1 && mouseX < x2 && mouseY >= y1 && mouseY < y2 && editor == null && inViewport(mouseX, mouseY))
+                        hoverText = I18n.format("cfm.browser.canvas.hint", c.canvasWidth, c.canvasHeight);
+                    break;
+                }
                 case SELECT:
                 {
                     int sel = forms != null ? forms.selected(c.n) : c.selected;
@@ -773,6 +821,40 @@ public class GuiBrowser extends GuiContainer
                 hoverText = target == null ? I18n.format("cfm.browser.link_unsupported") : UrlInput.display(target);
             }
         }
+    }
+
+    /** 画板在页面上的样子：操作者看自己画的，旁观者看操作者同步来的（没有就是页面给的初始图） */
+    private void drawCanvasPreview(RenderedPage p, PageDocument.Control c, @Nullable FormState forms, int x1, int y1, int x2, int y2)
+    {
+        if(x2 <= x1 || y2 <= y1)
+            return;
+        CanvasTexture tex = canvasTextures.computeIfAbsent(c.n, k -> new CanvasTexture());
+        if(forms != null)
+        {
+            PixelCanvas pc = forms.canvas(c.n);
+            if(pc == null)
+                return;
+            tex.update(pc, pc.width, pc.height, pc.version(), pc.pixels());
+        }
+        else
+        {
+            ComputerViews.CanvasView v = ComputerViews.view(computer.getPos()).canvases.get(c.n);
+            if(v != null && v.width == c.canvasWidth && v.height == c.canvasHeight)
+            {
+                tex.update(v, v.width, v.height, v.version, v.pixels);
+            }
+            else
+            {
+                if(spectatorCanvasPage != p)
+                {
+                    spectatorCanvasPage = p;
+                    spectatorCanvases.clear();
+                }
+                PixelCanvas init = spectatorCanvases.computeIfAbsent(c.n, k -> PixelCanvas.fromValue(c.canvasWidth, c.canvasHeight, c.value));
+                tex.update(init, init.width, init.height, init.version(), init.pixels());
+            }
+        }
+        tex.draw(x1, y1, x2 - x1, y2 - y1, zLevel);
     }
 
     private void drawItemTooltip(RenderedPage p, int mouseX, int mouseY)
@@ -1005,6 +1087,13 @@ public class GuiBrowser extends GuiContainer
     protected void mouseClicked(int mouseX, int mouseY, int button) throws IOException
     {
         caretStart = System.currentTimeMillis();
+        if(editor != null && editorValid() && inViewport(mouseX, mouseY))
+        {
+            editor.mouseClicked(mouseX, mouseY, button);
+            if(editor.closed)
+                closeEditor();
+            return;
+        }
         if(cookieMenu > 0)
         {
             boolean onButton = false;
@@ -1099,6 +1188,19 @@ public class GuiBrowser extends GuiContainer
                 case SELECT:
                     e.forms.toggle(p.document, c);
                     break;
+                case CANVAS:
+                {
+                    // 点画板：打开编辑器（盖在页面上，放大编辑）
+                    PixelCanvas pc = e.forms.canvas(c.n);
+                    if(pc != null)
+                    {
+                        closeEditor();
+                        editor = new CanvasEditor(c.n, pc, fontRenderer, vpW + 5, vpH);
+                        editorEntry = e;
+                        cookieMenu = 0;
+                    }
+                    break;
+                }
                 case SUBMIT:
                     if(c.form >= 0)
                         b.submitForm(c.form, c.n);
@@ -1166,6 +1268,11 @@ public class GuiBrowser extends GuiContainer
     @Override
     protected void mouseReleased(int mouseX, int mouseY, int state)
     {
+        if(editor != null && editorValid())
+        {
+            editor.mouseReleased(mouseX, mouseY);
+            return;
+        }
         if(panel)
             super.mouseReleased(mouseX, mouseY, state);
     }
@@ -1173,6 +1280,12 @@ public class GuiBrowser extends GuiContainer
     @Override
     protected void mouseClickMove(int mouseX, int mouseY, int clickedMouseButton, long timeSinceLastClick)
     {
+        if(editor != null && editorValid())
+        {
+            if(clickedMouseButton == 0)
+                editor.mouseDragged(mouseX, mouseY);
+            return;
+        }
         if(panel)
             super.mouseClickMove(mouseX, mouseY, clickedMouseButton, timeSinceLastClick);
     }
@@ -1184,7 +1297,9 @@ public class GuiBrowser extends GuiContainer
         int wheel = Mouse.getEventDWheel();
         if(wheel != 0)
         {
-            if(info)
+            if(editor != null && editorValid())
+                editor.wheel(wheel > 0 ? 1 : -1);
+            else if(info)
                 infoScroll += wheel > 0 ? -3 : 3;
             else
                 scrollBy(wheel > 0 ? -60 : 60);
@@ -1195,6 +1310,12 @@ public class GuiBrowser extends GuiContainer
     protected void keyTyped(char typedChar, int keyCode) throws IOException
     {
         caretStart = System.currentTimeMillis();
+        if(editor != null && editorValid() && editor.keyTyped(keyCode))
+        {
+            if(editor.closed)
+                closeEditor();
+            return;
+        }
         if(keyCode == Keyboard.KEY_ESCAPE)
         {
             if(cookieMenu > 0)

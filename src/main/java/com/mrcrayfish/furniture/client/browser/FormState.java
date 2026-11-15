@@ -1,6 +1,7 @@
 package com.mrcrayfish.furniture.client.browser;
 
 import com.mrcrayfish.furniture.computer.FormEncoding;
+import com.mrcrayfish.furniture.computer.PixelCanvas;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -15,6 +16,8 @@ public final class FormState
     final Map<Integer, TextEdit> text = new HashMap<>();
     final Map<Integer, Boolean> checked = new HashMap<>();
     final Map<Integer, Integer> selected = new HashMap<>();
+    /** 画板里画的（服主 11-15：同表单内容，翻页、关界面、提交失败都留着） */
+    final Map<Integer, PixelCanvas> canvases = new HashMap<>();
 
     /** 第一次看到这页的控件时按页面上的初始值填（已经有的不动） */
     void init(PageDocument doc)
@@ -27,6 +30,8 @@ public final class FormState
                 checked.putIfAbsent(c.n, c.checked);
             else if(c.kind == PageDocument.Kind.SELECT)
                 selected.putIfAbsent(c.n, c.selected);
+            else if(c.kind == PageDocument.Kind.CANVAS)
+                canvases.computeIfAbsent(c.n, k -> PixelCanvas.fromValue(c.canvasWidth, c.canvasHeight, c.value));
         }
     }
 
@@ -40,6 +45,7 @@ public final class FormState
             text.remove(c.n);
             checked.remove(c.n);
             selected.remove(c.n);
+            canvases.remove(c.n);
         }
         init(doc);
     }
@@ -70,8 +76,20 @@ public final class FormState
                 if(i != null && i != c.selected)
                     return true;
             }
+            else if(c.kind == PageDocument.Kind.CANVAS)
+            {
+                PixelCanvas p = canvases.get(c.n);
+                if(p != null && p.isModified())
+                    return true;
+            }
         }
         return false;
+    }
+
+    /** 画板（还没初始化为 null） */
+    public PixelCanvas canvas(int n)
+    {
+        return canvases.get(n);
     }
 
     public TextEdit text(int n)
@@ -155,6 +173,13 @@ public final class FormState
                     if(c.n == submitter)
                         out.add(FormEncoding.field(c.name, c.value));
                     break;
+                case CANVAS:
+                {
+                    // PNG 的 data URL（没动过时按页面给的初始图；页面没给就是全透明）
+                    PixelCanvas p = canvases.get(c.n);
+                    out.add(FormEncoding.field(c.name, (p != null ? p : PixelCanvas.fromValue(c.canvasWidth, c.canvasHeight, c.value)).toDataUrl()));
+                    break;
+                }
                 default:
                     break;
             }

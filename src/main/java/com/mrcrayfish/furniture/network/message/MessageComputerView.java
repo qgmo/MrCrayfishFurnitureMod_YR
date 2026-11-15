@@ -19,7 +19,7 @@ import java.nio.charset.StandardCharsets;
  */
 public class MessageComputerView implements IMessage, IMessageHandler<MessageComputerView, IMessage>
 {
-    public static final int PAGE = 0, CLEAR = 1, SCROLL = 2, TYPING = 3, HISTORY = 4, COOKIES = 5;
+    public static final int PAGE = 0, CLEAR = 1, SCROLL = 2, TYPING = 3, HISTORY = 4, COOKIES = 5, CANVAS = 6;
 
     private BlockPos pos = BlockPos.ORIGIN;
     private int kind;
@@ -73,6 +73,12 @@ public class MessageComputerView implements IMessage, IMessageHandler<MessageCom
     public static MessageComputerView cookies(BlockPos pos, byte[] jar)
     {
         return new MessageComputerView(pos, COOKIES, 0, jar);
+    }
+
+    /** 操作者画板里画的：{@code scroll} 那一格放画板的编号，数据是 [宽 2][高 2][压缩像素] */
+    public static MessageComputerView canvas(BlockPos pos, int field, byte[] data)
+    {
+        return new MessageComputerView(pos, CANVAS, field, data);
     }
 
     /** 客户端：解出打的字；格式不对返回 null */

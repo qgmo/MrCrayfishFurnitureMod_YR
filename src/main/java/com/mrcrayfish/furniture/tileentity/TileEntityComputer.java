@@ -79,6 +79,8 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
     private int pageId = -1;
     /** 操作者正在打的字（每个框最新的一条；换页面清空），给新来的旁观者补发 */
     private final Map<Integer, TypingSync.Typed> typed = new LinkedHashMap<>();
+    /** 操作者画板里画的（每个画板最新的一张：[宽 2][高 2][压缩像素]；换页面清空），给新来的旁观者补发 */
+    private final Map<Integer, byte[]> canvases = new LinkedHashMap<>();
     private int scroll;
     private int retryTicks;
     private int ticks;
@@ -229,6 +231,21 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         return typed.values();
     }
 
+    public Collection<Map.Entry<Integer, byte[]>> getCanvases()
+    {
+        return canvases.entrySet();
+    }
+
+    /** 操作者画的（已经检查过）：记下、转给旁观者 */
+    public void setCanvas(int field, int width, int height, byte[] data)
+    {
+        if(!canvases.containsKey(field) && canvases.size() >= PageDocument.MAX_CONTROLS)
+            return;
+        byte[] v = ComputerSync.canvasData(width, height, data);
+        canvases.put(field, v);
+        ComputerSync.broadcastCanvas(this, field, v);
+    }
+
     /** 操作者打的字（已经检查过）：记下、转给旁观者 */
     public void setTyped(TypingSync.Typed t)
     {
@@ -316,6 +333,7 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         this.pageFacts = compressed == null ? PageFacts.NONE : facts;
         this.pageId = compressed == null ? -1 : id;
         this.typed.clear();
+        this.canvases.clear();
         this.scroll = 0;
         ComputerSync.broadcastPage(this);
     }

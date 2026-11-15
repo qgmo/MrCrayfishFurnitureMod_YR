@@ -2,6 +2,8 @@ package com.mrcrayfish.furniture.client.browser;
 
 import com.mrcrayfish.furniture.client.MediaDecoding;
 import com.mrcrayfish.furniture.computer.BrowserHistory;
+import com.mrcrayfish.furniture.computer.CanvasSync;
+import com.mrcrayfish.furniture.computer.PixelCanvas;
 import com.mrcrayfish.furniture.computer.CookieJar;
 import com.mrcrayfish.furniture.computer.FormEncoding;
 import com.mrcrayfish.furniture.computer.PageLimits;
@@ -11,6 +13,7 @@ import com.mrcrayfish.furniture.computer.PageUploads;
 import com.mrcrayfish.furniture.computer.TypingSync;
 import com.mrcrayfish.furniture.computer.UrlInput;
 import com.mrcrayfish.furniture.network.PacketHandler;
+import com.mrcrayfish.furniture.network.message.MessageComputerCanvas;
 import com.mrcrayfish.furniture.network.message.MessageComputerCookies;
 import com.mrcrayfish.furniture.network.message.MessageComputerHistory;
 import com.mrcrayfish.furniture.network.message.MessageComputerPage;
@@ -188,6 +191,8 @@ public final class Browser
     @Nullable
     private BrowserHistory reportedHistory;
     private long historySentAt;
+    /** 画板同步给旁观者（服主 11-15） */
+    private final CanvasSync.Outbox canvasOut = new CanvasSync.Outbox();
 
     Browser(BlockPos pos)
     {
@@ -525,6 +530,7 @@ public final class Browser
     public void tick()
     {
         syncTyping();
+        syncCanvases();
         reportHistory();
         autoRefresh(System.currentTimeMillis());
         if(waiting != null)
@@ -990,6 +996,7 @@ public final class Browser
         byte[] data = new PageSnapshot(e.url, e.html, e.mode, e.connection).encode();
         // 换页面了：旁观者那边的打字记录会清空，从页面上的初始值重新比
         typing.reset();
+        canvasOut.reset();
         typingUpload = -1;
         typing.baseline(TypingSync.outgoing(TypingSync.ADDRESS, false, UrlInput.display(e.url)));
         if(data.length > PageSnapshot.MAX_COMPRESSED)
@@ -1033,6 +1040,31 @@ public final class Browser
         TypingSync.Typed t = typing.poll(System.currentTimeMillis());
         if(t != null)
             PacketHandler.INSTANCE.sendToServer(new MessageComputerTyping(pos, typingUpload, t));
+    }
+
+    /**
+     * 画板同步（服主 11-15，同打字同步）：画板内容变了就整张压缩发给服务端，每 {@value CanvasSync#INTERVAL_MS} 毫秒最多一张；
+     * 没画过（和页面给的初始图一样）的不发。只读本地内容。
+     */
+    private void syncCanvases()
+    {
+        Entry e = current();
+        RenderedPage page = rendered();
+        if(e == null || page == null || e != uploadedEntry || typingUpload < 0)
+            return;
+        long now = System.currentTimeMillis();
+        for(PageDocument.Control c : page.document.controls)
+        {
+            if(c.kind != PageDocument.Kind.CANVAS)
+                continue;
+            PixelCanvas p = e.forms.canvas(c.n);
+            if(p != null && canvasOut.due(c.n, p, now))
+            {
+                canvasOut.sent(c.n, p, now);
+                PacketHandler.INSTANCE.sendToServer(new MessageComputerCanvas(pos, typingUpload, c.n, p));
+                return;
+            }
+        }
     }
 
     /** 滚动位置（最多每 250 毫秒报一次） */

@@ -33,6 +33,8 @@ public final class ComputerSync
     private static final Map<UUID, RateLimiter> TYPING = new HashMap<>();
     /** 每个玩家报会话（前进后退历史）的频率 */
     private static final Map<UUID, RateLimiter> HISTORY = new HashMap<>();
+    /** 每个玩家同步画板的频率 */
+    private static final Map<UUID, RateLimiter> CANVAS = new HashMap<>();
     /** 每个玩家报 Cookie 的频率 */
     private static final Map<UUID, RateLimiter> COOKIES = new HashMap<>();
     /** 旁观者的玩家临时地址放行页面里图片所在主机的用途（服主 11-14：旁观者自己下载图片） */
@@ -52,6 +54,33 @@ public final class ComputerSync
     public static boolean allowTyping(EntityPlayerMP player, long now)
     {
         return TYPING.computeIfAbsent(player.getUniqueID(), k -> new RateLimiter(TypingSync.SERVER_RATE, TypingSync.SERVER_BURST)).tryAcquire(now, 1);
+    }
+
+    public static boolean allowCanvas(EntityPlayerMP player, long now)
+    {
+        return CANVAS.computeIfAbsent(player.getUniqueID(), k -> new RateLimiter(CanvasSync.SERVER_RATE, CanvasSync.SERVER_BURST)).tryAcquire(now, 1);
+    }
+
+    /** 画板同步给旁观者的数据：[宽 2][高 2][压缩像素] */
+    public static byte[] canvasData(int width, int height, byte[] data)
+    {
+        byte[] v = new byte[4 + data.length];
+        v[0] = (byte) (width >> 8);
+        v[1] = (byte) width;
+        v[2] = (byte) (height >> 8);
+        v[3] = (byte) height;
+        System.arraycopy(data, 0, v, 4, data.length);
+        return v;
+    }
+
+    /** 操作者画的转给旁观者 */
+    public static void broadcastCanvas(TileEntityComputer computer, int field, byte[] data)
+    {
+        for(EntityPlayerMP p : computer.getViewers())
+        {
+            if(!computer.isOperator(p))
+                PacketHandler.INSTANCE.sendTo(MessageComputerView.canvas(computer.getPos(), field, data), p);
+        }
     }
 
     public static boolean allowHistory(EntityPlayerMP player, long now)
@@ -102,6 +131,8 @@ public final class ComputerSync
         {
             for(TypingSync.Typed t : computer.getTyped())
                 PacketHandler.INSTANCE.sendTo(MessageComputerView.typing(computer.getPos(), t), player);
+            for(Map.Entry<Integer, byte[]> c : computer.getCanvases())
+                PacketHandler.INSTANCE.sendTo(MessageComputerView.canvas(computer.getPos(), c.getKey(), c.getValue()), player);
         }
     }
 
@@ -214,6 +245,7 @@ public final class ComputerSync
             ACTIONS.remove(event.player.getUniqueID());
             TYPING.remove(event.player.getUniqueID());
             HISTORY.remove(event.player.getUniqueID());
+            CANVAS.remove(event.player.getUniqueID());
             COOKIES.remove(event.player.getUniqueID());
             // 临时地址下线就收回了，放行跟着没了
             SPECTATING.remove(event.player.getUniqueID());
