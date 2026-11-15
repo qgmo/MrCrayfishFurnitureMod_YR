@@ -4,6 +4,7 @@ import com.mrcrayfish.furniture.compat.RegionUse;
 import com.mrcrayfish.furniture.computer.BrowserHistory;
 import com.mrcrayfish.furniture.computer.ComputerCookies;
 import com.mrcrayfish.furniture.computer.ComputerNetwork;
+import com.mrcrayfish.furniture.computer.ComputerPeripherals;
 import com.mrcrayfish.furniture.computer.ComputerSync;
 import com.mrcrayfish.furniture.computer.PageFacts;
 import com.mrcrayfish.furniture.computer.TypingSync;
@@ -14,6 +15,7 @@ import com.mrcrayfish.furniture.power.ApplianceFaces;
 import com.mrcrayfish.furniture.power.IAppliance;
 import com.mrcrayfish.furniture.util.AppliancePower;
 import com.mrcrayfish.furniture.util.TileEntityUtil;
+import moe.qingu.youran.api.network.DeviceCapability;
 import moe.qingu.youran.api.network.DeviceHandle;
 import moe.qingu.youran.api.network.Ipv6Address;
 import net.minecraft.entity.item.EntityItem;
@@ -54,6 +56,8 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
     private final ApplianceEnergy energy = new ApplianceEnergy(this, AppliancePower.COMPUTER, ApplianceFaces.bottom(), () -> TileEntityUtil.markBlockForUpdate(world, pos));
 
     private boolean switchedOn;
+    /** 外设槽（定位模块；服主 11-15）：进存档，也随方块更新发给客户端（界面里显示） */
+    private final ComputerPeripherals peripherals = new ComputerPeripherals(this::onPeripheralsChanged);
     /** 会话：当前地址与前进后退历史（进存档，不存网页内容；服主 11-14） */
     private BrowserHistory history = BrowserHistory.EMPTY;
     /** 这台电脑的 Cookie 在 {@link ComputerCookies} 里的编号（第一次存 Cookie 时生成；进存档，不发给客户端） */
@@ -133,6 +137,46 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
     public int getPageId()
     {
         return pageId;
+    }
+
+    public ComputerPeripherals getPeripherals()
+    {
+        return peripherals;
+    }
+
+    /**
+     * 能不能放、拿外设：是现在的操作者，且过保护检查（同接管电脑的 {@link RegionUse#canUse}）。
+     * 客户端上按同步来的操作者判断（只用来少发不会被接受的点击），服务端说了算。
+     */
+    public boolean canChangePeripherals(EntityPlayer player)
+    {
+        return world != null && isOperator(player) && RegionUse.canUse(world, player, pos);
+    }
+
+    private void onPeripheralsChanged()
+    {
+        if(world != null && !world.isRemote)
+        {
+            markDirty();
+            DeviceHandle d = device;
+            if(d != null && !d.isRemoved())
+                d.setCapability(DeviceCapability.LOCATION, peripherals.hasLocator());
+            TileEntityUtil.markBlockForUpdate(world, pos);
+        }
+    }
+
+    /** 拆电脑时：外设掉出来 */
+    public void dropPeripherals()
+    {
+        for(int i = 0; i < ComputerPeripherals.SLOTS; i++)
+        {
+            ItemStack s = peripherals.get(i);
+            if(!s.isEmpty())
+            {
+                peripherals.set(i, ItemStack.EMPTY);
+                net.minecraft.inventory.InventoryHelper.spawnItemStack(world, pos.getX(), pos.getY(), pos.getZ(), s);
+            }
+        }
     }
 
     public BrowserHistory getHistory()
@@ -321,6 +365,12 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         }
         if(device.isPowered() != running)
             device.setPowered(running);
+        // 网卡附带一键登录能力（服主 11-15）；装了定位模块时有位置能力
+        if(!device.hasCapability(DeviceCapability.ONE_CLICK_LOGIN))
+            device.setCapability(DeviceCapability.ONE_CLICK_LOGIN, true);
+        boolean locator = peripherals.hasLocator();
+        if(device.hasCapability(DeviceCapability.LOCATION) != locator)
+            device.setCapability(DeviceCapability.LOCATION, locator);
         EntityPlayerMP want = running ? getOperatorPlayer() : null;
         EntityPlayerMP now = device.attachedPlayer();
         if(want != now)
@@ -379,6 +429,7 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         this.energy.readFromNBT(tagCompound);
         this.history = BrowserHistory.readFromNBT(tagCompound);
         this.cookieJarId = tagCompound.hasUniqueId("CookieJarId") ? tagCompound.getUniqueId("CookieJarId") : null;
+        this.peripherals.readFromNBT(tagCompound);
     }
 
     @Override
@@ -390,6 +441,7 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         this.history.writeToNBT(tagCompound);
         if(cookieJarId != null)
             tagCompound.setUniqueId("CookieJarId", cookieJarId);
+        this.peripherals.writeToNBT(tagCompound);
         return tagCompound;
     }
 

@@ -1,6 +1,7 @@
 package com.mrcrayfish.furniture.computer;
 
 import com.mrcrayfish.furniture.tileentity.TileEntityComputer;
+import moe.qingu.youran.api.network.DeviceCapability;
 import moe.qingu.youran.api.network.DeviceHandle;
 import moe.qingu.youran.api.network.Ipv6Address;
 import moe.qingu.youran.api.network.NetworkDevices;
@@ -49,7 +50,10 @@ public final class ComputerNetwork
             return null;
         BlockPos pos = computer.getPos();
         int dim = world.provider.getDimension();
-        DeviceHandle h = devices.register(dim, pos.getX(), pos.getY(), pos.getZ());
+        // 家具电脑的网卡附带一键登录能力（服主 11-15）；定位模块由外设槽决定（TileEntityComputer 每 tick 对齐）
+        DeviceHandle h = devices.register(dim, pos.getX(), pos.getY(), pos.getZ(), DeviceCapability.ONE_CLICK_LOGIN);
+        if(h != null && computer.getPeripherals().hasLocator())
+            h.setCapability(DeviceCapability.LOCATION, true);
         if(h != null)
         {
             BY_ADDRESS.put(h.address(), new Location(dim, pos.toImmutable()));

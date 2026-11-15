@@ -848,3 +848,7 @@ cfm.browser.info.validity=Valid: %s to %s
 cfm.browser.info.sha256=SHA-256 fingerprint: %s
 cfm.browser.info.san=Alternative names: %s
 cfm.browser.info.root=The QinguMoe CA root certificate is built into the mod and not part of the chain above.
+cfm.browser.panel.peripheral=Locator
+cfm.browser.panel.peripheral.hint=Peripheral slot: holds a YouranMod locator module, so websites can get a signed location of this computer with your consent
+cfm.browser.panel.peripheral.operator=You are the operator and can put it in or take it out
+cfm.browser.panel.peripheral.not_operator=Only the operator can put it in or take it out

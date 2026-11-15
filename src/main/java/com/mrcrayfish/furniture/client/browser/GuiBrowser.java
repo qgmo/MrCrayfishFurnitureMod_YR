@@ -422,6 +422,8 @@ public class GuiBrowser extends GuiContainer
             List<String> power = ApplianceGui.tooltip(guiLeft, guiTop, ContainerComputer.CARD_X, ContainerComputer.CARD_Y, container.getCardSlot(), computer.getAppliance(), mouseX, mouseY);
             if(power != null)
                 drawHoveringText(power, mouseX, mouseY);
+            else
+                drawPeripheralHint(mouseX, mouseY);
         }
         if(cookieMenu > 0 && on)
         {
@@ -1392,6 +1394,20 @@ public class GuiBrowser extends GuiContainer
     protected void drawGuiContainerForegroundLayer(int mouseX, int mouseY)
     {
         fontRenderer.drawString(I18n.format("cfm.browser.panel.card"), ContainerComputer.CARD_X + 30, ContainerComputer.CARD_Y + 5, 0xFF404040);
+        fontRenderer.drawString(I18n.format("cfm.browser.panel.peripheral"), ContainerComputer.PERIPHERAL_X + 20, ContainerComputer.PERIPHERAL_Y + 5, 0xFF404040);
+    }
+
+    /** 指着空的外设槽：说明放什么、谁能放 */
+    private void drawPeripheralHint(int mouseX, int mouseY)
+    {
+        int x = guiLeft + ContainerComputer.PERIPHERAL_X - 1, y = guiTop + ContainerComputer.PERIPHERAL_Y - 1;
+        if(container.getPeripheralSlot().getHasStack() || mouseX < x || mouseX >= x + 18 || mouseY < y || mouseY >= y + 18)
+            return;
+        List<String> lines = new ArrayList<>();
+        lines.add(I18n.format("cfm.browser.panel.peripheral.hint"));
+        lines.add(net.minecraft.util.text.TextFormatting.GRAY + I18n.format(computer.isOperator(mc.player)
+                ? "cfm.browser.panel.peripheral.operator" : "cfm.browser.panel.peripheral.not_operator"));
+        drawHoveringText(lines, mouseX, mouseY);
     }
 
     @Override

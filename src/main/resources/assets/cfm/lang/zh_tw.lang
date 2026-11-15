@@ -858,3 +858,7 @@ cfm.browser.info.validity=有效期間：%s 至 %s
 cfm.browser.info.sha256=SHA-256 指紋：%s
 cfm.browser.info.san=別名：%s
 cfm.browser.info.root=根憑證 QinguMoe CA 內建在模組裡，不在上面的鏈裡。
+cfm.browser.panel.peripheral=定位模組
+cfm.browser.panel.peripheral.hint=周邊槽：放 YouranMod 的定位模組，網站經你同意後能拿到這台電腦簽了名的位置
+cfm.browser.panel.peripheral.operator=你是操作者，可以放、拿
+cfm.browser.panel.peripheral.not_operator=只有操作者能放、拿

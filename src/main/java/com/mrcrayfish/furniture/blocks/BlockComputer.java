@@ -60,7 +60,13 @@ public class BlockComputer extends BlockFurnitureTile
     {
         // 悠然服务器魔改：电脑拆了（含被搬走），这里存的 Cookie 跟着删掉（服主 11-15）
         if(!world.isRemote)
+        {
             ComputerCookies.remove(world, pos);
+            // 外设槽里的定位模块掉出来
+            TileEntity te = world.getTileEntity(pos);
+            if(te instanceof TileEntityComputer)
+                ((TileEntityComputer) te).dropPeripherals();
+        }
         super.breakBlock(world, pos, state);
     }
 

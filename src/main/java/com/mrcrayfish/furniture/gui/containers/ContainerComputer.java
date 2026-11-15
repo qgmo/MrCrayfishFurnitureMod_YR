@@ -1,31 +1,42 @@
 package com.mrcrayfish.furniture.gui.containers;
 
+import com.mrcrayfish.furniture.computer.ComputerPeripherals;
+import com.mrcrayfish.furniture.gui.inventory.InventoryPeripherals;
+import com.mrcrayfish.furniture.gui.slots.SlotPeripheral;
 import com.mrcrayfish.furniture.gui.slots.SlotPowerCard;
 import com.mrcrayfish.furniture.power.ApplianceContainers;
 import com.mrcrayfish.furniture.tileentity.TileEntityComputer;
 import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.entity.player.EntityPlayerMP;
+import net.minecraft.inventory.ClickType;
 import net.minecraft.inventory.Container;
 import net.minecraft.inventory.IContainerListener;
 import net.minecraft.inventory.IInventory;
 import net.minecraft.inventory.Slot;
 import net.minecraft.item.ItemStack;
+import net.minecraft.network.play.server.SPacketSetSlot;
 
 import javax.annotation.Nullable;
 
 /**
- * 电脑的界面（悠然服务器魔改）：浏览器本身全在客户端，服务端这边只有能量单元卡槽和玩家背包（界面上的“物品”面板），
+ * 电脑的界面（悠然服务器魔改）：浏览器本身全在客户端，服务端这边只有能量单元卡槽、外设槽（放定位模块）和玩家背包（界面上的“物品”面板），
  * 并把缓存电量、工作状态同步给界面。原来 MineBay 的交易槽去掉了（MineBay 改成了网站）。
+ * 外设槽只有操作者、且过保护检查（同接管电脑）的玩家能放、拿（服主 11-15）；旁观者点了服务端不认，并把界面重新同步给他。
  */
 public class ContainerComputer extends Container
 {
     /** 面板大小与卡槽位置（相对面板左上角） */
     public static final int PANEL_WIDTH = 176, PANEL_HEIGHT = 114;
     public static final int CARD_X = 8, CARD_Y = 8;
+    /** 外设槽的位置（右上角，标签画在它右边） */
+    public static final int PERIPHERAL_X = 104, PERIPHERAL_Y = 8;
 
     private final TileEntityComputer computer;
     @Nullable
     private final SlotPowerCard cardSlot;
     private final int cardIndex;
+    private final SlotPeripheral peripheralSlot;
+    private final int peripheralIndex;
     private final ApplianceContainers.Sync sync = new ApplianceContainers.Sync();
 
     public ContainerComputer(IInventory playerInventory, TileEntityComputer computer)
@@ -53,6 +64,43 @@ public class ContainerComputer extends Container
         {
             this.cardIndex = -1;
         }
+        // 外设槽：加在所有槽位之后（原有槽位编号不变）；两端都加
+        InventoryPeripherals peripherals = new InventoryPeripherals(computer.getPeripherals(), computer::markDirty, computer::isUsableByPlayer);
+        this.peripheralSlot = new SlotPeripheral(peripherals, 0, PERIPHERAL_X, PERIPHERAL_Y, computer::canChangePeripherals);
+        this.peripheralIndex = this.inventorySlots.size();
+        this.addSlotToContainer(peripheralSlot);
+    }
+
+    public SlotPeripheral getPeripheralSlot()
+    {
+        return peripheralSlot;
+    }
+
+    /** 外设槽：不是操作者（或过不了保护检查）的玩家点它不算；服务端把界面与手上拿着的重新同步给他 */
+    @Override
+    public ItemStack slotClick(int slotId, int dragType, ClickType clickType, EntityPlayer player)
+    {
+        boolean touchesPeripheral = slotId == peripheralIndex
+                || (clickType == ClickType.QUICK_MOVE && slotId >= 0 && slotId < 36 && ComputerPeripherals.isPeripheral(inventorySlots.get(slotId).getStack()));
+        if(touchesPeripheral && !peripheralSlot.canChange(player))
+        {
+            if(player instanceof EntityPlayerMP && slotId == peripheralIndex)
+            {
+                EntityPlayerMP mp = (EntityPlayerMP) player;
+                mp.sendAllContents(this, this.getInventory());
+                mp.connection.sendPacket(new SPacketSetSlot(-1, -1, mp.inventory.getItemStack()));
+            }
+            if(slotId == peripheralIndex)
+                return ItemStack.EMPTY;
+        }
+        return super.slotClick(slotId, dragType, clickType, player);
+    }
+
+    @Override
+    public boolean canDragIntoSlot(Slot slot)
+    {
+        // 拖动分发不进外设槽（只能单独点）
+        return slot != peripheralSlot && super.canDragIntoSlot(slot);
     }
 
     public TileEntityComputer getComputer()
@@ -108,6 +156,9 @@ public class ContainerComputer extends Container
         ItemStack card = ApplianceContainers.transfer(this, slotNum, cardIndex, 0, 36, this::mergeItemStack);
         if(card != null)
             return card;
+        ItemStack peripheral = transferPeripheral(entityPlayer, slotNum);
+        if(peripheral != null)
+            return peripheral;
         if(slotNum < 0 || slotNum >= 36)
             return ItemStack.EMPTY;
         // 背包与快捷栏之间挪
@@ -130,6 +181,40 @@ public class ContainerComputer extends Container
         else
             slot.onSlotChanged();
         return copy;
+    }
+
+    /** 外设槽相关的 Shift 点击；不归它管返回 null */
+    private ItemStack transferPeripheral(EntityPlayer player, int slotNum)
+    {
+        if(slotNum < 0 || slotNum >= inventorySlots.size())
+            return null;
+        Slot slot = inventorySlots.get(slotNum);
+        if(slot == null || !slot.getHasStack())
+            return null;
+        ItemStack stack = slot.getStack();
+        if(slotNum == peripheralIndex)
+        {
+            if(!peripheralSlot.canChange(player))
+                return ItemStack.EMPTY;
+            ItemStack copy = stack.copy();
+            if(!this.mergeItemStack(stack, 0, 36, true))
+                return ItemStack.EMPTY;
+            slot.putStack(stack.isEmpty() ? ItemStack.EMPTY : stack);
+            return copy;
+        }
+        if(slotNum < 36 && ComputerPeripherals.isPeripheral(stack) && !peripheralSlot.getHasStack() && peripheralSlot.isItemValid(stack))
+        {
+            if(!peripheralSlot.canChange(player))
+                return ItemStack.EMPTY;
+            peripheralSlot.putStack(stack.splitStack(1));
+            if(stack.isEmpty())
+                slot.putStack(ItemStack.EMPTY);
+            else
+                slot.onSlotChanged();
+            // 只放一个；返回空，原版的 Shift 点击就不再把剩下的挪到背包别处
+            return ItemStack.EMPTY;
+        }
+        return null;
     }
 
     @Override
