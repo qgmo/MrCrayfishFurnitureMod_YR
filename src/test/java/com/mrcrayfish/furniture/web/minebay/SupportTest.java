@@ -421,17 +421,20 @@ class SupportTest
     }
 
     @Test
-    void ticketsPerPlayerAreLimited()
+    void ticketsAreLimitedOnlyByBoxSize()
     {
         SupportData d = new SupportData(SupportData.NAME);
-        for(int i = 0; i < SupportData.MAX_OPEN_TICKETS_PER_PLAYER; i++)
-            assertNotNull(d.addTicket(ALICE, "Alice", "t" + i, T0));
-        assertNull(d.addTicket(ALICE, "Alice", "多的", T0));
-        assertNotNull(d.addTicket(BOB, "Bob", "别人的", T0));
-        d.closeTicket(1, "Admin");
-        assertNotNull(d.addTicket(ALICE, "Alice", "处理掉一条后又能留", T0));
-        assertEquals(3, d.openTickets(ALICE));
-        assertEquals(4, d.openTickets());
+        for(int i = 0; i < 10; i++)
+            assertNotNull(d.addTicket(ALICE, "Alice", "t" + i, T0), "每个帐号不单独限条数");
+        assertEquals(10, d.openTickets(ALICE));
+        for(int i = 10; i < SupportData.MAX_TICKETS; i++)
+            assertNotNull(d.addTicket(BOB, "Bob", "b" + i, T0));
+        assertNull(d.addTicket(BOB, "Bob", "满了", T0), "都没处理时存满不收");
+        d.closeTicket(3, "Admin");
+        SupportData.Ticket t = d.addTicket(ALICE, "Alice", "处理掉一条后又能留", T0);
+        assertNotNull(t);
+        assertNull(d.ticket(3), "满了先丢最早的已处理的");
+        assertEquals(SupportData.MAX_TICKETS, d.openTickets());
     }
 
     // ---------------------------------------------------------------- 存取

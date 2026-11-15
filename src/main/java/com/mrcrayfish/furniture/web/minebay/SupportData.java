@@ -27,8 +27,6 @@ public class SupportData extends WorldSavedData
     public static final int MAX_PLAYERS = 10000;
     /** 最多存多少条留言（满了先丢最早的已处理的；都没处理时不收新的） */
     public static final int MAX_TICKETS = 500;
-    /** 每个帐号最多有几条没处理的留言 */
-    public static final int MAX_OPEN_TICKETS_PER_PLAYER = 3;
 
     /** 一条转给管理员的留言 */
     public static final class Ticket
@@ -149,12 +147,10 @@ public class SupportData extends WorldSavedData
         return n;
     }
 
-    /** 收一条留言；这个帐号没处理的太多、或存满了时不收，返回 null */
+    /** 收一条留言；存满了（{@value #MAX_TICKETS} 条都没处理）时不收，返回 null。每个帐号不单独限条数（服主 11-15，提问已有每小时限额） */
     @Nullable
     public Ticket addTicket(UUID player, String name, String text, long now)
     {
-        if(openTickets(player) >= MAX_OPEN_TICKETS_PER_PLAYER)
-            return null;
         if(tickets.size() >= MAX_TICKETS)
         {
             Ticket oldestClosed = null;

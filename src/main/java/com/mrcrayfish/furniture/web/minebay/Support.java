@@ -166,8 +166,7 @@ public final class Support
                 return;
             }
             chat.add(new SupportChat.Message(SupportChat.Role.AGENT, text, now));
-            chat.add(new SupportChat.Message(SupportChat.Role.NOTE, "（留言没有转出：您已有 " + SupportData.MAX_OPEN_TICKETS_PER_PLAYER
-                    + " 条留言在等管理员处理，或者留言箱满了。请直接联系服主。）", now));
+            chat.add(new SupportChat.Message(SupportChat.Role.NOTE, "（留言没有转出：留言箱满了，请直接联系服主。）", now));
             return;
         }
         chat.add(new SupportChat.Message(SupportChat.Role.AGENT, text, now));
