@@ -136,16 +136,22 @@ public final class SupportPrompt
         return currencyName.equals("绿宝石");
     }
 
-    /** 整个请求：系统提示、最近的对话（玩家 → user，客服 → assistant，网站的说明不带）、这次的问题 */
+    /** 整个请求：系统提示、最近的对话（成对的一问一答：玩家 → user，客服 → assistant；网站的说明、没得到回答的提问不带）、这次的问题 */
     public static List<SupportLlm.Message> messages(String system, List<SupportChat.Message> history, String question)
     {
         List<SupportLlm.Message> out = new ArrayList<>();
         out.add(new SupportLlm.Message("system", system));
+        // 只带一问一答成对的：没得到回答的提问（后面是网站的说明）不带，免得接连两条 user（有的接口不收）
         List<SupportChat.Message> talk = new ArrayList<>();
-        for(SupportChat.Message m : history)
+        for(int i = 0; i + 1 < history.size(); i++)
         {
-            if(m.role != SupportChat.Role.NOTE)
+            SupportChat.Message m = history.get(i);
+            if(m.role == SupportChat.Role.PLAYER && history.get(i + 1).role == SupportChat.Role.AGENT)
+            {
                 talk.add(m);
+                talk.add(history.get(i + 1));
+                i++;
+            }
         }
         for(SupportChat.Message m : talk.subList(Math.max(0, talk.size() - HISTORY), talk.size()))
             out.add(new SupportLlm.Message(m.role == SupportChat.Role.PLAYER ? "user" : "assistant", m.text));

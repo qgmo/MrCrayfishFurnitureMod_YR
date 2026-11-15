@@ -358,6 +358,29 @@ class SupportTest
             assertFalse(x.content.contains("暂时没能回复"), "网站自己的说明不带");
     }
 
+    @Test
+    void unansweredQuestionsAreLeftOut()
+    {
+        List<SupportChat.Message> h = Arrays.asList(
+                new SupportChat.Message(SupportChat.Role.PLAYER, "q1", 1),
+                new SupportChat.Message(SupportChat.Role.AGENT, "a1", 2),
+                new SupportChat.Message(SupportChat.Role.PLAYER, "q2", 3),
+                new SupportChat.Message(SupportChat.Role.NOTE, Support.CANNOT_REPLY, 4),
+                new SupportChat.Message(SupportChat.Role.PLAYER, "q3", 5),
+                new SupportChat.Message(SupportChat.Role.AGENT, "a3", 6),
+                new SupportChat.Message(SupportChat.Role.NOTE, "（已转给管理员，留言编号 #1。）", 6));
+        List<SupportLlm.Message> m = SupportPrompt.messages("S", h, "q4");
+        List<String> roles = new ArrayList<>();
+        List<String> texts = new ArrayList<>();
+        for(SupportLlm.Message x : m)
+        {
+            roles.add(x.role);
+            texts.add(x.content);
+        }
+        assertEquals(Arrays.asList("system", "user", "assistant", "user", "assistant", "user"), roles, "不会接连两条 user");
+        assertEquals(Arrays.asList("S", "q1", "a1", "q3", "a3", "q4"), texts);
+    }
+
     // ---------------------------------------------------------------- 回答清理、留言
 
     @Test
