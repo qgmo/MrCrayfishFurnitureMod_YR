@@ -113,11 +113,17 @@ public final class SupportText
         {
             int cp = t.codePointAt(i);
             i += Character.charCount(cp);
-            if(cp == '\n')
+            if(cp == 0xA7)
+            {
+                // 格式代码：§ 连同后面那个字一起去掉
+                if(i < t.length())
+                    i += Character.charCount(t.codePointAt(i));
+            }
+            else if(cp == '\n')
                 b.append('\n');
             else if(cp == '\t' || cp == '\r')
                 b.append(' ');
-            else if(cp != 0xA7 && !bad(cp))
+            else if(!bad(cp))
                 b.appendCodePoint(cp);
         }
         return b.toString();
