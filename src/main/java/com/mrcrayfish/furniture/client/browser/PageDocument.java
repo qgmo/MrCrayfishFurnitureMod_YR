@@ -32,14 +32,26 @@ import java.util.regex.Pattern;
  * <li>注入默认样式（字体、表单控件大小、页面宽度）。</li>
  * </ul>
  * HTML 的松散写法（不闭合的标签等）和 XHTML 都认；HTML 命名实体按 HTML 规则解码。
- * 图片只收和页面同一主机的（{@link UrlInput#sameHost}），每页最多 {@value #MAX_IMAGES} 张。
+ * 图片只收和页面同一主机的（{@link UrlInput#sameHost}），另外任何网站都可以用 {@value #CAPTCHA_HOST} 的验证码图片（服主 11-15），
+ * 每页最多 {@value #MAX_IMAGES} 张。
  */
 public final class PageDocument
 {
     public static final String XHTML_NS = "http://www.w3.org/1999/xhtml";
+
+    /** 页面里的图片能不能取：同一主机，或者 captcha.yr 的验证码图片（{@code /img/} 下） */
+    static boolean imageAllowed(String pageUrl, String src)
+    {
+        if(UrlInput.sameHost(pageUrl, src))
+            return true;
+        String host = UrlInput.hostOf(src);
+        return CAPTCHA_HOST.equals(host) && (src.startsWith("http://" + CAPTCHA_HOST + "/img/") || src.startsWith("https://" + CAPTCHA_HOST + "/img/"));
+    }
     public static final String N_ATTR = "data-yr-n";
     /** 一页最多这么多张图（只有操作者加载） */
     public static final int MAX_IMAGES = 16;
+    /** YouranMod 的人机验证服务：任何网站都能在自己的表单里放它的验证码图片 */
+    public static final String CAPTCHA_HOST = "captcha.yr";
     /** 一页最多这么多个表单控件 */
     public static final int MAX_CONTROLS = 128;
 
@@ -345,7 +357,7 @@ public final class PageDocument
                 case "img":
                 {
                     String src = UrlInput.resolve(baseUrl, e.getAttribute("src"));
-                    if(src != null && !src.equals(UrlInput.HOME) && UrlInput.sameHost(baseUrl, src) && images.size() < MAX_IMAGES)
+                    if(src != null && !src.equals(UrlInput.HOME) && imageAllowed(baseUrl, src) && images.size() < MAX_IMAGES)
                         images.add(src);
                     break;
                 }

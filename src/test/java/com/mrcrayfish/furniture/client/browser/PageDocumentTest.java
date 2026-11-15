@@ -157,6 +157,15 @@ class PageDocumentTest
     }
 
     @Test
+    void captchaImagesFromAnySite() throws Exception
+    {
+        // captcha.yr 的验证码图片任何网站都能放（服主 11-15）；captcha.yr 上别的路径、仿冒的主机不行
+        PageDocument d = parseHtml("<img src=https://captcha.yr/img/0123456789abcdef0123456789abcdef.png><img src=http://captcha.yr/img/x.png>"
+                + "<img src=https://captcha.yr/other.png><img src=https://captcha.yr.evil.yr/img/x.png><img src=https://evilcaptcha.yr/img/x.png>");
+        assertEquals(java.util.Arrays.asList("https://captcha.yr/img/0123456789abcdef0123456789abcdef.png", "http://captcha.yr/img/x.png"), d.images);
+    }
+
+    @Test
     void noExternalEntities()
     {
         // 外部实体不会被读出来（解析失败或者为空，都不能出现文件内容）
