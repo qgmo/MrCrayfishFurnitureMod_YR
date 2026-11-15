@@ -81,6 +81,8 @@ public class MrCrayfishFurnitureMod
 
         /* 游戏内网站（悠然服务器魔改）：MineBay 搬到 minebay.yr */
         com.mrcrayfish.furniture.web.minebay.MineBaySite.register();
+        /* 浏览器主页 180.yr 的导航信息 */
+        com.mrcrayfish.furniture.web.NavEntries.register();
 
         /* GUI Handler Registering */
         NetworkRegistry.INSTANCE.registerGuiHandler(this, new GuiHandler());
