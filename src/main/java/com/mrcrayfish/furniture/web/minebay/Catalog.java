@@ -207,6 +207,42 @@ final class Catalog
         return new Listing(id, seq, category, iconId(stack), count, name, sortName, search.toString().toLowerCase(Locale.ROOT), itemId(currency), price, max, desc, stock);
     }
 
+    /** 这件商品的货币的名字（服务端的中文名，没有时英文名；客服用） */
+    String currencyName(String productId)
+    {
+        Entry e = byId.get(productId);
+        if(e == null)
+            return "?";
+        String zh = chinese(e.currency);
+        return zh != null ? zh : english(e.currency);
+    }
+
+    /** 按货币的写法（{@link #itemId}）取名字；认不出时原样返回 */
+    static String currencyNameOf(String itemId)
+    {
+        String reg = itemId;
+        int meta = 0;
+        int at = itemId.indexOf('@');
+        if(at >= 0)
+        {
+            reg = itemId.substring(0, at);
+            try
+            {
+                meta = Integer.parseInt(itemId.substring(at + 1));
+            }
+            catch(NumberFormatException e)
+            {
+                return itemId;
+            }
+        }
+        net.minecraft.item.Item item = net.minecraftforge.fml.common.registry.ForgeRegistries.ITEMS.getValue(new ResourceLocation(reg));
+        if(item == null)
+            return itemId;
+        ItemStack stack = new ItemStack(item, 1, meta);
+        String zh = chinese(stack);
+        return zh != null ? zh : english(stack);
+    }
+
     /** 货币的写法：注册名，有子类型或数据值不为 0 时加 {@code @数据值}（货币只看物品与数据值） */
     static String itemId(ItemStack stack)
     {

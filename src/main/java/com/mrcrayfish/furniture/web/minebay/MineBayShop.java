@@ -48,6 +48,8 @@ public final class MineBayShop
 {
     /** pay.yr 里收款的虚拟账户 */
     public static final String ACCOUNT = "cfm:minebay";
+    /** 收款账户给人看的名字（pay.yr 的付款页、确认框、收支记录里） */
+    public static final String ACCOUNT_NAME = "MineBay";
     /** 收款单多久过期（秒） */
     static final int ORDER_TTL_SECONDS = 600;
     /** 一单里最多发几叠物品（防模组回调出错一下子给太多） */
@@ -68,7 +70,9 @@ public final class MineBayShop
                 paid(order, payment);
             }
         });
+        PayApi.setDisplayName(ACCOUNT, ACCOUNT_NAME);
         MinecraftForge.EVENT_BUS.register(new Events());
+        MinecraftForge.EVENT_BUS.register(new Support.Events());
     }
 
     static AccountRef account()

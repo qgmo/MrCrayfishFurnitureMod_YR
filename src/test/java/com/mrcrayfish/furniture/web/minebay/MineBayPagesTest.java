@@ -208,4 +208,49 @@ class MineBayPagesTest
         assertTrue(in.contains("action=\"/logout\""), "登录了有退出");
         check(MineBayPages.unpaid(VIEWER, "https://pay.yr/c/ord_aaaaaaaaaaaaaaaa"));
     }
+
+    /** 在线客服页：合法、对话转义、等回复时自动刷新、没开时没有输入框、没登录时让登录、发送失败时填的原样填回去 */
+    @Test
+    void supportPage() throws Exception
+    {
+        List<SupportChat.Message> msgs = new ArrayList<>();
+        for(int i = 0; i < 30; i++)
+        {
+            msgs.add(new SupportChat.Message(SupportChat.Role.PLAYER, "问 <b>" + i + "</b>", 1_763_200_000_000L + i));
+            msgs.add(new SupportChat.Message(SupportChat.Role.AGENT, "答 " + i + "\n第二行 <script>", 1_763_200_000_000L + i));
+        }
+        msgs.add(new SupportChat.Message(SupportChat.Role.NOTE, "（已转给管理员，留言编号 #1。）", 1_763_200_000_000L));
+        String html = MineBayPages.support(VIEWER, true, msgs, true, null, "", 20, false);
+        PageDocument d = check(html);
+        assertNotNull(d.refresh, "等回复时自动刷新");
+        assertEquals(2, d.refresh.seconds);
+        assertEquals("https://minebay.yr/", d.refresh.url, "刷新的是这一页自己");
+        assertTrue(html.contains("小 Bay 正在输入"));
+        assertTrue(html.contains("问 &lt;b&gt;29&lt;/b&gt;"));
+        assertFalse(html.contains("<script>"));
+        assertTrue(html.contains("答 29<br/>第二行"));
+        assertFalse(html.contains("问 &lt;b&gt;20&lt;/b&gt;"), "默认只显示最近几条");
+        assertTrue(html.contains("显示全部记录（61 条）"));
+        assertFalse(html.contains("问 &lt;b&gt;26&lt;/b&gt;"), "默认只显示最近 " + MineBayPages.SUPPORT_RECENT + " 条");
+        assertTrue(MineBayPages.list(VIEWER, many(3), many(3), null, "", ShopParams.Sort.DEFAULT, 1, null).contains("href=\"/support\" class=\"kf\">联系客服"),
+                "商城页面角落的联系客服");
+        assertTrue(html.contains("返回 MineBay"));
+        assertTrue(d.forms.stream().anyMatch(f -> f.post && f.action.equals("https://minebay.yr/support")));
+
+        String all = MineBayPages.support(VIEWER, true, msgs, false, MineBayPages.Notice.bad("每小时最多问 20 条"), "我填的 \"字\"", 20, true);
+        PageDocument a = check(all);
+        assertNull(a.refresh, "不等回复时不刷新");
+        assertTrue(all.contains("问 &lt;b&gt;0&lt;/b&gt;"));
+        assertTrue(a.controls.stream().anyMatch(c -> c.name.equals("m") && c.value.equals("我填的 \"字\"")), "填的原样填回去");
+
+        String off = MineBayPages.support(VIEWER, false, Collections.<SupportChat.Message>emptyList(), false, null, "", 20, false);
+        check(off);
+        assertTrue(off.contains("在线客服暂不可用"));
+        assertFalse(off.contains("action=\"/support\""));
+
+        String anon = MineBayPages.support(MineBayPages.Viewer.anonymous("t"), true, Collections.<SupportChat.Message>emptyList(), false, null, "", 20, false);
+        check(anon);
+        assertTrue(anon.contains("登录后才能联系客服"));
+        assertTrue(MineBayPages.support(VIEWER, true, Collections.<SupportChat.Message>emptyList(), false, null, "", 20, false).contains("请问有什么可以帮您"));
+    }
 }
