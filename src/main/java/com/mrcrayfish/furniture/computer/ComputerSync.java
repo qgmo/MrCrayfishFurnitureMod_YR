@@ -83,6 +83,30 @@ public final class ComputerSync
         }
     }
 
+    /** 操作者：发主页设置（服务器默认 + 这台电脑的；服主 11-15） */
+    public static void sendHome(EntityPlayerMP player, TileEntityComputer computer)
+    {
+        PacketHandler.INSTANCE.sendTo(MessageComputerView.home(computer.getPos(), HomePage.encode(serverHome(), computer.getHomePage())), player);
+    }
+
+    private static String cachedHomeConfig;
+    private static String cachedHome;
+
+    /** 配置里的默认主页（规范化过；写得不对时 about:home，记一次日志） */
+    public static synchronized String serverHome()
+    {
+        String c = com.mrcrayfish.furniture.handler.ConfigurationHandler.computerHomePage;
+        if(cachedHome == null || !String.valueOf(c).equals(cachedHomeConfig))
+        {
+            String[] problem = new String[1];
+            cachedHome = HomePage.serverDefault(c, problem);
+            cachedHomeConfig = String.valueOf(c);
+            if(problem[0] != null)
+                com.mrcrayfish.furniture.MrCrayfishFurnitureMod.logger().warn("{}; using about:home", problem[0]);
+        }
+        return cachedHome;
+    }
+
     public static boolean allowHistory(EntityPlayerMP player, long now)
     {
         return HISTORY.computeIfAbsent(player.getUniqueID(), k -> new RateLimiter(4, 8)).tryAcquire(now, 1);
@@ -123,7 +147,10 @@ public final class ComputerSync
         if(!computer.isOperator(player))
             grant(player, computer);
         else
+        {
+            sendHome(player, computer);
             sendHistory(player, computer);
+        }
         byte[] page = computer.getPage();
         PacketHandler.INSTANCE.sendTo(page == null ? MessageComputerView.clear(computer.getPos())
                 : MessageComputerView.page(computer.getPos(), page, computer.getScroll()), player);

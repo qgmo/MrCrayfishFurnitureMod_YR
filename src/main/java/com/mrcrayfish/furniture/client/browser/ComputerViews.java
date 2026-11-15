@@ -85,6 +85,18 @@ public final class ComputerViews
         public CookieJar cookies;
         /** 操作者画板里画的（画板编号 → 像素；旁观时显示）；换页面清空 */
         public final Map<Integer, CanvasView> canvases = new HashMap<>();
+        /** 主页设置（操作者打开时服务端发来）：收到了没有、服务器默认、这台电脑的（没设为 null） */
+        public boolean homeKnown;
+        public String defaultHome = com.mrcrayfish.furniture.computer.UrlInput.HOME;
+        @Nullable
+        public String home;
+
+        /** 这台电脑现在的主页；还不知道时为 null */
+        @Nullable
+        public String effectiveHome()
+        {
+            return homeKnown ? com.mrcrayfish.furniture.computer.HomePage.effective(home, defaultHome) : null;
+        }
     }
 
     /** 旁观时看到的一张画板 */
@@ -157,6 +169,16 @@ public final class ComputerViews
             byte[] px = com.mrcrayfish.furniture.computer.PixelCanvas.fromSync(java.util.Arrays.copyOfRange(data, 4, data.length), w, h);
             if(px != null)
                 v.canvases.put(scroll, new CanvasView(w, h, px, ++canvasVersion));
+        }
+        else if(kind == MessageComputerView.HOME)
+        {
+            String[] h = com.mrcrayfish.furniture.computer.HomePage.decode(data);
+            if(h != null)
+            {
+                v.defaultHome = h[0];
+                v.home = h[1];
+                v.homeKnown = true;
+            }
         }
         else if(kind == MessageComputerView.HISTORY)
         {

@@ -63,6 +63,9 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
     /** 这台电脑的 Cookie 在 {@link ComputerCookies} 里的编号（第一次存 Cookie 时生成；进存档，不发给客户端） */
     @Nullable
     private UUID cookieJarId;
+    /** 这台电脑的主页（玩家“设为这台电脑的主页”；没设为 null，用服务器默认；服主 11-15）。进存档，只发给操作者 */
+    @Nullable
+    private String homePage;
 
     // ---- 只在内存（服务端），操作者同步给客户端 ----
     @Nullable
@@ -246,6 +249,19 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         ComputerSync.broadcastCanvas(this, field, v);
     }
 
+    @Nullable
+    public String getHomePage()
+    {
+        return homePage;
+    }
+
+    /** 这台电脑的主页（检查过的网址；null 为用服务器默认） */
+    public void setHomePage(@Nullable String url)
+    {
+        this.homePage = url;
+        this.markDirty();
+    }
+
     /** 操作者打的字（已经检查过）：记下、转给旁观者 */
     public void setTyped(TypingSync.Typed t)
     {
@@ -310,6 +326,7 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         if(getOperatorPlayer() != null || !RegionUse.canUse(world, player, pos))
             return false;
         setOperator(player);
+        ComputerSync.sendHome(player, this);
         ComputerSync.sendHistory(player, this);
         return true;
     }
@@ -462,6 +479,9 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         this.history = BrowserHistory.readFromNBT(tagCompound);
         this.cookieJarId = tagCompound.hasUniqueId("CookieJarId") ? tagCompound.getUniqueId("CookieJarId") : null;
         this.peripherals.readFromNBT(tagCompound);
+        String home = tagCompound.getString("HomePage");
+        // 被改过的存档：不合格的当作没设
+        this.homePage = com.mrcrayfish.furniture.computer.HomePage.isValid(home) ? home : null;
     }
 
     @Override
@@ -474,6 +494,8 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         if(cookieJarId != null)
             tagCompound.setUniqueId("CookieJarId", cookieJarId);
         this.peripherals.writeToNBT(tagCompound);
+        if(homePage != null)
+            tagCompound.setString("HomePage", homePage);
         return tagCompound;
     }
 
@@ -498,6 +520,7 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         tag.removeTag("HistoryIndex");
         tag.removeTag("CookieJarIdMost");
         tag.removeTag("CookieJarIdLeast");
+        tag.removeTag("HomePage");
         return tag;
     }
 

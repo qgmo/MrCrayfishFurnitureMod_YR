@@ -112,6 +112,9 @@ public class GuiBrowser extends GuiContainer
     private final Map<Integer, PixelCanvas> spectatorCanvases = new HashMap<>();
     @Nullable
     private RenderedPage spectatorCanvasPage;
+    /** 主页菜单开着 */
+    private boolean homeMenu;
+    private final int[] setHomeBtn = new int[4], resetHomeBtn = new int[4], offlineBtn = new int[4];
 
     public GuiBrowser(InventoryPlayer inventoryPlayer, TileEntityComputer computer)
     {
@@ -204,6 +207,7 @@ public class GuiBrowser extends GuiContainer
         String powerLabel = I18n.format("cfm.browser.power");
         String itemsLabel = I18n.format("cfm.browser.items");
         String cookiesLabel = I18n.format("cfm.browser.cookies");
+        String menuLabel = I18n.format("cfm.browser.menu");
         int powerW = fontRenderer.getStringWidth(powerLabel) + 8;
         int itemsW = fontRenderer.getStringWidth(itemsLabel) + 8;
         int right = sx + sw - 4;
@@ -222,13 +226,19 @@ public class GuiBrowser extends GuiContainer
         cookies.x = power.x - 2 - cookies.w;
         cookies.y = toolbarY;
         cookies.h = tbH;
+        ToolButton menu = new ToolButton("menu", menuLabel);
+        menu.w = fontRenderer.getStringWidth(menuLabel) + 8;
+        menu.x = cookies.x - 2 - menu.w;
+        menu.y = toolbarY;
+        menu.h = tbH;
+        tools.add(menu);
         tools.add(cookies);
         tools.add(power);
         tools.add(items);
         lockX = x + 2;
         lockW = Math.max(14, fontRenderer.getStringWidth(I18n.format("cfm.browser.insecure")) + 6);
         addrX = lockX + lockW + 2;
-        addrW = Math.max(40, cookies.x - 3 - addrX);
+        addrW = Math.max(40, menu.x - 3 - addrX);
 
         // 物品面板放在右下角（盖在页面上）
         guiLeft = Math.max(0, Math.min(width - xSize, sx + sw - xSize - 6));
@@ -254,6 +264,7 @@ public class GuiBrowser extends GuiContainer
         // 不操作了：手上这份 Cookie 丢掉（下次成为操作者时服务端再发；服主 11-15）
         ComputerViews.view(computer.getPos()).cookies = null;
         cookieMenu = 0;
+        homeMenu = false;
         // 画板：只关编辑器、丢贴图，画的东西在表单里留着
         closeEditor();
         for(CanvasTexture t : canvasTextures.values())
@@ -475,7 +486,11 @@ public class GuiBrowser extends GuiContainer
             else
                 drawPeripheralHint(mouseX, mouseY);
         }
-        if(cookieMenu > 0 && on)
+        if(homeMenu && on && browser() != null)
+        {
+            drawHomeMenu(mouseX, mouseY);
+        }
+        else if(cookieMenu > 0 && on)
         {
             drawCookieMenu(mouseX, mouseY);
         }
@@ -504,6 +519,7 @@ public class GuiBrowser extends GuiContainer
                 case "home": t.enabled = op; break;
                 case "power": t.enabled = op; break;
                 case "cookies": t.visible = op; t.enabled = op; break;
+                case "menu": t.visible = op; t.enabled = op; break;
                 default: t.enabled = true;
             }
         }
@@ -547,7 +563,7 @@ public class GuiBrowser extends GuiContainer
             int bg = !t.enabled ? 0xFFD0D3D7 : hover ? 0xFFC9D7F2 : 0xFFF8F9FA;
             if(t.id.equals("power"))
                 bg = computer.isSwitchedOn() ? (hover ? 0xFF5BB974 : 0xFF34A853) : (hover ? 0xFFE8817A : 0xFFD93025);
-            if((t.id.equals("items") && panel) || (t.id.equals("cookies") && cookieMenu > 0))
+            if((t.id.equals("items") && panel) || (t.id.equals("cookies") && cookieMenu > 0) || (t.id.equals("menu") && homeMenu))
                 bg = 0xFFAECBFA;
             Gui.drawRect(t.x, t.y, t.x + t.w, t.y + t.h, 0xFF80868B);
             Gui.drawRect(t.x + 1, t.y + 1, t.x + t.w - 1, t.y + t.h - 1, bg);
@@ -1081,6 +1097,73 @@ public class GuiBrowser extends GuiContainer
             cookieMenu = 0;
     }
 
+    // ---- 主页菜单（服主 11-15：设为这台电脑的主页、恢复默认、离线主页） ----
+
+    private void drawHomeMenu(int mouseX, int mouseY)
+    {
+        Browser b = browser();
+        ComputerViews.View v = ComputerViews.view(computer.getPos());
+        menuW = Math.min(vpW - 20, 260);
+        menuX = Math.max(vpX + 4, vpX + vpW - menuW - 4);
+        menuY = vpY + 2;
+        List<String> lines = new ArrayList<>();
+        lines.add("§l" + I18n.format("cfm.browser.home_menu.title"));
+        lines.add(I18n.format("cfm.browser.home_menu.current", UrlInput.display(b.homeUrl())));
+        lines.add("§7" + I18n.format(v.home != null ? "cfm.browser.home_menu.computer" : "cfm.browser.home_menu.default"));
+        lines = wrap(lines, menuW - 12);
+        menuH = 8 + lines.size() * 10 + 6 + 3 * 16 + 4;
+        GlStateManager.translate(0, 0, 300);
+        Gui.drawRect(menuX - 1, menuY - 1, menuX + menuW + 1, menuY + menuH + 1, 0xFF5F6368);
+        Gui.drawRect(menuX, menuY, menuX + menuW, menuY + menuH, 0xFFFFFFFF);
+        int y = menuY + 5;
+        for(String l : lines)
+        {
+            fontRenderer.drawString(l, menuX + 6, y, TEXT);
+            y += 10;
+        }
+        y += 6;
+        String set = I18n.format("cfm.browser.home_menu.set");
+        String reset = I18n.format("cfm.browser.home_menu.reset");
+        String offline = I18n.format("cfm.browser.home_menu.offline");
+        setRect(setHomeBtn, menuX + 6, y, fontRenderer.getStringWidth(set) + 10, 14);
+        drawMenuButton(setHomeBtn, set, b.canSetHome(), false, mouseX, mouseY);
+        setRect(resetHomeBtn, menuX + 6, y + 16, fontRenderer.getStringWidth(reset) + 10, 14);
+        drawMenuButton(resetHomeBtn, reset, v.home != null, false, mouseX, mouseY);
+        setRect(offlineBtn, menuX + 6, y + 32, fontRenderer.getStringWidth(offline) + 10, 14);
+        drawMenuButton(offlineBtn, offline, true, false, mouseX, mouseY);
+        GlStateManager.translate(0, 0, -300);
+    }
+
+    private void homeMenuClicked(int mouseX, int mouseY)
+    {
+        Browser b = browser();
+        if(b == null)
+        {
+            homeMenu = false;
+            return;
+        }
+        if(inRect(setHomeBtn, mouseX, mouseY))
+        {
+            if(b.canSetHome())
+                b.setHomeToCurrent();
+            return;
+        }
+        if(inRect(resetHomeBtn, mouseX, mouseY))
+        {
+            if(ComputerViews.view(computer.getPos()).home != null)
+                b.resetHome();
+            return;
+        }
+        if(inRect(offlineBtn, mouseX, mouseY))
+        {
+            homeMenu = false;
+            b.openOfflineHome();
+            return;
+        }
+        if(!(mouseX >= menuX && mouseX < menuX + menuW && mouseY >= menuY && mouseY < menuY + menuH))
+            homeMenu = false;
+    }
+
     // ---- 输入 ----
 
     @Override
@@ -1092,6 +1175,17 @@ public class GuiBrowser extends GuiContainer
             editor.mouseClicked(mouseX, mouseY, button);
             if(editor.closed)
                 closeEditor();
+            return;
+        }
+        if(homeMenu)
+        {
+            boolean onButton = false;
+            for(ToolButton t : tools)
+                onButton |= t.id.equals("menu") && t.over(mouseX, mouseY);
+            if(onButton)
+                homeMenu = false;
+            else
+                homeMenuClicked(mouseX, mouseY);
             return;
         }
         if(cookieMenu > 0)
@@ -1197,6 +1291,7 @@ public class GuiBrowser extends GuiContainer
                         closeEditor();
                         editor = new CanvasEditor(c.n, pc, fontRenderer, vpW + 5, vpH);
                         editorEntry = e;
+                        homeMenu = false;
                         cookieMenu = 0;
                     }
                     break;
@@ -1240,6 +1335,12 @@ public class GuiBrowser extends GuiContainer
                 break;
             case "cookies":
                 cookieMenu = cookieMenu == 0 ? 1 : 0;
+                homeMenu = false;
+                info = false;
+                break;
+            case "menu":
+                homeMenu = !homeMenu;
+                cookieMenu = 0;
                 info = false;
                 break;
             case "back":
@@ -1318,6 +1419,11 @@ public class GuiBrowser extends GuiContainer
         }
         if(keyCode == Keyboard.KEY_ESCAPE)
         {
+            if(homeMenu)
+            {
+                homeMenu = false;
+                return;
+            }
             if(cookieMenu > 0)
             {
                 cookieMenu = 0;

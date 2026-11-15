@@ -45,6 +45,7 @@ public class PacketHandler
         // 悠然服务器魔改：电脑浏览器的 Cookie（加在最后，不改已有消息的编号）
         registerMessage(MessageComputerCookies.class, MessageComputerCookies.class, Side.SERVER);
         registerMessage(MessageComputerCanvas.class, MessageComputerCanvas.class, Side.SERVER);
+        registerMessage(MessageComputerHome.class, MessageComputerHome.class, Side.SERVER);
     }
     
     private static <REQ extends IMessage, REPLY extends IMessage> void registerMessage(Class<? extends IMessageHandler<REQ, REPLY>> messageHandler, Class<REQ> requestMessageType, Side side)

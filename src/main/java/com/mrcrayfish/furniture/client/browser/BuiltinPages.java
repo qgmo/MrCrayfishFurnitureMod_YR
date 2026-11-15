@@ -36,6 +36,7 @@ public final class BuiltinPages
         head(sb, tr.t("cfm.browser.home.title"));
         sb.append("<div class=\"box\"><h1>").append(Html.escape(tr.t("cfm.browser.home.heading"))).append("</h1>\n");
         sb.append("<p>").append(Html.escape(tr.t("cfm.browser.home.intro"))).append("</p>\n<ul>\n");
+        link(sb, "http://180.yr/", "180.yr", tr.t("cfm.browser.home.nav180"));
         link(sb, "https://minebay.yr/", "MineBay", tr.t("cfm.browser.home.minebay"));
         link(sb, "https://test.yr/", "test.yr", tr.t("cfm.browser.home.test"));
         link(sb, "http://test.yr/", "test.yr（HTTP）", tr.t("cfm.browser.home.test_http"));

@@ -3,6 +3,7 @@ package com.mrcrayfish.furniture.client.browser;
 import com.mrcrayfish.furniture.client.MediaDecoding;
 import com.mrcrayfish.furniture.computer.BrowserHistory;
 import com.mrcrayfish.furniture.computer.CanvasSync;
+import com.mrcrayfish.furniture.computer.HomePage;
 import com.mrcrayfish.furniture.computer.PixelCanvas;
 import com.mrcrayfish.furniture.computer.CookieJar;
 import com.mrcrayfish.furniture.computer.FormEncoding;
@@ -15,6 +16,7 @@ import com.mrcrayfish.furniture.computer.UrlInput;
 import com.mrcrayfish.furniture.network.PacketHandler;
 import com.mrcrayfish.furniture.network.message.MessageComputerCanvas;
 import com.mrcrayfish.furniture.network.message.MessageComputerCookies;
+import com.mrcrayfish.furniture.network.message.MessageComputerHome;
 import com.mrcrayfish.furniture.network.message.MessageComputerHistory;
 import com.mrcrayfish.furniture.network.message.MessageComputerPage;
 import com.mrcrayfish.furniture.network.message.MessageComputerScroll;
@@ -118,6 +120,8 @@ public final class Browser
         final String initiator;
         /** 跳转链上前面已经跨过站 */
         final boolean crossSite;
+        /** 打开主页：连不上时显示离线主页 about:home（服主 11-15） */
+        boolean homeFallback;
 
         Request(String url, String method, @Nullable byte[] body, @Nullable Entry fromEntry, int fromForm)
         {
@@ -193,6 +197,12 @@ public final class Browser
     private long historySentAt;
     /** 画板同步给旁观者（服主 11-15） */
     private final CanvasSync.Outbox canvasOut = new CanvasSync.Outbox();
+    /** 正在自动打开主页（开机、刚建好）：打开后记成 {@link #initialHome}，会话恢复可以换掉它 */
+    private boolean autoHomeLoading;
+    /** 等服务端发主页设置，从什么时候开始等的（0 为没在等） */
+    private long homeWaitSince;
+    /** 最多等主页设置多久，等不到就开离线主页 */
+    static final long HOME_WAIT_MS = 1500;
 
     Browser(BlockPos pos)
     {
@@ -267,8 +277,21 @@ public final class Browser
         Entry cur = current();
         if(cur == null)
         {
-            showBuiltin(UrlInput.HOME, BuiltinPages.home(ComputerViews.TR), true);
-            initialHome = current();
+            if(status != Status.IDLE || waiting != null)
+                return;
+            // 开机进主页（服主 11-15：服务器配置的默认主页，或这台电脑设的）；还没收到主页设置时等一会
+            String home = v.effectiveHome();
+            if(home == null)
+            {
+                long now = System.currentTimeMillis();
+                if(homeWaitSince == 0)
+                    homeWaitSince = now;
+                if(now - homeWaitSince < HOME_WAIT_MS)
+                    return;
+                home = UrlInput.HOME;
+            }
+            homeWaitSince = 0;
+            openHome(home, true);
         }
         else if(!cur.isLoaded())
         {
@@ -284,7 +307,64 @@ public final class Browser
     /** 只有自动开的主页，用户什么都没动过 */
     private boolean isPristine()
     {
-        return history.size() == 1 && history.get(0) == initialHome && !addressEdited && address.getText().equals(UrlInput.HOME);
+        return history.size() == 1 && history.get(0) == initialHome && !addressEdited;
+    }
+
+    /** 这台电脑现在的主页（还没收到设置时为 about:home） */
+    public String homeUrl()
+    {
+        String h = ComputerViews.view(pos).effectiveHome();
+        return h == null ? UrlInput.HOME : h;
+    }
+
+    /** 打开主页；{@code auto} 为开机自动打开（之后会话恢复可以换掉它） */
+    private void openHome(String url, boolean auto)
+    {
+        replacing = null;
+        addressEdited = false;
+        address.setText(UrlInput.display(url));
+        Request r = new Request(url, "GET", null, null, -1);
+        r.homeFallback = true;
+        navigate(r);
+        if(auto)
+        {
+            if(url.equals(UrlInput.HOME))
+                initialHome = current();
+            else
+                autoHomeLoading = true;
+        }
+    }
+
+    /** 当前页能不能设成主页：正常打开的 http / https 页，或者 about:home */
+    public boolean canSetHome()
+    {
+        Entry e = current();
+        if(e == null)
+            return false;
+        return e.builtin ? e.url.equals(UrlInput.HOME) : HomePage.isValid(e.url);
+    }
+
+    /** 把当前页设为这台电脑的主页（存在服务端，跟着电脑走） */
+    public void setHomeToCurrent()
+    {
+        if(!canSetHome())
+            return;
+        String url = current().url;
+        ComputerViews.view(pos).home = url;
+        PacketHandler.INSTANCE.sendToServer(new MessageComputerHome(pos, url));
+    }
+
+    /** 恢复服务器默认主页 */
+    public void resetHome()
+    {
+        ComputerViews.view(pos).home = null;
+        PacketHandler.INSTANCE.sendToServer(new MessageComputerHome(pos, ""));
+    }
+
+    /** 打开离线主页 about:home */
+    public void openOfflineHome()
+    {
+        openHome(UrlInput.HOME, false);
     }
 
     /** 按会话恢复：前进后退的条目只有网址，当前那条马上重新加载 */
@@ -366,9 +446,7 @@ public final class Browser
 
     public void home()
     {
-        addressEdited = false;
-        address.setText(UrlInput.HOME);
-        navigate(new Request(UrlInput.HOME, "GET", null, null, -1));
+        openHome(homeUrl(), false);
     }
 
     /** 刷新：重新取当前网址（GET；表单提交的结果页也只重取网址，不重新提交） */
@@ -510,6 +588,7 @@ public final class Browser
         generation++;
         waiting = null;
         replacing = replace;
+        autoHomeLoading = false;
         if(req.url.equals(UrlInput.HOME))
         {
             showBuiltin(UrlInput.HOME, BuiltinPages.home(ComputerViews.TR), true);
@@ -630,6 +709,7 @@ public final class Browser
             String initiator = req.initiator != null ? req.initiator : CookieJar.site(UrlInput.hostOf(req.url));
             Request r = new Request(next, keep ? req.method : "GET", keep ? req.body : null, keep ? req.fromEntry : null, keep ? req.fromForm : -1,
                     initiator, req.isCrossSite());
+            r.homeFallback = req.homeFallback;
             if(!addressEdited || req.fromEntry != null)
                 address.setText(UrlInput.display(next));
             fetch(s, r, redirects + 1, gen);
@@ -783,7 +863,10 @@ public final class Browser
 
     private void loaded(Request req, byte[] html, PageParser.Mode mode, @Nullable PageSnapshot.Connection conn, Map<String, byte[]> images)
     {
+        boolean auto = autoHomeLoading;
         push(new Entry(req.url, html, mode, conn, images, false));
+        if(auto)
+            initialHome = current();
         // 打开成功：地址栏换成实际的网址（失败时才保留敲的原样）
         address.setText(UrlInput.display(req.url));
         addressEdited = false;
@@ -792,6 +875,16 @@ public final class Browser
 
     private void fail(Request req, Throwable err)
     {
+        if(req.homeFallback && !req.url.equals(UrlInput.HOME))
+        {
+            // 主页打不开（没网、网站关了）：显示离线主页 about:home（服主 11-15），状态栏说一句
+            boolean auto = autoHomeLoading;
+            showBuiltin(UrlInput.HOME, BuiltinPages.home(ComputerViews.TR), true);
+            if(auto)
+                initialHome = current();
+            notice = ComputerViews.TR.t("cfm.browser.status.home_offline", UrlInput.display(req.url));
+            return;
+        }
         BuiltinPages.Error e = BuiltinPages.Error.OTHER;
         String detail = err.getMessage();
         if(err instanceof NetworkException)

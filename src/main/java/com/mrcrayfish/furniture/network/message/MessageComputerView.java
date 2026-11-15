@@ -19,7 +19,7 @@ import java.nio.charset.StandardCharsets;
  */
 public class MessageComputerView implements IMessage, IMessageHandler<MessageComputerView, IMessage>
 {
-    public static final int PAGE = 0, CLEAR = 1, SCROLL = 2, TYPING = 3, HISTORY = 4, COOKIES = 5, CANVAS = 6;
+    public static final int PAGE = 0, CLEAR = 1, SCROLL = 2, TYPING = 3, HISTORY = 4, COOKIES = 5, CANVAS = 6, HOME = 7;
 
     private BlockPos pos = BlockPos.ORIGIN;
     private int kind;
@@ -79,6 +79,12 @@ public class MessageComputerView implements IMessage, IMessageHandler<MessageCom
     public static MessageComputerView canvas(BlockPos pos, int field, byte[] data)
     {
         return new MessageComputerView(pos, CANVAS, field, data);
+    }
+
+    /** 主页设置（只发给操作者；{@link com.mrcrayfish.furniture.computer.HomePage#encode}） */
+    public static MessageComputerView home(BlockPos pos, byte[] data)
+    {
+        return new MessageComputerView(pos, HOME, 0, data);
     }
 
     /** 客户端：解出打的字；格式不对返回 null */
