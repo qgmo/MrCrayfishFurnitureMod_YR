@@ -141,7 +141,8 @@ public final class MineBayShop
             return Opened.fail("有商品现在发不了货，没有下单。");
         long number = data.nextOrderNumber();
         String no = MineBayPages.number(number);
-        OrderSpec spec = new OrderSpec(account(), MineBaySite.DOMAIN).payer(buyer).description("MineBay 订单 " + no).reference(no)
+        // 不指定付款人（服主 11-15 信任模型）：谁在 pay.yr 上付都行，东西发给 MineBay 登录着的买家
+        OrderSpec spec = new OrderSpec(account(), MineBaySite.DOMAIN).description("MineBay 订单 " + no).reference(no)
                 .returnUrl(scheme + "://" + MineBaySite.DOMAIN + "/paid").cancelUrl(scheme + "://" + MineBaySite.DOMAIN + "/unpaid")
                 .ttlSeconds(ORDER_TTL_SECONDS);
         try
