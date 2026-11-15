@@ -177,6 +177,13 @@ public final class Browser
     /** 刚建好时自动开的主页（用户还没动过时可以被会话恢复换掉） */
     @Nullable
     private Entry initialHome;
+    /** 当前这条是什么时候显示出来的（自动刷新从这时算） */
+    private long shownAt = System.currentTimeMillis();
+    /** 这条已经按自动刷新处理过了（刷了或者因为填了表单没刷），不再管它 */
+    @Nullable
+    private Entry refreshDone;
+    /** 闲着时状态栏上的提示（如“有未提交的内容，没有自动刷新”）；换页就清掉 */
+    private String notice = "";
     /** 报给服务端的会话（变了才报，最多每 500 毫秒一次） */
     @Nullable
     private BrowserHistory reportedHistory;
@@ -197,6 +204,12 @@ public final class Browser
     public String statusText()
     {
         return statusText;
+    }
+
+    /** 闲着时状态栏上的提示；没有为空串 */
+    public String notice()
+    {
+        return notice;
     }
 
     @Nullable
@@ -378,6 +391,9 @@ public final class Browser
         waiting = null;
         Entry old = current();
         index = i;
+        shownAt = System.currentTimeMillis();
+        notice = "";
+        refreshDone = null;
         if(!addressEdited || old != null)
         {
             addressEdited = false;
@@ -505,11 +521,12 @@ public final class Browser
         fetch(s, req, 0, generation);
     }
 
-    /** 每帧调：等网络的请求，接上了就发，等太久就报错；把正在打的字同步给旁观者 */
+    /** 每帧调：等网络的请求，接上了就发，等太久就报错；把正在打的字同步给旁观者；到时间就自动刷新 */
     public void tick()
     {
         syncTyping();
         reportHistory();
+        autoRefresh(System.currentTimeMillis());
         if(waiting != null)
         {
             ClientNic.Session s = ClientNic.current();
@@ -526,6 +543,31 @@ public final class Browser
                 showError(r.url, BuiltinPages.Error.NO_NETWORK, null, false);
             }
         }
+    }
+
+    /**
+     * 自动刷新（{@code <meta http-equiv="refresh">}，服主 11-15）：页面显示满 N 秒、浏览器闲着时，GET 页面写的网址（同站），结果换掉这一条
+     * （不多出历史）。玩家在这页的表单里填了东西、或者正在改地址栏时不刷（用户输入不能被自动丢掉），状态栏提示一句；之后这一页不再刷。
+     */
+    void autoRefresh(long now)
+    {
+        Entry e = current();
+        RenderedPage page = rendered();
+        if(e == null || e.builtin || page == null || page.document.refresh == null || e == refreshDone || status != Status.IDLE || waiting != null)
+            return;
+        PageDocument.Refresh r = page.document.refresh;
+        if(now - shownAt < r.seconds * 1000L)
+            return;
+        refreshDone = e;
+        if(addressEdited || e.forms.isDirty(page.document))
+        {
+            notice = ComputerViews.TR.t("cfm.browser.status.refresh_skipped");
+            return;
+        }
+        replacing = null;
+        if(!r.url.equals(e.url))
+            address.setText(UrlInput.display(r.url));
+        navigate(new Request(r.url, "GET", null, null, -1, initiatorOf(e), false), e);
     }
 
     private void fetch(ClientNic.Session s, Request req, int redirects, int gen)
@@ -814,6 +856,8 @@ public final class Browser
 
     private void push(Entry e)
     {
+        shownAt = System.currentTimeMillis();
+        notice = "";
         Entry r = replacing;
         replacing = null;
         int at = r == null ? -1 : history.indexOf(r);

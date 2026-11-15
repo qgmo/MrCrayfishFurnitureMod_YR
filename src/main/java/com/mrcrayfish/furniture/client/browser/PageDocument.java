@@ -66,6 +66,74 @@ public final class PageDocument
     public final Map<Integer, String> items;
     /** 要加载的图片（解析好的绝对网址） */
     public final List<String> images;
+    /** 自动刷新（{@code <meta http-equiv="refresh">}）；没有为 null */
+    @Nullable
+    public final Refresh refresh;
+
+    /**
+     * 页面要求的自动刷新：{@code <meta http-equiv="refresh" content="N">} 或 {@code content="N;url=网址"}（服主 11-15）。
+     * 间隔最少 {@value #MIN_SECONDS} 秒（写得更短的按 {@value #MIN_SECONDS} 秒）；网址只许同站（{@code CookieJar.sameSite}），别的站的、
+     * 解析不了的整个不算（不刷新）。只认第一个。什么时候真刷由 {@code Browser} 定（表单里填了东西就不刷）。
+     */
+    public static final class Refresh
+    {
+        public static final int MIN_SECONDS = 2;
+        public static final int MAX_SECONDS = 86400;
+
+        public final int seconds;
+        /** 刷新到哪（绝对网址；没写 url 时是页面自己） */
+        public final String url;
+
+        Refresh(int seconds, String url)
+        {
+            this.seconds = seconds;
+            this.url = url;
+        }
+
+        /** 按 HTML 标准的写法读 {@code content}（简化：整数秒，可选 {@code ;} 或 {@code ,} 后跟 {@code url=}，网址可加引号）；不认识返回 null */
+        @Nullable
+        static Refresh parse(String content, String baseUrl)
+        {
+            if(content == null)
+                return null;
+            String c = content.trim();
+            int i = 0;
+            while(i < c.length() && Character.isDigit(c.charAt(i)))
+                i++;
+            if(i == 0 || i > 6)
+                return null;
+            int seconds = Integer.parseInt(c.substring(0, i));
+            // 小数部分不管
+            while(i < c.length() && (Character.isDigit(c.charAt(i)) || c.charAt(i) == '.'))
+                i++;
+            String rest = c.substring(i).trim();
+            String target = baseUrl;
+            if(!rest.isEmpty())
+            {
+                if(rest.charAt(0) != ';' && rest.charAt(0) != ',')
+                    return null;
+                rest = rest.substring(1).trim();
+                if(rest.regionMatches(true, 0, "url", 0, 3))
+                {
+                    String r = rest.substring(3).trim();
+                    if(!r.startsWith("="))
+                        return null;
+                    rest = r.substring(1).trim();
+                }
+                if(rest.length() >= 2 && (rest.charAt(0) == '"' || rest.charAt(0) == '\''))
+                {
+                    char q = rest.charAt(0);
+                    int end = rest.indexOf(q, 1);
+                    rest = end < 0 ? rest.substring(1) : rest.substring(1, end);
+                }
+                if(!rest.isEmpty())
+                    target = UrlInput.resolve(baseUrl, rest);
+            }
+            if(target == null || target.equals(UrlInput.HOME) || !com.mrcrayfish.furniture.computer.CookieJar.sameSite(baseUrl, target))
+                return null;
+            return new Refresh(Math.max(MIN_SECONDS, Math.min(MAX_SECONDS, seconds)), target);
+        }
+    }
 
     public static final class FormInfo
     {
@@ -143,8 +211,9 @@ public final class PageDocument
     }
 
     private PageDocument(Document dom, String baseUrl, String title, List<FormInfo> forms, List<Control> controls,
-                         Map<Integer, String> links, Map<Integer, String> items, List<String> images)
+                         Map<Integer, String> links, Map<Integer, String> items, List<String> images, @Nullable Refresh refresh)
     {
+        this.refresh = refresh;
         this.dom = dom;
         this.baseUrl = baseUrl;
         this.title = title;
@@ -253,6 +322,8 @@ public final class PageDocument
         final Map<Integer, String> links = new HashMap<>();
         final Map<Integer, String> items = new HashMap<>();
         final Set<String> images = new LinkedHashSet<>();
+        Refresh refresh;
+        boolean refreshSeen;
         int next;
 
         Builder(Document dom, String baseUrl, Function<String, String> itemName, Function<String, String> lang, int viewWidth)
@@ -275,7 +346,7 @@ public final class PageDocument
                 title = title.substring(0, 200);
             walk(root);
             injectStyles(root);
-            return new PageDocument(dom, baseUrl, title, forms, controls, links, items, new ArrayList<>(images));
+            return new PageDocument(dom, baseUrl, title, forms, controls, links, items, new ArrayList<>(images), refresh);
         }
 
         private void walk(Element e)
@@ -289,6 +360,12 @@ public final class PageDocument
             for(Element c : children)
             {
                 String tag = local(c);
+                if(tag.equals("meta") && refresh == null && !refreshSeen && c.getAttribute("http-equiv").trim().equalsIgnoreCase("refresh"))
+                {
+                    // 只认第一个（不认识的也算看过了）
+                    refreshSeen = true;
+                    refresh = Refresh.parse(c.getAttribute("content"), baseUrl);
+                }
                 if(tag.equals("script") || tag.equals("link") || tag.equals("iframe") || tag.equals("frame") || tag.equals("frameset")
                         || tag.equals("object") || tag.equals("embed") || tag.equals("applet") || tag.equals("base") || tag.equals("meta") || tag.equals("noscript"))
                 {

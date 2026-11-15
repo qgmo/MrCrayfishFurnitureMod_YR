@@ -864,3 +864,4 @@ cfm.browser.panel.peripheral.operator=你是操作者，可以放、拿
 cfm.browser.panel.peripheral.not_operator=只有操作者能放、拿
 cfm.browser.location.field=[提交時附上這台電腦的位置（要先在確認框裡同意）]
 cfm.browser.status.location=等你在確認框裡決定要不要給網站這台電腦的位置……
+cfm.browser.status.refresh_skipped=有未送出的內容，沒有自動重新整理

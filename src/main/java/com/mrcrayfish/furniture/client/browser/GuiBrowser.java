@@ -584,6 +584,8 @@ public class GuiBrowser extends GuiContainer
         String left = hoverText;
         if(left.isEmpty() && b != null && b.status() != Browser.Status.IDLE)
             left = b.statusText();
+        if(left.isEmpty() && b != null && b.status() == Browser.Status.IDLE)
+            left = b.notice();
         RenderedPage p = page();
         if(left.isEmpty() && p != null && p.truncated())
             left = I18n.format("cfm.browser.truncated", PageRenderer.MAX_HEIGHT);

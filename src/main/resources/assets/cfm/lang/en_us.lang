@@ -854,3 +854,4 @@ cfm.browser.panel.peripheral.operator=You are the operator and can put it in or 
 cfm.browser.panel.peripheral.not_operator=Only the operator can put it in or take it out
 cfm.browser.location.field=[This computer's location is attached when submitting (you will be asked first)]
 cfm.browser.status.location=Waiting for you to decide in the confirmation box whether to share this computer's location...
+cfm.browser.status.refresh_skipped=You have unsubmitted input, so the page was not refreshed automatically

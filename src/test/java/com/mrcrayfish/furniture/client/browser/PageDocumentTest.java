@@ -412,4 +412,78 @@ class PageDocumentTest
         proof.put(loc.n, "youran-location-proof v1\n...");
         assertEquals("[loc=youran-location-proof v1\n..., fake=v, q=]", f.fields(d, 0, -1, proof).toString());
     }
+
+    static String withHead(String head, String body)
+    {
+        return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>t</title>" + head
+                + "</head><body>" + body + "</body></html>";
+    }
+
+    /** 自动刷新：秒数、同站的网址（相对的按页面解析）；不到 2 秒按 2 秒；别的站、写法不对的不算；只认第一个 */
+    @Test
+    void metaRefresh() throws Exception
+    {
+        PageDocument d = parse(withHead("<meta http-equiv=\"refresh\" content=\"5\" />", "<p>x</p>"));
+        assertNotNull(d.refresh);
+        assertEquals(5, d.refresh.seconds);
+        assertEquals("https://minebay.yr/shop/", d.refresh.url, "没写网址就刷本页");
+        assertEquals(0, d.dom.getElementsByTagNameNS("*", "meta").getLength(), "meta 本身照旧去掉");
+
+        d = parse(withHead("<meta http-equiv=\"Refresh\" content=\"0; URL='/wait?request=a&amp;b=1'\" />", ""));
+        assertEquals(2, d.refresh.seconds, "最少 2 秒");
+        assertEquals("https://minebay.yr/wait?request=a&b=1", d.refresh.url);
+
+        d = parse(withHead("<meta http-equiv=\"refresh\" content=\"3;url=https://pay.minebay.yr/x\" />", ""));
+        assertEquals("https://pay.minebay.yr/x", d.refresh.url, "同站的别的主机可以");
+
+        assertNull(parse(withHead("<meta http-equiv=\"refresh\" content=\"3;url=https://evil.yr/\" />", "")).refresh, "别的站不刷");
+        assertNull(parse(withHead("<meta http-equiv=\"refresh\" content=\"soon\" />", "")).refresh);
+        assertNull(parse(withHead("<meta http-equiv=\"refresh\" content=\"3;url=about:home\" />", "")).refresh);
+        assertNull(parse(withHead("<meta http-equiv=\"refresh\" content=\"3;url=file:///etc/passwd\" />", "")).refresh);
+        assertNull(parse(withHead("<meta name=\"refresh\" content=\"3\" />", "")).refresh, "要 http-equiv");
+        d = parse(withHead("<meta http-equiv=\"refresh\" content=\"7\" /><meta http-equiv=\"refresh\" content=\"2\" />", ""));
+        assertEquals(7, d.refresh.seconds, "只认第一个");
+        assertNull(parse(withHead("<meta http-equiv=\"refresh\" content=\"bad\" /><meta http-equiv=\"refresh\" content=\"2\" />", "")).refresh,
+                "第一个不认识就整个不刷");
+        assertNull(parse(withHead("", "<p>x</p>")).refresh);
+    }
+
+    /** 表单填过没有：文字改了、勾选或下拉改过就算；只是页面给的初始值（含隐藏字段）不算 */
+    @Test
+    void formDirty() throws Exception
+    {
+        PageDocument d = parse(PAGE);
+        FormState f = new FormState();
+        f.init(d);
+        assertFalse(f.isDirty(d));
+        PageDocument.Control text = null;
+        PageDocument.Control check = null;
+        PageDocument.Control select = null;
+        for(PageDocument.Control c : d.controls)
+        {
+            if(c.name.equals("n"))
+                text = c;
+            if(c.name.equals("c"))
+                check = c;
+            if(c.name.equals("s"))
+                select = c;
+        }
+        f.text(text.n).insert("2");
+        assertTrue(f.isDirty(d));
+        f.text(text.n).backspace(false);
+        assertFalse(f.isDirty(d), "改回原样不算");
+        f.toggle(d, check);
+        assertTrue(f.isDirty(d));
+        f.toggle(d, check);
+        assertFalse(f.isDirty(d));
+        f.toggle(d, select);
+        assertTrue(f.isDirty(d));
+        f.reset(d, 0);
+        assertFalse(f.isDirty(d), "提交成功（清空）以后不算");
+        // 初始值比长度上限长时，框里截短了也不算填过
+        PageDocument l = parse(withHead("", "<form action=\"/x\"><p><input type=\"text\" name=\"a\" maxlength=\"2\" value=\"abcdef\"/></p></form>"));
+        FormState g = new FormState();
+        g.init(l);
+        assertFalse(g.isDirty(l));
+    }
 }

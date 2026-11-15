@@ -44,6 +44,36 @@ public final class FormState
         init(doc);
     }
 
+    /**
+     * 玩家在这页的表单里填过东西没有（文字和页面给的初始值不一样、勾选或下拉改过）。自动刷新只在没填过时才刷（填了的不能被自动丢掉）。
+     */
+    public boolean isDirty(PageDocument doc)
+    {
+        for(PageDocument.Control c : doc.controls)
+        {
+            if(c.isTextual())
+            {
+                TextEdit t = text.get(c.n);
+                // 和页面初始值按同样的规则（长度上限、去掉控制字符）放进框里的样子比
+                if(t != null && !t.getText().equals(new TextEdit(Math.max(1, c.maxLength), c.value).getText()))
+                    return true;
+            }
+            else if(c.kind == PageDocument.Kind.CHECKBOX || c.kind == PageDocument.Kind.RADIO)
+            {
+                Boolean b = checked.get(c.n);
+                if(b != null && b != c.checked)
+                    return true;
+            }
+            else if(c.kind == PageDocument.Kind.SELECT)
+            {
+                Integer i = selected.get(c.n);
+                if(i != null && i != c.selected)
+                    return true;
+            }
+        }
+        return false;
+    }
+
     public TextEdit text(int n)
     {
         return text.get(n);

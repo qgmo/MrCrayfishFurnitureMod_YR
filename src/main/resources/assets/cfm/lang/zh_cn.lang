@@ -844,3 +844,4 @@ cfm.browser.panel.peripheral.operator=你是操作者，可以放、拿
 cfm.browser.panel.peripheral.not_operator=只有操作者能放、拿
 cfm.browser.location.field=[提交时附上这台电脑的位置（要先在确认框里同意）]
 cfm.browser.status.location=等你在确认框里决定要不要给网站这台电脑的位置……
+cfm.browser.status.refresh_skipped=有未提交的内容，没有自动刷新
