@@ -195,6 +195,28 @@ class MineBayPagesTest
     }
 
     /** 没登录：购物车、订单给登录按钮；服务器没开 id.yr 时说明 */
+    /** 帐号设置页（“操作前必须验证身份”开关带令牌）、等验证结果页（自动刷新）、顶栏的“帐号设置”、帮助里的说明 */
+    @Test
+    void accountPages() throws Exception
+    {
+        PageDocument off = check(MineBayPages.account(VIEWER, false, null));
+        PageDocument.FormInfo f = off.forms.stream().filter(x -> x.action.equals("https://minebay.yr/account/security")).findFirst().orElse(null);
+        assertNotNull(f);
+        assertTrue(f.post);
+        assertTrue(off.controls.stream().anyMatch(c -> c.kind == PageDocument.Kind.HIDDEN && c.name.equals("verify") && c.value.equals("1")), "关着时按钮是打开");
+        assertTrue(off.controls.stream().anyMatch(c -> c.kind == PageDocument.Kind.HIDDEN && c.name.equals("t") && c.value.equals("abc")));
+        String on = MineBayPages.account(VIEWER, true, MineBayPages.Notice.ok("已打开"));
+        check(on);
+        assertTrue(on.contains("已打开</b>") && on.contains("name=\"verify\" value=\"0\""));
+        String w = MineBayPages.waitVerify(VIEWER, "g_abc");
+        check(w);
+        assertTrue(w.contains("http-equiv=\"refresh\" content=\"2\""));
+        assertTrue(w.contains("/verified?g=g_abc"));
+        assertTrue(MineBayPages.help(VIEWER).contains("操作前必须验证身份"));
+        assertTrue(MineBayPages.help(VIEWER).contains("href=\"/account\""), "登录了顶栏有帐号设置");
+        assertFalse(MineBayPages.help(new MineBayPages.Viewer(null, 0, "t")).contains("href=\"/account\""));
+    }
+
     @Test
     void loginPages() throws Exception
     {
