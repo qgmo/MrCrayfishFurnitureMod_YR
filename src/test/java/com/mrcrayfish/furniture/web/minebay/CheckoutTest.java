@@ -34,20 +34,16 @@ class CheckoutTest
         public int maxPerOrder() { return max; }
     }
 
-    /** 假的背包：货币 → 数量；发出去的东西记下来 */
-    static final class FakeTill implements Checkout.Till<String>
+    /** 假的准备：某件准备不了（返回 null 或抛异常） */
+    static final class FakePreparer implements Checkout.Preparer<String>
     {
-        final Map<String, Long> wallet = new HashMap<>();
-        final List<String> given = new ArrayList<>();
-        final List<String> delivered = new ArrayList<>();
         String failPrepare;
         boolean throwPrepare;
-        String shortTake;
-
-        public long have(String c) { return wallet.getOrDefault(c, 0L); }
+        final List<String> asked = new ArrayList<>();
 
         public List<String> prepare(Checkout.Item item) throws Exception
         {
+            asked.add(item.offer.id());
             if(item.offer.id().equals(failPrepare))
             {
                 if(throwPrepare)
@@ -56,19 +52,6 @@ class CheckoutTest
             }
             return Collections.singletonList(item.offer.id() + "x" + item.quantity);
         }
-
-        public long take(String c, long amount)
-        {
-            long got = c.equals(shortTake) ? amount - 1 : amount;
-            wallet.merge(c, -got, Long::sum);
-            return got;
-        }
-
-        public void refund(String c, long amount) { wallet.merge(c, amount, Long::sum); }
-
-        public void give(Checkout.Item item, List<String> goods) { given.addAll(goods); }
-
-        public void delivered(Checkout.Item item, List<String> goods) { delivered.addAll(goods); }
     }
 
     static Function<String, Checkout.Offer> shop(Offer... offers)
@@ -99,8 +82,6 @@ class CheckoutTest
         assertEquals(Long.valueOf(16), p.totals.get("diamond"));
         assertEquals(Arrays.asList("emerald", "diamond"), new ArrayList<>(p.totals.keySet()), "按出现顺序");
         assertEquals(Checkout.Unavailable.GONE, p.unavailable.get("config:gone"));
-        assertTrue(p.affordable(c -> c.equals("emerald") ? 35L : 16L));
-        assertFalse(p.affordable(c -> c.equals("emerald") ? 34L : 16L));
     }
 
     @Test
@@ -134,74 +115,81 @@ class CheckoutTest
         assertNotEquals(a, Checkout.plan(cart("config:clay", 3).lines(), shop(new Offer("config:clay", "gold", 1, 64))).signature, "换货币");
     }
 
+    /** 库存不够的（改接 pay.yr 以前是“钱不够”时一样不扣）：留在购物车里不买；立即购买买不了 */
     @Test
-    void poorTakesNothing()
+    void stockShortLinesStayInCart()
     {
-        FakeTill t = new FakeTill();
-        t.wallet.put("emerald", 100L);
-        t.wallet.put("diamond", 15L);
-        Checkout.Plan p = Checkout.plan(cart("config:clay", 3, "config:armor", 2).lines(), shop);
-        assertEquals(Checkout.Outcome.POOR, Checkout.run(p, t));
-        assertEquals(Long.valueOf(100), t.wallet.get("emerald"), "一种货币不够，另一种也不扣");
-        assertEquals(Long.valueOf(15), t.wallet.get("diamond"));
-        assertTrue(t.given.isEmpty());
+        Checkout.Plan p = Checkout.plan(cart("config:clay", 3, "config:armor", 2).lines(), shop, id -> id.equals("config:clay") ? 2 : -1);
+        assertEquals(Checkout.Unavailable.STOCK, p.unavailable.get("config:clay"));
+        assertEquals(Collections.singletonMap("config:armor", 2), p.quantities());
+        assertTrue(Checkout.plan(cart("config:clay", 3).lines(), shop, id -> 3).unavailable.isEmpty(), "正好够");
+        assertEquals(Checkout.Unavailable.STOCK, Checkout.plan(cart("config:clay", 1).lines(), shop, id -> 0).unavailable.get("config:clay"), "卖完了");
+        assertNull(Checkout.single(shop.apply("config:clay"), 3, 2));
+        assertNotNull(Checkout.single(shop.apply("config:clay"), 3, 3));
+        assertNotNull(Checkout.single(shop.apply("config:clay"), 3, -1), "-1 为不限");
     }
 
+    /** 准备不了一样（返回 null 或抛异常），整单不开 */
     @Test
-    void failedPreparationTakesNothing()
+    void failedPreparationOpensNothing()
     {
         for(boolean thr : new boolean[]{false, true})
         {
-            FakeTill t = new FakeTill();
-            t.wallet.put("emerald", 100L);
-            t.wallet.put("diamond", 100L);
+            FakePreparer t = new FakePreparer();
             t.failPrepare = "config:armor";
             t.throwPrepare = thr;
             Checkout.Plan p = Checkout.plan(cart("config:clay", 3, "config:armor", 2).lines(), shop);
-            assertEquals(Checkout.Outcome.FAILED, Checkout.run(p, t));
-            assertEquals(Long.valueOf(100), t.wallet.get("emerald"));
-            assertEquals(Long.valueOf(100), t.wallet.get("diamond"));
-            assertTrue(t.given.isEmpty(), "一样准备不了，别的也不发");
+            assertNull(Checkout.prepare(p, t));
         }
+        assertNull(Checkout.prepare(Checkout.plan(cart("config:clay", 1).lines(), shop), item -> Collections.<String>emptyList()), "空的也算准备不了");
     }
 
+    /** 准备好的和商品一一对应（改接 pay.yr 以前这里测“扣不齐时退回”；扣钱现在由 pay.yr 做） */
     @Test
-    void shortTakeIsRefunded()
+    void preparedGoodsMatchItems()
     {
-        FakeTill t = new FakeTill();
-        t.wallet.put("emerald", 100L);
-        t.wallet.put("diamond", 100L);
-        t.shortTake = "diamond";
-        Checkout.Plan p = Checkout.plan(cart("config:clay", 3, "config:armor", 2).lines(), shop);
-        assertEquals(Checkout.Outcome.FAILED, Checkout.run(p, t));
-        assertEquals(Long.valueOf(100), t.wallet.get("emerald"), "先扣了的退回");
-        assertEquals(Long.valueOf(100), t.wallet.get("diamond"));
-        assertTrue(t.given.isEmpty());
+        FakePreparer t = new FakePreparer();
+        Checkout.Plan p = Checkout.plan(cart("config:clay", 3, "config:armor", 2, "config:gone", 1).lines(), shop);
+        List<List<String>> g = Checkout.prepare(p, t);
+        assertEquals(Arrays.asList(Collections.singletonList("config:clayx3"), Collections.singletonList("config:armorx2")), g);
+        assertEquals(Arrays.asList("config:clay", "config:armor"), t.asked, "下架的不准备");
     }
 
+    /** 付款以后发货：先全部发出，再逐行通知；买走的从购物车里拿掉，下架的留着 */
     @Test
-    void successTakesExactlyAndDeliversEverything()
+    void deliverGivesEverythingThenNotifies()
     {
-        FakeTill t = new FakeTill();
-        t.wallet.put("emerald", 35L);
-        t.wallet.put("diamond", 16L);
         Cart c = cart("config:clay", 3, "config:armor", 2, "config:book", 4, "config:gone", 1);
         Checkout.Plan p = Checkout.plan(c.lines(), shop);
-        assertEquals(Checkout.Outcome.OK, Checkout.run(p, t));
-        assertEquals(Long.valueOf(0), t.wallet.get("emerald"));
-        assertEquals(Long.valueOf(0), t.wallet.get("diamond"));
-        assertEquals(Arrays.asList("config:clayx3", "config:armorx2", "config:bookx4"), t.given);
-        assertEquals(t.given, t.delivered);
+        List<List<String>> goods = Checkout.prepare(p, new FakePreparer());
+        List<String> log = new ArrayList<>();
+        List<Integer> idx = Arrays.asList(0, 1, 2);
+        Checkout.deliver(idx, goods::get, new Checkout.Shipper<Integer, String>()
+        {
+            public void give(Integer line, List<String> g) { log.add("give " + g.get(0)); }
+
+            public void delivered(Integer line, List<String> g) { log.add("done " + g.get(0)); }
+        });
+        assertEquals(Arrays.asList("give config:clayx3", "give config:armorx2", "give config:bookx4", "done config:clayx3", "done config:armorx2", "done config:bookx4"), log);
         c.removeBought(p.quantities());
         assertEquals(1, c.lines().size(), "下架的留在购物车里");
         assertEquals("config:gone", c.lines().get(0).id);
     }
 
     @Test
-    void emptyPlanDoesNothing()
+    void emptyPlanPreparesNothing()
     {
-        FakeTill t = new FakeTill();
-        assertEquals(Checkout.Outcome.EMPTY, Checkout.run(Checkout.plan(new Cart().lines(), shop), t));
-        assertEquals(Checkout.Outcome.EMPTY, Checkout.run(Checkout.plan(cart("config:gone", 1).lines(), shop), t));
+        FakePreparer t = new FakePreparer();
+        assertNull(Checkout.prepare(Checkout.plan(new Cart().lines(), shop), t));
+        assertNull(Checkout.prepare(Checkout.plan(cart("config:gone", 1).lines(), shop), t));
+        assertTrue(t.asked.isEmpty());
+    }
+
+    @Test
+    void totalsStillPerCurrency()
+    {
+        Checkout.Plan p = Checkout.plan(cart("config:clay", 3, "config:armor", 2).lines(), shop);
+        assertEquals(Long.valueOf(3), p.totals.get("emerald"));
+        assertEquals(Long.valueOf(16), p.totals.get("diamond"));
     }
 }

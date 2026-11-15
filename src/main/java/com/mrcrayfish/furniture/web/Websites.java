@@ -47,6 +47,18 @@ public final class Websites
             {
                 return host.onMainThread(task);
             }
+
+            @Override
+            public moe.qingu.youran.api.network.stack.NetStack stack()
+            {
+                return host.stack();
+            }
+
+            @Override
+            public boolean hasTls()
+            {
+                return host.tls() != null;
+            }
         };
     }
 }

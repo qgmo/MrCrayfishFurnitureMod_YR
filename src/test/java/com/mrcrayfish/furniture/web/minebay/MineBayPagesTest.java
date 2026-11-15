@@ -49,12 +49,14 @@ class MineBayPagesTest
         for(int page = 1; page <= 3; page++)
         {
             PageDocument d = check(MineBayPages.list(VIEWER, list, list, null, "", ShopParams.Sort.DEFAULT, page, page == 2 ? MineBayPages.Notice.ok("买好了 <ok>") : null));
-            // 搜索框 1 个 + 每件商品一个“加入购物车”
-            assertEquals(1 + ShopParams.PER_PAGE, d.forms.size());
-            assertEquals("https://minebay.yr/cart/add", d.forms.get(1).action);
-            assertTrue(d.forms.get(1).post);
-            assertFalse(d.forms.get(0).post, "搜索用 GET");
-            assertEquals(ShopParams.PER_PAGE, d.controls.stream().filter(c -> c.kind == PageDocument.Kind.HIDDEN && c.name.equals("t") && c.value.equals("abc")).count(), "每张表单带令牌");
+            // 顶栏“退出”1 个（登录了）+ 搜索框 1 个 + 每件商品一个“加入购物车”
+            assertEquals(2 + ShopParams.PER_PAGE, d.forms.size());
+            assertEquals("https://minebay.yr/logout", d.forms.get(0).action);
+            assertTrue(d.forms.get(0).post);
+            assertEquals("https://minebay.yr/cart/add", d.forms.get(2).action);
+            assertTrue(d.forms.get(2).post);
+            assertFalse(d.forms.get(1).post, "搜索用 GET");
+            assertEquals(ShopParams.PER_PAGE + 1, d.controls.stream().filter(c -> c.kind == PageDocument.Kind.HIDDEN && c.name.equals("t") && c.value.equals("abc")).count(), "每张 POST 表单带令牌");
         }
         // 页码超出范围时停在最后一页
         assertTrue(MineBayPages.list(VIEWER, list, list, null, "", ShopParams.Sort.DEFAULT, 999, null).contains("第 25 / 25 页"));
@@ -104,15 +106,16 @@ class MineBayPagesTest
         assertEquals(1, plan.unavailable.size());
         PageDocument d = check(MineBayPages.cart(VIEWER, cart, lookup, plan, null, Collections.singletonMap(list.get(0).id, "abc")));
         assertEquals("abc", d.controls.stream().filter(c -> c.name.equals("n")).findFirst().get().value, "没提交成功的数量原样填回去");
-        Map<String, Long> have = new HashMap<>();
-        have.put("minecraft:emerald", 5L);
-        String poor = MineBayPages.checkout(VIEWER, plan, lookup, have, null, null, null);
-        check(poor);
-        assertFalse(poor.contains("action=\"/checkout\""), "钱不够时没有确认按钮");
-        have.put("minecraft:emerald", 1_000_000L);
-        have.put("minecraft:diamond", 1_000_000L);
-        String ok = MineBayPages.checkout(VIEWER, plan, lookup, have, "nonce1", null, null);
-        assertTrue(check(ok).controls.stream().anyMatch(c -> c.name.equals("k") && c.value.equals("nonce1")));
+        // 改接 pay.yr 后结算页不再数背包；没有确认码时没有提交按钮
+        String none = MineBayPages.checkout(VIEWER, plan, lookup, null, null, null, null);
+        check(none);
+        assertFalse(none.contains("action=\"/checkout\""), "没有确认码时没有提交按钮");
+        assertFalse(none.contains("背包里有"), "不再显示背包里有多少");
+        String ok = MineBayPages.checkout(VIEWER, plan, lookup, "nonce1", "locnonce-123456", null, null);
+        PageDocument okDoc = check(ok);
+        assertTrue(okDoc.controls.stream().anyMatch(c -> c.name.equals("k") && c.value.equals("nonce1")));
+        assertTrue(ok.contains("type=\"x-yr-location\" name=\"loc\" value=\"locnonce-123456\""), "提交时带上定位模块签名的位置");
+        assertTrue(ok.contains("pay.yr"));
         // 订单：每页 5 单，每单 32 种
         List<Orders.Order> orders = new ArrayList<>();
         for(int o = 0; o < Orders.MAX_ORDERS; o++)
@@ -128,5 +131,81 @@ class MineBayPagesTest
         check(MineBayPages.removeConfirm(VIEWER, list.get(0).id, list.get(0), 3));
         check(MineBayPages.help(VIEWER));
         check(MineBayPages.problem(new MineBayPages.Viewer(null, 0, "t"), "出错 <了>", "说明 & 原因"));
+    }
+
+    /** 绿宝石价同时写出悠然元（N 绿宝石 / 2N 元）；别的货币不写 */
+    @Test
+    void emeraldPricesShowYuan()
+    {
+        String e = MineBayPages.item(VIEWER, listing(1, Categories.MISC, "minecraft:emerald", 16), 0, null, null);
+        assertTrue(e.contains("/ 32 元"), "16 绿宝石 / 32 元");
+        String d = MineBayPages.item(VIEWER, listing(1, Categories.MISC, "minecraft:diamond", 3), 0, null, null);
+        assertFalse(d.contains(" 元</span>"), "钻石价不换算");
+    }
+
+    static MineBayPages.Viewer stockViewer(long left)
+    {
+        return new MineBayPages.Viewer("Steve", 0, "abc", new MineBayPages.StockView()
+        {
+            public long remaining(Listing l)
+            {
+                return l.stock == null ? -1 : left;
+            }
+
+            public String refill(Listing l)
+            {
+                return "约 2 天后补 1 份";
+            }
+        }, true);
+    }
+
+    static Listing limited(int i, Stock.Rule rule)
+    {
+        Listing l = listing(i, Categories.MISC, "minecraft:emerald", 16);
+        return new Listing(l.id, l.seq, l.category, l.icon, l.count, "BASIC 盘", l.sortName, l.searchText, l.currency, l.price, 4, l.description, new Stock.Spec(14, rule));
+    }
+
+    /** 限量商品：卡片、详情、购物车、结算都显示剩余；卖完没有购买按钮 */
+    @Test
+    void stockShownEverywhere() throws Exception
+    {
+        Listing l = limited(1, Stock.Rule.DAILY);
+        List<Listing> one = Collections.singletonList(l);
+        String list5 = MineBayPages.list(stockViewer(5), one, one, null, "", ShopParams.Sort.DEFAULT, 1, null);
+        assertTrue(list5.contains("剩 5 份"));
+        assertEquals(3, check(list5).forms.size(), "退出 + 搜索 + 加入购物车");
+        String list0 = MineBayPages.list(stockViewer(0), one, one, null, "", ShopParams.Sort.DEFAULT, 1, null);
+        assertTrue(list0.contains("已卖完"));
+        assertEquals(2, check(list0).forms.size(), "卖完了没有加入购物车");
+        String item0 = MineBayPages.item(stockViewer(0), l, 0, null, null);
+        assertTrue(item0.contains("每月 14 份，每天补") && item0.contains("约 2 天后补 1 份"));
+        assertEquals(0, check(item0).controls.stream().filter(c -> c.kind == PageDocument.Kind.SUBMIT && "go".equals(c.name)).count(), "卖完了没有购买按钮");
+        assertTrue(MineBayPages.item(stockViewer(3), limited(2, Stock.Rule.MONTHLY), 0, null, null).contains("每月 1 日补满"));
+        Cart cart = new Cart();
+        cart.add(l.id, 4, 4);
+        Checkout.Plan plan = Checkout.plan(cart.lines(), id -> l, id -> 3);
+        assertEquals(Checkout.Unavailable.STOCK, plan.unavailable.get(l.id));
+        String c = MineBayPages.cart(stockViewer(3), cart, id -> l, plan, null, Collections.<String, String>emptyMap());
+        check(c);
+        assertTrue(c.contains("库存只剩 3 份"));
+        Checkout.Plan ok = Checkout.plan(cart.lines(), id -> l, id -> 9);
+        String co = MineBayPages.checkout(stockViewer(9), ok, id -> l, "k", "locnonce-1", null, null);
+        check(co);
+        assertTrue(co.contains("剩 9 份"));
+    }
+
+    /** 没登录：购物车、订单给登录按钮；服务器没开 id.yr 时说明 */
+    @Test
+    void loginPages() throws Exception
+    {
+        MineBayPages.Viewer anon = MineBayPages.Viewer.anonymous("t");
+        PageDocument d = check(MineBayPages.loginNeeded(anon, "/cart"));
+        assertTrue(d.forms.stream().anyMatch(f -> f.action.equals("https://minebay.yr/login")));
+        assertTrue(d.controls.stream().anyMatch(c -> c.name.equals("next") && c.value.equals("/cart")));
+        String off = MineBayPages.loginNeeded(new MineBayPages.Viewer(null, 0, "t", MineBayPages.NO_STOCK, false), "/cart");
+        assertTrue(off.contains("id.yr") && !off.contains("action=\"/login\""));
+        String in = MineBayPages.help(VIEWER);
+        assertTrue(in.contains("action=\"/logout\""), "登录了有退出");
+        check(MineBayPages.unpaid(VIEWER, "https://pay.yr/c/ord_aaaaaaaaaaaaaaaa"));
     }
 }

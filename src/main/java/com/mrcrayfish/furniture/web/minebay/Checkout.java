@@ -7,17 +7,16 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
+import java.util.function.ToLongFunction;
 
 /**
- * 结算（纯逻辑，主线程上用）：先按购物车（或“立即购买”的一件）算出 {@link Plan}——买哪些、每种货币一共多少；
- * 再 {@link #run} 全有或全无地执行：
+ * 结算（纯逻辑，主线程上用）。钱不在这里扣：MineBay 开一张 {@code pay.yr} 收款单，玩家在 pay.yr 付，付款成功的回调里发货（服主 11-15）。
  * <ol>
- * <li>每种货币都够才往下走，不够一样也不动（{@link Outcome#POOR}）；</li>
- * <li>先把要发的东西全部准备好（模组商品的发货回调在这一步），有一样准备不了就整单取消，不扣钱（{@link Outcome#FAILED}）；</li>
- * <li>扣钱；万一扣不齐（不该发生：同一线程上刚数过），扣了的原样退回，整单取消；</li>
- * <li>发货（放进背包，满了掉脚下，不会失败），最后通知发货回调。</li>
+ * <li>{@link #plan}：按购物车（或“立即购买”的一件）算出买哪些、每种货币一共多少；下架、超过一单上限、库存不够的留在购物车里不买；</li>
+ * <li>{@link #prepare}：开单之前先把要发的东西全部准备好（模组商品的发货回调在这一步），有一样准备不了就不开单；</li>
+ * <li>付款成功后 {@link #deliver}：发货（放进背包，满了掉脚下），最后通知发货回调。</li>
  * </ol>
- * 页面上确认时记下 {@link Plan#signature}，提交时重算一遍对得上才执行：确认之后购物车、价格变了就不买，要重新确认。
+ * 页面上确认时记下 {@link Plan#signature}，提交时重算一遍对得上才开单：确认之后购物车、价格变了就要重新确认。
  */
 public final class Checkout
 {
@@ -40,7 +39,9 @@ public final class Checkout
         /** 下架了 */
         GONE,
         /** 车里的份数超过了这件商品现在的上限 */
-        LIMIT
+        LIMIT,
+        /** 库存不够 */
+        STOCK
     }
 
     public static final class Item
@@ -94,21 +95,19 @@ public final class Checkout
                 out.put(i.offer.id(), i.quantity);
             return out;
         }
-
-        /** 钱够不够：have 给出每种货币背包里有多少 */
-        public boolean affordable(Function<String, Long> have)
-        {
-            for(Map.Entry<String, Long> e : totals.entrySet())
-            {
-                if(have.apply(e.getKey()) < e.getValue())
-                    return false;
-            }
-            return true;
-        }
     }
 
-    /** 按购物车算 */
+    /** 不限库存 */
+    public static final ToLongFunction<String> UNLIMITED = id -> -1;
+
+    /** 按购物车算（不看库存） */
     public static Plan plan(List<Cart.Line> lines, Function<String, ? extends Offer> lookup)
+    {
+        return plan(lines, lookup, UNLIMITED);
+    }
+
+    /** 按购物车算；{@code remaining} 给出每件商品现在还能卖几份（-1 为不限） */
+    public static Plan plan(List<Cart.Line> lines, Function<String, ? extends Offer> lookup, ToLongFunction<String> remaining)
     {
         List<Item> items = new ArrayList<>();
         Map<String, Unavailable> unavailable = new LinkedHashMap<>();
@@ -119,93 +118,87 @@ public final class Checkout
                 unavailable.put(l.id, Unavailable.GONE);
             else if(l.quantity() > Cart.limit(o.maxPerOrder()))
                 unavailable.put(l.id, Unavailable.LIMIT);
+            else if(isShort(remaining.applyAsLong(l.id), l.quantity()))
+                unavailable.put(l.id, Unavailable.STOCK);
             else
                 items.add(new Item(o, l.quantity()));
         }
         return new Plan(items, unavailable);
     }
 
-    /** 立即购买一件（不经过购物车）；买不了返回 null */
+    private static boolean isShort(long remaining, int quantity)
+    {
+        return remaining >= 0 && remaining < quantity;
+    }
+
+    /** 立即购买一件（不经过购物车，不看库存）；买不了返回 null */
     @Nullable
     public static Plan single(@Nullable Offer offer, int quantity)
     {
-        if(offer == null || offer.unitPrice() <= 0 || quantity < 1 || quantity > Cart.limit(offer.maxPerOrder()))
+        return single(offer, quantity, -1);
+    }
+
+    /** 立即购买一件；{@code remaining} 是现在还能卖几份（-1 为不限）；买不了返回 null */
+    @Nullable
+    public static Plan single(@Nullable Offer offer, int quantity, long remaining)
+    {
+        if(offer == null || offer.unitPrice() <= 0 || quantity < 1 || quantity > Cart.limit(offer.maxPerOrder()) || isShort(remaining, quantity))
             return null;
         List<Item> items = new ArrayList<>();
         items.add(new Item(offer, quantity));
         return new Plan(items, Collections.<String, Unavailable>emptyMap());
     }
 
-    /** 执行结算时要用到的游戏状态（主线程；测试里用假的） */
-    public interface Till<G>
+    /** 准备要发的东西（开单之前；不能改游戏状态）。准备不了返回 null 或抛异常 */
+    public interface Preparer<G>
     {
-        /** 背包里这种货币有多少 */
-        long have(String currency);
-
-        /** 准备要发的东西（不能改游戏状态）；准备不了返回 null 或抛异常 */
         @Nullable
         List<G> prepare(Item item) throws Exception;
-
-        /** 扣钱，返回实际扣了多少 */
-        long take(String currency, long amount);
-
-        /** 退回扣了的钱 */
-        void refund(String currency, long amount);
-
-        /** 发货 */
-        void give(Item item, List<G> goods);
-
-        /** 发完以后（通知发货回调；出错只记日志） */
-        void delivered(Item item, List<G> goods);
     }
 
-    public enum Outcome
-    {
-        OK, EMPTY, POOR, FAILED
-    }
-
-    public static <G> Outcome run(Plan plan, Till<G> till)
+    /**
+     * 全有或全无地准备：每件都准备好才返回（和 {@code plan.items} 一一对应）；有一样准备不了（null、空、抛异常）或没有能买的返回 null。
+     */
+    @Nullable
+    public static <G> List<List<G>> prepare(Plan plan, Preparer<G> preparer)
     {
         if(plan.isEmpty())
-            return Outcome.EMPTY;
-        for(Map.Entry<String, Long> e : plan.totals.entrySet())
-        {
-            if(e.getValue() <= 0 || till.have(e.getKey()) < e.getValue())
-                return e.getValue() <= 0 ? Outcome.FAILED : Outcome.POOR;
-        }
+            return null;
         List<List<G>> goods = new ArrayList<>();
         for(Item i : plan.items)
         {
             List<G> g;
             try
             {
-                g = till.prepare(i);
+                g = preparer.prepare(i);
             }
             catch(Exception e)
             {
-                return Outcome.FAILED;
+                return null;
             }
             if(g == null || g.isEmpty())
-                return Outcome.FAILED;
+                return null;
             goods.add(g);
         }
-        Map<String, Long> taken = new LinkedHashMap<>();
-        for(Map.Entry<String, Long> e : plan.totals.entrySet())
-        {
-            long got = till.take(e.getKey(), e.getValue());
-            if(got > 0)
-                taken.put(e.getKey(), got);
-            if(got != e.getValue())
-            {
-                for(Map.Entry<String, Long> t : taken.entrySet())
-                    till.refund(t.getKey(), t.getValue());
-                return Outcome.FAILED;
-            }
-        }
-        for(int k = 0; k < plan.items.size(); k++)
-            till.give(plan.items.get(k), goods.get(k));
-        for(int k = 0; k < plan.items.size(); k++)
-            till.delivered(plan.items.get(k), goods.get(k));
-        return Outcome.OK;
+        return goods;
+    }
+
+    /** 发货（付款成功以后，主线程） */
+    public interface Shipper<L, G>
+    {
+        /** 放进背包（满了掉脚下，不会失败） */
+        void give(L line, List<G> goods);
+
+        /** 全部发完以后（通知发货回调；出错只记日志） */
+        void delivered(L line, List<G> goods);
+    }
+
+    /** 先把每一行都发了，再逐行通知（一单里的东西要么都发、要么都不发） */
+    public static <L, G> void deliver(List<L> lines, Function<L, List<G>> goods, Shipper<L, G> shipper)
+    {
+        for(L l : lines)
+            shipper.give(l, goods.apply(l));
+        for(L l : lines)
+            shipper.delivered(l, goods.apply(l));
     }
 }

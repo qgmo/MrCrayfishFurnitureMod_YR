@@ -32,21 +32,60 @@ public final class MineBayPages
 
     private MineBayPages() {}
 
-    /** 看页面的人（电脑的操作者） */
+    /** 每件商品现在还能卖几份（-1 不限）、多久补货 */
+    public interface StockView
+    {
+        long remaining(Listing l);
+
+        String refill(Listing l);
+    }
+
+    /** 不看库存（都不限） */
+    public static final StockView NO_STOCK = new StockView()
+    {
+        @Override
+        public long remaining(Listing l)
+        {
+            return -1;
+        }
+
+        @Override
+        public String refill(Listing l)
+        {
+            return "";
+        }
+    };
+
+    /** 看页面的人（MineBay 登录着的角色；谁坐在电脑前不管） */
     public static final class Viewer
     {
-        /** 玩家名；没人操作这台电脑时为 null */
+        /** 登录的玩家名；没登录为 null */
         @Nullable
         public final String player;
         public final int cartCount;
         /** 表单令牌 */
         public final String token;
+        public final StockView stock;
+        /** 服务器开着 id.yr（能登录） */
+        public final boolean loginAvailable;
 
         public Viewer(@Nullable String player, int cartCount, String token)
+        {
+            this(player, cartCount, token, NO_STOCK, true);
+        }
+
+        public Viewer(@Nullable String player, int cartCount, String token, StockView stock, boolean loginAvailable)
         {
             this.player = player;
             this.cartCount = cartCount;
             this.token = token;
+            this.stock = stock;
+            this.loginAvailable = loginAvailable;
+        }
+
+        public static Viewer anonymous(String token)
+        {
+            return new Viewer(null, 0, token, NO_STOCK, true);
         }
     }
 
@@ -102,9 +141,7 @@ public final class MineBayPages
         if(home && p == 1)
         {
             sb.append("<div class=\"banner\"><div class=\"bt\">欢迎来到 MineBay！</div>");
-            sb.append("<div class=\"bd\">用背包里的绿宝石、钻石、铁锭买东西，买到的直接放进背包。</div>");
-            sb.append("<table class=\"perks\"><tr><td><b>购物车随存档</b><br/>下线、换电脑都还在</td><td><b>背包付款</b><br/>结算前列出要扣多少</td><td><b>订单可查</b><br/>最近 ")
-                    .append(Orders.MAX_ORDERS).append(" 单都有记录</td></tr></table></div>\n");
+            sb.append("<table class=\"perks\"><tr><td><b>pay.yr 付款</b><br/>绿宝石、悠然元都收</td><td><b>购物车随存档</b><br/>换电脑也还在</td><td><b>付款即发货</b><br/>直接进背包</td></tr></table></div>\n");
         }
         if(!query.isEmpty() && !shown.isEmpty() && category == null)
         {
@@ -143,7 +180,7 @@ public final class MineBayPages
         {
             sb.append("<div class=\"empty\">");
             if(!query.isEmpty())
-                sb.append("没有找到与“<b>").append(Html.escape(query)).append("</b>”相关的商品。<br/>换个词试试：可以搜中文名、英文名或物品 ID（如 saddle）。");
+                sb.append("没有找到“<b>").append(Html.escape(query)).append("</b>”。<br/>可以搜中文名、英文名或物品 ID。");
             else
                 sb.append("这个分类里暂时没有商品。");
             sb.append("<br/><a href=\"/\">看看全部商品</a></div>\n");
@@ -183,9 +220,15 @@ public final class MineBayPages
             sb.append(" <span class=\"cnt\">&#215;").append(l.count).append("</span>");
         sb.append("</div><div class=\"pr\">");
         price(sb, l.currency, l.price, false);
+        long left = v.stock.remaining(l);
+        if(left > 0)
+            sb.append(" <span class=\"stock\">剩 ").append(left).append(" 份</span>");
         sb.append("</div>");
-        sb.append("<form method=\"post\" action=\"/cart/add\"><input type=\"hidden\" name=\"id\" value=\"").append(attr(l.id))
-                .append("\"/><input type=\"hidden\" name=\"t\" value=\"").append(attr(v.token)).append("\"/><button type=\"submit\" class=\"btn add\">加入购物车</button></form>");
+        if(left == 0)
+            sb.append("<div><span class=\"btn off\">已卖完</span></div>");
+        else
+            sb.append("<form method=\"post\" action=\"/cart/add\"><input type=\"hidden\" name=\"id\" value=\"").append(attr(l.id))
+                    .append("\"/><input type=\"hidden\" name=\"t\" value=\"").append(attr(v.token)).append("\"/><button type=\"submit\" class=\"btn add\">加入购物车</button></form>");
         sb.append("</div></td>");
     }
 
@@ -214,14 +257,26 @@ public final class MineBayPages
         sb.append("<tr><th>每份</th><td>").append(l.count).append(" 个</td></tr>\n");
         if(cat != null)
             sb.append("<tr><th>分类</th><td><a href=\"").append(attr(listUrl(cat.id, "", ShopParams.Sort.DEFAULT, 1))).append("\">").append(Html.escape(cat.name)).append("</a></td></tr>\n");
-        sb.append("<tr><th>发货</th><td>付款后马上放进背包（满了掉在脚边）</td></tr>\n</table>\n");
+        long left = v.stock.remaining(l);
+        if(l.stock != null)
+        {
+            String wait = v.stock.refill(l);
+            sb.append("<tr><th>库存</th><td>").append(left == 0 ? "<span class=\"bad\">已卖完</span>" : "剩 <b>" + left + "</b> 份").append(" <span class=\"dim\">（")
+                    .append(Html.escape(Stock.describe(l.stock))).append(left == 0 && !wait.isEmpty() ? "；" + Html.escape(wait) : "").append("）</span></td></tr>\n");
+        }
+        sb.append("<tr><th>发货</th><td>付款后放进背包</td></tr>\n</table>\n");
         int max = Cart.limit(l.maxPerOrder);
         sb.append("<form method=\"post\" action=\"/cart/add\" class=\"buybox\"><input type=\"hidden\" name=\"id\" value=\"").append(attr(l.id))
                 .append("\"/><input type=\"hidden\" name=\"t\" value=\"").append(attr(v.token)).append("\"/>");
         sb.append("<div class=\"qtyline\">数量：<input type=\"text\" class=\"qty\" name=\"n\" maxlength=\"2\" value=\"").append(attr(typedQuantity == null ? "1" : clip(typedQuantity, 8)))
                 .append("\"/> 份 <span class=\"dim\">（1–").append(max).append("）</span></div>");
-        sb.append("<div><button type=\"submit\" name=\"go\" value=\"cart\" class=\"btn add big\">加入购物车</button> &#160;");
-        sb.append("<button type=\"submit\" name=\"go\" value=\"buy\" class=\"btn buy big\">立即购买</button></div>");
+        if(left == 0)
+            sb.append("<div><span class=\"btn off big\">已卖完</span></div>");
+        else
+        {
+            sb.append("<div><button type=\"submit\" name=\"go\" value=\"cart\" class=\"btn add big\">加入购物车</button> &#160;");
+            sb.append("<button type=\"submit\" name=\"go\" value=\"buy\" class=\"btn buy big\">立即购买</button></div>");
+        }
         if(inCart > 0)
             sb.append("<div class=\"incart\">购物车里已有 ").append(inCart).append(" 份，<a href=\"/cart\">去看看</a></div>");
         sb.append("</form>\n</td></tr></table>\n");
@@ -261,7 +316,7 @@ public final class MineBayPages
         sb.append("<div class=\"crumbs\"><a href=\"/\">MineBay</a> &#8250; <b>购物车</b></div>\n<h2>我的购物车</h2>\n");
         if(v.player == null)
         {
-            sb.append("<div class=\"empty\">要开着电脑的界面才能用购物车：购物车按玩家存在服务器上。</div>\n");
+            loginBox(sb, v, "/cart");
             end(sb);
             return sb.toString();
         }
@@ -293,6 +348,13 @@ public final class MineBayPages
                     sb.append("<div class=\"warn\">已下架，不能结算</div>");
                 else if(why == Checkout.Unavailable.LIMIT)
                     sb.append("<div class=\"warn\">这件一单最多买 ").append(Cart.limit(l.maxPerOrder)).append(" 份，请改少一点</div>");
+                else if(why == Checkout.Unavailable.STOCK)
+                {
+                    long left = v.stock.remaining(l);
+                    sb.append("<div class=\"warn\">").append(left <= 0 ? "已卖完" : "库存只剩 " + left + " 份").append("</div>");
+                }
+                else if(l.stock != null)
+                    sb.append("<div class=\"stock\">剩 ").append(v.stock.remaining(l)).append(" 份</div>");
                 sb.append("</td><td class=\"up\">");
                 price(sb, l.currency, l.price, false);
                 sb.append("</td>");
@@ -310,8 +372,8 @@ public final class MineBayPages
             sb.append("</td></tr>\n");
         }
         sb.append("</table>\n");
-        sb.append("<table class=\"sum\"><tr><td class=\"note\">最多放 ").append(Cart.MAX_LINES).append(" 种商品，每种最多 ").append(Cart.MAX_QUANTITY)
-                .append(" 份。<br/>购物车存在服务器上，下线、关电脑、换一台电脑都还在；只有你自己删除或者结算买走，东西才会拿掉。</td><td class=\"tot\">");
+        sb.append("<table class=\"sum\"><tr><td class=\"note\">最多 ").append(Cart.MAX_LINES).append(" 种，每种 ").append(Cart.MAX_QUANTITY)
+                .append(" 份。</td><td class=\"tot\">");
         if(plan.isEmpty())
             sb.append("<div class=\"totl\">没有能结算的商品</div>");
         else
@@ -350,16 +412,16 @@ public final class MineBayPages
     // ---------------------------------------------------------------- 结算
 
     /**
-     * 结算确认。{@code nonce} 为 null 时不给“确认下单”（钱不够、没有能买的）。
+     * 结算确认。{@code nonce}（确认码）为 null 时不给“提交订单”；{@code locationNonce} 是给定位模块的一次性随机数（浏览器提交时换成签名的位置证明）。
      * @param buyId 立即购买时的商品编号；结算购物车时为 null
      */
-    public static String checkout(Viewer v, Checkout.Plan plan, Function<String, Listing> lookup, Map<String, Long> have, @Nullable String nonce,
+    public static String checkout(Viewer v, Checkout.Plan plan, Function<String, Listing> lookup, @Nullable String nonce, @Nullable String locationNonce,
                                   @Nullable String buyId, @Nullable Notice notice)
     {
         String back = buyId == null ? "/cart" : itemUrl(buyId);
         StringBuilder sb = new StringBuilder(16 * 1024);
         begin(sb, "确认订单 - MineBay", v, "", null);
-        sb.append("<table class=\"steps\"><tr><td class=\"done\">1. ").append(buyId == null ? "购物车" : "选好商品").append("</td><td class=\"on\">2. 确认订单</td><td>3. 完成</td></tr></table>\n");
+        sb.append("<table class=\"steps\"><tr><td class=\"done\">1. ").append(buyId == null ? "购物车" : "选好商品").append("</td><td class=\"on\">2. 确认订单</td><td>3. 付款</td><td>4. 完成</td></tr></table>\n");
         notice(sb, notice);
         sb.append("<h2>请核对订单</h2>\n");
         sb.append("<table class=\"lines\"><tr class=\"h\"><th colspan=\"2\">商品</th><th>单价</th><th class=\"q\">数量</th><th class=\"r\">小计</th></tr>\n");
@@ -372,6 +434,8 @@ public final class MineBayPages
                 name(sb, l.name, l.sortName, l.icon);
                 if(l.count > 1)
                     sb.append(" <span class=\"cnt\">&#215;").append(l.count).append("</span>");
+                if(l.stock != null)
+                    sb.append("<div class=\"stock\">剩 ").append(v.stock.remaining(l)).append(" 份</div>");
             }
             sb.append("</td><td class=\"up\">");
             price(sb, i.offer.currency(), i.offer.unitPrice(), false);
@@ -381,32 +445,53 @@ public final class MineBayPages
         }
         sb.append("</table>\n");
         if(!plan.unavailable.isEmpty())
-            sb.append("<p class=\"warn\">购物车里另有 ").append(plan.unavailable.size()).append(" 种买不了（已下架或超过上限），这次不买，留在购物车里。</p>\n");
-        sb.append("<div class=\"box paybox\"><div class=\"boxh\">付款（从背包里扣）</div><div class=\"boxb\"><table class=\"pay\"><tr class=\"h\"><th>货币</th><th class=\"r\">要付</th><th class=\"r\">背包里有</th><th class=\"r\">付完还剩</th></tr>\n");
-        boolean enough = true;
-        for(Map.Entry<String, Long> e : plan.totals.entrySet())
-        {
-            long h = have.containsKey(e.getKey()) ? have.get(e.getKey()) : 0;
-            boolean ok = h >= e.getValue();
-            enough &= ok;
-            sb.append("<tr><td><span class=\"c16\" data-yr-item=\"").append(attr(e.getKey())).append("\"></span> <span data-yr-item-name=\"").append(attr(e.getKey())).append("\">")
-                    .append(Html.escape(e.getKey())).append("</span></td><td class=\"r\"><b>").append(e.getValue()).append("</b></td><td class=\"r\">").append(h)
-                    .append("</td><td class=\"r\">").append(ok ? "<span class=\"good\">" + (h - e.getValue()) + "</span>" : "<span class=\"bad\">还差 " + (e.getValue() - h) + "</span>")
-                    .append("</td></tr>\n");
-        }
-        sb.append("</table></div></div>\n");
-        if(!enough)
-        {
-            sb.append("<div class=\"notice bad\">背包里的钱不够，这一单买不了。什么都没有扣").append(buyId == null ? "，购物车原样保留" : "").append("。</div>\n");
-            sb.append("<p><a href=\"").append(attr(back)).append("\">&#171; 返回").append(buyId == null ? "购物车" : "商品").append("</a></p>\n");
-        }
-        else if(nonce != null)
+            sb.append("<p class=\"warn\">另有 ").append(plan.unavailable.size()).append(" 种买不了（下架、超过上限或库存不够），留在购物车里。</p>\n");
+        sb.append("<div class=\"box paybox\"><div class=\"boxh\">合计</div><div class=\"boxb\">");
+        totals(sb, plan.totals);
+        sb.append("<div class=\"dim small\">在 pay.yr 付款，绿宝石、悠然元都能付（1 绿宝石 = 2 元）。</div></div></div>\n");
+        if(nonce != null && locationNonce != null && v.player != null)
         {
             sb.append("<form method=\"post\" action=\"/checkout\" class=\"confirm\"><input type=\"hidden\" name=\"k\" value=\"").append(attr(nonce))
                     .append("\"/><input type=\"hidden\" name=\"t\" value=\"").append(attr(v.token)).append("\"/>");
-            sb.append("<div>按“确认下单”后，从你的背包里扣掉上面的钱，商品马上放进背包（满了掉在脚边）。</div>");
-            sb.append("<div class=\"go\"><button type=\"submit\" class=\"btn buy big\">确认下单</button> &#160; <a href=\"").append(attr(back)).append("\">返回修改</a></div></form>\n");
+            sb.append("<input type=\"x-yr-location\" name=\"loc\" value=\"").append(attr(locationNonce)).append("\"/>");
+            sb.append("<div>收货人：<b>").append(Html.escape(v.player)).append("</b>（要在线、在这台电脑 8 格内）</div>");
+            sb.append("<div class=\"go\"><button type=\"submit\" class=\"btn buy big\">提交订单，去付款</button> &#160; <a href=\"").append(attr(back)).append("\">返回修改</a></div></form>\n");
         }
+        else
+            sb.append("<p><a href=\"").append(attr(back)).append("\">&#171; 返回").append(buyId == null ? "购物车" : "商品").append("</a></p>\n");
+        end(sb);
+        return sb.toString();
+    }
+
+    /** 要登录才能看的页面（购物车、结算、订单） */
+    public static String loginNeeded(Viewer v, String next)
+    {
+        StringBuilder sb = new StringBuilder(4 * 1024);
+        begin(sb, "请登录 - MineBay", v, "", null);
+        sb.append("<div class=\"crumbs\"><a href=\"/\">MineBay</a> &#8250; <b>登录</b></div>\n");
+        loginBox(sb, v, next);
+        end(sb);
+        return sb.toString();
+    }
+
+    private static void loginBox(StringBuilder sb, Viewer v, String next)
+    {
+        sb.append("<div class=\"empty\">");
+        if(!v.loginAvailable)
+            sb.append("服务器没有开游戏角色登录（id.yr），暂时不能购物。");
+        else
+            sb.append("登录后才能用购物车、下单。<form method=\"get\" action=\"/login\"><input type=\"hidden\" name=\"next\" value=\"").append(attr(next))
+                    .append("\"/><button type=\"submit\" class=\"btn buy big\">用游戏角色登录</button></form>");
+        sb.append("<br/><a href=\"/\">继续逛逛</a></div>\n");
+    }
+
+    /** 从 pay.yr 回来但还没付款 */
+    public static String unpaid(Viewer v, String checkoutUrl)
+    {
+        StringBuilder sb = new StringBuilder(4 * 1024);
+        begin(sb, "还没付款 - MineBay", v, "", null);
+        sb.append("<table class=\"steps\"><tr><td class=\"done\">1. 选好商品</td><td class=\"done\">2. 确认订单</td><td class=\"on\">3. 付款</td><td>4. 完成</td></tr></table>\n");
+        sb.append("<div class=\"empty\"><b>还没付款</b><br/><a class=\"btn buy big\" href=\"").append(attr(checkoutUrl)).append("\">去 pay.yr 付款</a> &#160; <a href=\"/cart\">回购物车</a></div>\n");
         end(sb);
         return sb.toString();
     }
@@ -421,12 +506,12 @@ public final class MineBayPages
         StringBuilder sb = new StringBuilder(16 * 1024);
         begin(sb, "我的订单 - MineBay", v, "", null);
         if(highlight >= 0 && notice != null && notice.ok)
-            sb.append("<table class=\"steps\"><tr><td class=\"done\">1. 选好商品</td><td class=\"done\">2. 确认订单</td><td class=\"on\">3. 完成</td></tr></table>\n");
+            sb.append("<table class=\"steps\"><tr><td class=\"done\">1. 选好商品</td><td class=\"done\">2. 确认订单</td><td class=\"done\">3. 付款</td><td class=\"on\">4. 完成</td></tr></table>\n");
         notice(sb, notice);
         sb.append("<div class=\"crumbs\"><a href=\"/\">MineBay</a> &#8250; <b>我的订单</b></div>\n<h2>我的订单</h2>\n");
         if(v.player == null)
         {
-            sb.append("<div class=\"empty\">要开着电脑的界面才能看订单：订单按玩家记在服务器上。</div>\n");
+            loginBox(sb, v, "/orders");
             end(sb);
             return sb.toString();
         }
@@ -436,7 +521,7 @@ public final class MineBayPages
             end(sb);
             return sb.toString();
         }
-        sb.append("<p class=\"dim small\">共 ").append(orders.size()).append(" 单，只保留最近 ").append(Orders.MAX_ORDERS).append(" 单。时间为北京时间。</p>\n");
+        sb.append("<p class=\"dim small\">共 ").append(orders.size()).append(" 单（保留最近 ").append(Orders.MAX_ORDERS).append(" 单，北京时间）。</p>\n");
         int from = (p - 1) * ORDERS_PER_PAGE;
         for(int i = from; i < Math.min(orders.size(), from + ORDERS_PER_PAGE); i++)
             order(sb, orders.get(i), ORDER_PREVIEW_ITEMS, orders.get(i).number == highlight);
@@ -500,21 +585,16 @@ public final class MineBayPages
         begin(sb, "帮助 - MineBay", v, "", null);
         sb.append("<div class=\"crumbs\"><a href=\"/\">MineBay</a> &#8250; <b>帮助</b></div>\n<h2>帮助</h2>\n");
         sb.append("<div class=\"box\"><div class=\"boxh\">怎么买</div><div class=\"boxb\"><ol>");
-        sb.append("<li>找到想要的商品：点上面的分类，或者在搜索框里搜（中文名、英文名、物品 ID 都可以）。</li>");
-        sb.append("<li>点“加入购物车”；也可以在商品页填好数量，点“立即购买”。</li>");
-        sb.append("<li>在购物车里改数量、删商品，然后点“去结算”。</li>");
-        sb.append("<li>确认页列出每种货币要扣多少、背包里有多少，核对后点“确认下单”。</li>");
+        sb.append("<li>用游戏角色登录。</li>");
+        sb.append("<li>加入购物车，点“去结算”；或在商品页点“立即购买”。</li>");
+        sb.append("<li>提交订单（要同意提供电脑的位置），到 pay.yr 付款。</li>");
+        sb.append("<li>付款后东西放进背包，满了掉在脚边。</li>");
         sb.append("</ol></div></div>\n");
-        sb.append("<div class=\"box\"><div class=\"boxh\">付款与发货</div><div class=\"boxb\"><ul>");
-        sb.append("<li>付款从正在操作这台电脑的玩家背包里扣（不含副手、盔甲栏）。</li>");
-        sb.append("<li>一单里的商品要么全部买到，要么一样都不买；钱不够时什么都不扣，购物车原样保留。</li>");
-        sb.append("<li>买到的东西直接放进背包；背包满了掉在脚边。</li>");
-        sb.append("</ul></div></div>\n");
-        sb.append("<div class=\"box\"><div class=\"boxh\">购物车与订单</div><div class=\"boxb\"><ul>");
-        sb.append("<li>购物车按玩家存在服务器上：关电脑、下线、换一台电脑都还在。只有你自己删除，或者结算买走，东西才会从车里拿掉。</li>");
-        sb.append("<li>购物车最多放 ").append(Cart.MAX_LINES).append(" 种商品，每种最多 ").append(Cart.MAX_QUANTITY).append(" 份（有的商品一单上限更少）。</li>");
-        sb.append("<li>商品下架后还留在购物车里，标成“已下架”，需要你自己删除。</li>");
-        sb.append("<li>“我的订单”保留最近 ").append(Orders.MAX_ORDERS).append(" 单。</li>");
+        sb.append("<div class=\"box\"><div class=\"boxh\">要知道的</div><div class=\"boxb\"><ul>");
+        sb.append("<li>买东西、收货的是登录的角色：他要在线、在电脑 8 格内。电脑要装定位模块。</li>");
+        sb.append("<li>绿宝石价可以用悠然元付（1 绿宝石 = 2 元），也可以用 pay.yr 余额。</li>");
+        sb.append("<li>限量商品全服共用库存，卖完要等补货。</li>");
+        sb.append("<li>登录跟着电脑走，用完请退出。购物车、订单存在服务器上，换电脑也还在。</li>");
         sb.append("</ul></div></div>\n");
         end(sb);
         return sb.toString();
@@ -580,11 +660,17 @@ public final class MineBayPages
         sb.append("</a>");
     }
 
-    /** 价格：货币图标 + 数量 */
+    /** 绿宝石（pay.yr 按 1 绿宝石 = 2 元收悠然元） */
+    static final String EMERALD = "minecraft:emerald";
+
+    /** 价格：货币图标 + 数量；绿宝石价同时写出悠然元（N 绿宝石 / 2N 元） */
     private static void price(StringBuilder sb, String currency, long amount, boolean strong)
     {
         sb.append("<span class=\"price\"><span class=\"c16\" data-yr-item=\"").append(attr(currency)).append("\"></span>").append(strong ? "<b>" : "")
-                .append(amount).append(strong ? "</b>" : "").append("</span>");
+                .append(amount).append(strong ? "</b>" : "");
+        if(EMERALD.equals(currency))
+            sb.append(" <span class=\"yuan\">/ ").append(amount * 2).append(" 元</span>");
+        sb.append("</span>");
     }
 
     private static void totals(StringBuilder sb, Map<String, Long> totals)
@@ -592,7 +678,10 @@ public final class MineBayPages
         for(Map.Entry<String, Long> e : totals.entrySet())
         {
             sb.append("<div class=\"totv\"><span class=\"c16\" data-yr-item=\"").append(attr(e.getKey())).append("\"></span><span class=\"cn\" data-yr-item-name=\"").append(attr(e.getKey())).append("\">")
-                    .append(Html.escape(e.getKey())).append("</span> <b>").append(e.getValue()).append("</b></div>");
+                    .append(Html.escape(e.getKey())).append("</span> <b>").append(e.getValue()).append("</b>");
+            if(EMERALD.equals(e.getKey()))
+                sb.append(" <span class=\"yuan\">/ ").append(e.getValue() * 2).append(" 元</span>");
+            sb.append("</div>");
         }
     }
 
@@ -639,9 +728,12 @@ public final class MineBayPages
         sb.append("<style type=\"text/css\">\n").append(CSS).append("</style></head><body>\n");
         sb.append("<div id=\"topbar\"><span class=\"links\"><a href=\"/orders\">我的订单</a> <span class=\"sep\">|</span> <a href=\"/help\">帮助</a></span>");
         if(v.player != null)
-            sb.append("你好，<b>").append(Html.escape(v.player)).append("</b>！欢迎光临 MineBay");
+            sb.append("你好，<b>").append(Html.escape(v.player)).append("</b> <form method=\"post\" action=\"/logout\" class=\"inl\"><input type=\"hidden\" name=\"t\" value=\"")
+                    .append(attr(v.token)).append("\"/><button type=\"submit\" class=\"lnk\">退出</button></form>");
+        else if(v.loginAvailable)
+            sb.append("你好！<a href=\"/login\">请登录</a>");
         else
-            sb.append("你好！<span class=\"dim\">没有人在操作这台电脑</span>");
+            sb.append("你好！");
         sb.append("</div>\n");
         sb.append("<table id=\"head\"><tr><td class=\"logo\"><a href=\"/\" class=\"logo\"><span class=\"l1\">M</span><span class=\"l2\">i</span><span class=\"l3\">n</span><span class=\"l4\">e</span>")
                 .append("<span class=\"l5\">B</span><span class=\"l6\">a</span><span class=\"l7\">y</span></a><div class=\"tag\">方块世界的网上商城</div></td>");
@@ -735,11 +827,13 @@ public final class MineBayPages
             + "td.note { font-size: 12px; color: #888; padding-right: 10px; line-height: 18px; }\n"
             + "td.tot { width: 200px; text-align: right; background: #fffbea; border: 1px solid #f0c14b; padding: 8px; }\n"
             + ".totl { color: #666; } .totv { font-size: 15px; color: #e53238; margin: 2px 0; } .totv .cn { color: #555; font-size: 12px; margin-right: 4px; } .go { margin-top: 6px; }\n"
-            + "table.steps { width: 100%; border-collapse: collapse; margin-bottom: 8px; } table.steps td { width: 33%; text-align: center; padding: 4px; background: #eee; color: #999; border: 2px solid #fff; }\n"
+            + "table.steps { width: 100%; border-collapse: collapse; margin-bottom: 8px; } table.steps td { width: 25%; text-align: center; padding: 4px; background: #eee; color: #999; border: 2px solid #fff; }\n"
             + "table.steps td.done { background: #dbe6fb; color: #2a50c8; } table.steps td.on { background: #2a50c8; color: #fff; font-weight: bold; }\n"
             + ".paybox { margin-top: 10px; } table.pay { width: 100%; border-collapse: collapse; } table.pay th { text-align: left; font-weight: normal; color: #888; padding: 3px 4px; }\n"
             + "table.pay td { padding: 3px 4px; border-top: 1px solid #eee; }\n"
             + ".good { color: #2b8a3e; } .bad { color: #c62828; font-weight: bold; }\n"
+            + ".stock { font-size: 11px; color: #2b8a3e; font-weight: normal; } .stock.out { color: #c62828; } .yuan { color: #888; font-weight: normal; font-size: 11px; }\n"
+            + ".btn.off { background: #ccc; border-color: #aaa; color: #fff; } form.inl { display: inline; } button.lnk { border: 0; background: transparent; color: #0654ba; padding: 0; font-size: 12px; }\n"
             + ".confirm { border: 1px solid #f0c14b; background: #fffbea; padding: 8px 10px; }\n"
             + ".order { border: 1px solid #ddd; margin-bottom: 8px; } .order.new { border: 2px solid #86b817; }\n"
             + "table.oh { width: 100%; border-collapse: collapse; background: #f0f0f0; font-size: 12px; } table.oh td { padding: 4px 8px; }\n"
