@@ -222,6 +222,9 @@ public class GuiBrowser extends GuiContainer
         guiTop = Math.max(0, Math.min(height - ySize, statusY - ySize - 2));
     }
 
+    /** 上一帧是不是操作者（判断“被换下来”） */
+    private boolean wasOperator;
+
     @Override
     public void onGuiClosed()
     {
@@ -251,10 +254,16 @@ public class GuiBrowser extends GuiContainer
             b.ensureStarted();
             b.tick();
         }
-        if(!isOperator())
+        boolean operator = isOperator();
+        if(!operator && wasOperator)
         {
-            // 旁观者拿不到 Cookie：原来是操作者、被换下来时手上那份也丢掉
+            // 旁观者拿不到 Cookie：原来是操作者、被换下来时手上那份丢掉。
+            // 只在“从操作者变成不是”时丢：服务端交 Cookie 的包可能比方块实体里“操作者是你”的同步先到，那时还不能丢
             ComputerViews.view(computer.getPos()).cookies = null;
+        }
+        wasOperator = operator;
+        if(!operator)
+        {
             cookieMenu = 0;
             ComputerViews.View v = ComputerViews.view(computer.getPos());
             if(v.version != viewVersion)
