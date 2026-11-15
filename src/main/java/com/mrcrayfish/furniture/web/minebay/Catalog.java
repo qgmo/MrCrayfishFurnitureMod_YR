@@ -4,7 +4,7 @@ import com.mrcrayfish.furniture.MrCrayfishFurnitureMod;
 import com.mrcrayfish.furniture.api.RecipeData;
 import com.mrcrayfish.furniture.api.Recipes;
 import com.mrcrayfish.furniture.computer.ItemIcons;
-import com.mrcrayfish.furniture.util.ServerTranslations;
+import moe.qingu.youran.api.lang.ServerLang;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockDispenser;
 import net.minecraft.block.BlockPistonBase;
@@ -13,7 +13,6 @@ import net.minecraft.block.BlockRailPowered;
 import net.minecraft.block.BlockRedstoneLight;
 import net.minecraft.enchantment.Enchantment;
 import net.minecraft.enchantment.EnchantmentHelper;
-import net.minecraft.entity.EntityList;
 import net.minecraft.init.Items;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemArmor;
@@ -24,7 +23,6 @@ import net.minecraft.item.ItemExpBottle;
 import net.minecraft.item.ItemFishingRod;
 import net.minecraft.item.ItemFlintAndSteel;
 import net.minecraft.item.ItemFood;
-import net.minecraft.item.ItemMonsterPlacer;
 import net.minecraft.item.ItemHoe;
 import net.minecraft.item.ItemPotion;
 import net.minecraft.item.ItemShears;
@@ -59,7 +57,7 @@ import java.util.Map;
  * <li>配置里的商品编号按物品（注册名、数据值、数量、NBT）算出来，写成 {@code config:十六进制}，与价格无关：改价后购物车里的还对得上。</li>
  * <li>分类：配置里的商品按物品自动归类（方块、工具与装备、食物、红石、药水与附魔、杂项）。</li>
  * <li>名字：服务端拿不到玩家的语言，网页上的物品名由浏览器在玩家本地翻译；服务端这边的名字（搜索、按名字排序、订单记录用）
- * 依次取：改过的名字、服务端翻译表里的中文名（语言目录、模组 jar 的 zh_cn.lang，见 {@link ServerLang}）、内置的中文名、英文名。</li>
+ * 依次取：改过的名字、YouranMod 服务端翻译里的简体名（语言目录、模组 jar 的 zh_cn.lang，见 {@link ServerLang}）、内置的中文名、英文名。</li>
  * </ul>
  * 商品清单变了（配置重载、模组上下架）才重建，否则用缓存。
  */
@@ -282,13 +280,13 @@ final class Catalog
     }
 
     /**
-     * 服务端能拿到的中文名：先查语言目录与模组 jar 里的 zh_cn.lang（{@link ServerLang}），查不到再用内置的几个原版物品、
-     * 药水、附魔书的中文名（没有放原版语言文件时就靠它们）
+     * 服务端能拿到的中文名：先查 YouranMod 的服务端翻译（{@link ServerLang}，语言目录与模组 jar 里的 zh_cn.lang；药水、附魔书、
+     * 刷怪蛋按游戏里的规则取名），查不到再用内置的几个原版物品、药水、附魔书的中文名（没有放原版语言文件时就靠它们）
      */
     @Nullable
     static String chinese(ItemStack s)
     {
-        String fromLang = fromLang(ServerLang.get(), s);
+        String fromLang = ServerLang.findItemName(ServerLang.ZH_CN, s);
         if(fromLang != null)
             return fromLang;
         Item i = s.getItem();
@@ -321,53 +319,6 @@ final class Catalog
         if(builtin != null && reg.getNamespace().equals("minecraft"))
             return builtin;
         return null;
-    }
-
-    /** 按游戏里 {@code getItemStackDisplayName} 的规则，用服务端翻译表算出中文名；表里没有就返回 null */
-    @Nullable
-    @SuppressWarnings("deprecation")
-    static String fromLang(ServerTranslations t, ItemStack s)
-    {
-        if(t.isEmpty())
-            return null;
-        try
-        {
-            Item i = s.getItem();
-            if(i instanceof ItemPotion || i == Items.TIPPED_ARROW)
-            {
-                String prefix = i == Items.SPLASH_POTION ? "splash_potion.effect." : i == Items.LINGERING_POTION ? "lingering_potion.effect."
-                        : i == Items.TIPPED_ARROW ? "tipped_arrow.effect." : "potion.effect.";
-                return t.local(PotionUtils.getPotionFromItem(s).getNamePrefixed(prefix));
-            }
-            if(i instanceof ItemEnchantedBook)
-            {
-                String book = t.local("item.enchantedBook.name");
-                Map<Enchantment, Integer> e = EnchantmentHelper.getEnchantments(s);
-                if(book != null && e.size() == 1)
-                {
-                    Map.Entry<Enchantment, Integer> only = e.entrySet().iterator().next();
-                    String n = t.local(only.getKey().getName());
-                    if(n != null)
-                        return book + "（" + n + " " + roman(only.getValue()) + "）";
-                }
-                return book;
-            }
-            if(i instanceof ItemMonsterPlacer)
-            {
-                String base = t.local("item.monsterPlacer.name");
-                ResourceLocation id = ItemMonsterPlacer.getNamedIdFrom(s);
-                if(base == null || id == null)
-                    return base;
-                String tn = EntityList.getTranslationName(id);
-                String entity = tn == null ? null : t.local("entity." + tn + ".name");
-                return entity == null ? base : base + " " + entity;
-            }
-            return t.local(s.getTranslationKey() + ".name");
-        }
-        catch(RuntimeException e)
-        {
-            return null;
-        }
     }
 
     // ---------------------------------------------------------------- 说明
@@ -430,12 +381,10 @@ final class Catalog
         return out;
     }
 
-    /** 没有翻译键可用时显示的名字：服务端翻译表里的中文，没有就是服务端自己的英文 */
-    @SuppressWarnings("deprecation")
+    /** 没有翻译键可用时显示的名字：服务端翻译里的简体，没有就是英文，再没有是键名 */
     private static String displayName(String key)
     {
-        String zh = ServerLang.get().local(key);
-        return zh != null ? zh : net.minecraft.util.text.translation.I18n.translateToLocal(key);
+        return ServerLang.get(ServerLang.ZH_CN, key);
     }
 
     static String roman(int n)

@@ -3,6 +3,7 @@ package com.mrcrayfish.furniture.web.minebay;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -97,6 +98,26 @@ class ShopParamsTest
         List<String> out = new ArrayList<>();
         Collections.addAll(out, ids);
         return out;
+    }
+
+    /** 服务端翻译给的中文名（原版 zh_cn.lang 里的）按拼音排序，中文名、英文名、物品 ID 都能搜到 */
+    @Test
+    void chineseNamesSortInChineseOrderAndAreSearchable()
+    {
+        String[][] items = {{"diamond", "钻石"}, {"saddle", "鞍"}, {"book", "书"}, {"terracotta", "陶瓦"}};
+        List<Listing> all = new ArrayList<>();
+        int seq = 0;
+        for(String[] it : items)
+        {
+            String zh = it[1];
+            all.add(new Listing("config:" + it[0], seq++, Categories.MISC, "minecraft:" + it[0], 1, null, zh, (zh + " " + it[0] + " minecraft:" + it[0]).toLowerCase(),
+                    "minecraft:emerald", 1, 64, new ArrayList<>()));
+        }
+        List<String> byName = ids(ShopParams.select(all, null, "", ShopParams.Sort.NAME));
+        assertEquals(Arrays.asList("config:saddle", "config:book", "config:terracotta", "config:diamond"), byName, "按拼音：鞍 书 陶 钻");
+        assertEquals(1, ShopParams.select(all, null, "钻石", ShopParams.Sort.DEFAULT).size());
+        assertEquals(1, ShopParams.select(all, null, "diamond", ShopParams.Sort.DEFAULT).size());
+        assertEquals(1, ShopParams.select(all, null, "minecraft:diamond", ShopParams.Sort.DEFAULT).size());
     }
 
     static List<String> ids(List<Listing> list)

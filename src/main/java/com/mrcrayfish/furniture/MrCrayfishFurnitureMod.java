@@ -114,13 +114,6 @@ public class MrCrayfishFurnitureMod
     }
 
     @EventHandler
-    public void serverAboutToStart(net.minecraftforge.fml.common.event.FMLServerAboutToStartEvent event)
-    {
-        /* MineBay 的服务端中文名：后台线程读语言目录与模组的 zh_cn.lang（悠然服务器魔改） */
-        com.mrcrayfish.furniture.web.minebay.ServerLang.start();
-    }
-
-    @EventHandler
     public void processIMC(FMLInterModComms.IMCEvent event)
     {
         if(event.getMessages().size() > 0)

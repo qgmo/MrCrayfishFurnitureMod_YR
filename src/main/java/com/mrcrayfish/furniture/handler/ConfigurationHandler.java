@@ -33,9 +33,6 @@ public class ConfigurationHandler
     /** 电视的 bilibili 视频总开关（服务端，悠然服务器魔改）：关了只放 GIF */
     public static boolean tvVideoEnabled = true;
 
-    /** MineBay 读原版等中文语言文件的目录（服务端，悠然服务器魔改）；空 = config/youranapi/lang（与 YouranAPI 的 chat.lang-dir 默认值相同） */
-    public static String minebayLangDir = "";
-
     /** 用水家具认的水（Forge 流体注册名，悠然服务器魔改） */
     public static String[] waterFluids = WaterFluids.DEFAULTS.clone();
 
@@ -88,7 +85,6 @@ public class ConfigurationHandler
         tvGifMaxPixels = config.getInt("tv-gif-max-pixels", CATEGORY_SETTINGS, 16777216, 65536, 268435456, "(Client) Maximum width x height x frames of a TV GIF (16777216 is about 64 MB once decoded). Larger GIFs are not displayed.");
         waterFluids = config.getStringList("water-fluids", CATEGORY_SETTINGS, WaterFluids.DEFAULTS, "(Server) Forge fluid names the water furniture accepts as water: basin, kitchen sink, bath, toilet and shower draw these from the fluid container below / behind them. Defaults: vanilla water, YouranMod mineral water (fuild_mineral_water), Tough As Nails purified water (purified_water), IC2 distilled water (ic2distilled_water). Names of fluids that are not installed are ignored. The tap accepts any fluid and does not use this list.");
         tvVideoEnabled = config.getBoolean("tv-video", CATEGORY_SETTINGS, true, "(Server) Whether TV channels may play bilibili videos (BV.../av... channels). When false, TVs only play GIFs and video channels show a notice. Each player's client fetches and decodes the video itself; the server only stores channel, play/pause, position and volume.");
-        minebayLangDir = config.getString("minebay-lang-dir", CATEGORY_SETTINGS, "", "(Server) Directory with Chinese language files MineBay uses for item names (search and sorting by name): *.lang files, e.g. vanilla zh_cn.lang taken from the launcher's assets, and resource packs (folders or zips, assets/*/lang/zh_cn.lang). Same key in several files: the later file name wins. Empty = config/youranapi/lang under the server directory (the same default as YouranAPI's chat.lang-dir); a relative path is relative to the server directory. Mod jars' own zh_cn.lang are read as well, with lower priority. Reloaded when the config is changed in game and at server start.").trim();
         config.addCustomCategoryComment(CATEGORY_RECIPE_SETTINGS, "Enabled or disable the default recipes");
         config.addCustomCategoryComment(CATEGORY_API, "RecipeAPI Configuration. How to use: http://mrcrayfishs-furniture-mod.wikia.com/wiki/Configuration");
         updateEnabledRecipes();
@@ -210,8 +206,6 @@ public class ConfigurationHandler
         if(eventArgs.getModID().equals("cfm"))
         {
             loadConfig(true);
-            if(net.minecraftforge.fml.common.FMLCommonHandler.instance().getMinecraftServerInstance() != null)
-                com.mrcrayfish.furniture.web.minebay.ServerLang.start();
         }
     }
 }
