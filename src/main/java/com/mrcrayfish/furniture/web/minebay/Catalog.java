@@ -145,7 +145,10 @@ final class Catalog
             int n = seen.merge(base, 1, Integer::sum);
             String id = n == 1 ? base : base + "-" + n;
             String custom = in.hasDisplayName() ? strip(in.getDisplayName()) : null;
-            Listing l = listing(id, out.size(), classify(in), in, in.getCount(), custom, cur, d.getPrice(), Cart.MAX_QUANTITY, Collections.<String>emptyList(), Collections.<String>emptyList());
+            Stock.Spec stock = stockOf(d);
+            if(d.getStock() != 0 && stock == null)
+                continue;
+            Listing l = listing(id, out.size(), classify(in), in, in.getCount(), custom, cur, d.getPrice(), Cart.MAX_QUANTITY, Collections.<String>emptyList(), Collections.<String>emptyList(), stock);
             out.add(l);
             byId.put(id, new Entry(l, cur.copy(), in.copy(), null));
         }
@@ -153,17 +156,29 @@ final class Catalog
         {
             ItemStack shown = p.item.isEmpty() ? p.icon : p.item;
             int count = p.item.isEmpty() ? 1 : p.item.getCount();
-            Listing l = listing(p.id, out.size(), p.category, p.icon, count, p.name, p.currency, p.price, p.maxPerOrder, p.description, p.keywords);
+            Listing l = listing(p.id, out.size(), p.category, p.icon, count, p.name, p.currency, p.price, p.maxPerOrder, p.description, p.keywords, p.stock);
             if(shown != p.icon && p.name == null && shown.hasDisplayName())
-                l = listing(p.id, out.size(), p.category, p.icon, count, strip(shown.getDisplayName()), p.currency, p.price, p.maxPerOrder, p.description, p.keywords);
+                l = listing(p.id, out.size(), p.category, p.icon, count, strip(shown.getDisplayName()), p.currency, p.price, p.maxPerOrder, p.description, p.keywords, p.stock);
             out.add(l);
             byId.put(p.id, new Entry(l, p.currency.copy(), p.item.copy(), p.delivery));
         }
         return new Catalog(out, byId);
     }
 
+    /** 配置里的限量；不限量或写错为 null（写错的不上架，见 {@code RecipeRegistry}） */
+    @Nullable
+    static Stock.Spec stockOf(RecipeData d)
+    {
+        if(d.getStock() == 0)
+            return null;
+        Stock.Rule r = Stock.Rule.of(d.getRestock() == null ? "daily" : d.getRestock());
+        if(r == null || d.getStock() < 1 || d.getStock() > Stock.MAX_PER_MONTH)
+            return null;
+        return new Stock.Spec(d.getStock(), r);
+    }
+
     private static Listing listing(String id, int seq, String category, ItemStack stack, int count, @Nullable String name, ItemStack currency, int price, int max,
-                                   List<String> extraDescription, List<String> keywords)
+                                   List<String> extraDescription, List<String> keywords, @Nullable Stock.Spec stock)
     {
         String english = english(stack);
         String chinese = chinese(stack);
@@ -189,7 +204,7 @@ final class Catalog
         }
         for(String k : keywords)
             search.append(k).append(' ');
-        return new Listing(id, seq, category, iconId(stack), count, name, sortName, search.toString().toLowerCase(Locale.ROOT), itemId(currency), price, max, desc);
+        return new Listing(id, seq, category, iconId(stack), count, name, sortName, search.toString().toLowerCase(Locale.ROOT), itemId(currency), price, max, desc, stock);
     }
 
     /** 货币的写法：注册名，有子类型或数据值不为 0 时加 {@code @数据值}（货币只看物品与数据值） */

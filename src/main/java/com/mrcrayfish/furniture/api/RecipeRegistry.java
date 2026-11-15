@@ -403,7 +403,32 @@ public class RecipeRegistry extends RecipeAPI
                         return;
                     }
 
-                    RecipeRegistry.getInstance().registerMineBayItem(new ItemStack(input, i_amount, i_metadata), new ItemStack(payment, 1, p_metadata), p_price);
+                    // 悠然服务器魔改：限量（stock=每月几份，restock=daily 每天补 / monthly 每月 1 日补满，默认 daily）。写错时整件不上架，免得限量商品变成不限量
+                    String stockText = parser.getValue("stock", null);
+                    String restockText = parser.getValue("restock", null);
+                    int stock = 0;
+                    String restock = null;
+                    if(stockText != null || restockText != null)
+                    {
+                        com.mrcrayfish.furniture.web.minebay.Stock.Rule rule = com.mrcrayfish.furniture.web.minebay.Stock.Rule.of(restockText == null ? "daily" : restockText);
+                        try
+                        {
+                            stock = Integer.parseInt(stockText == null ? "" : stockText.trim());
+                        }
+                        catch(NumberFormatException e)
+                        {
+                            stock = -1;
+                        }
+                        if(rule == null || stock < 1 || stock > com.mrcrayfish.furniture.web.minebay.Stock.MAX_PER_MONTH)
+                        {
+                            com.mrcrayfish.furniture.MrCrayfishFurnitureMod.logger().warn("MineBay: custom recipe #{} has a bad stock={} / restock={} (stock 1-{}, restock daily or monthly); not listed",
+                                    num, stockText, restockText, com.mrcrayfish.furniture.web.minebay.Stock.MAX_PER_MONTH);
+                            return;
+                        }
+                        restock = rule.code;
+                    }
+                    addMineBayRecipe(new RecipeData().setInput(new ItemStack(input, i_amount, i_metadata)).setCurrency(new ItemStack(payment, 1, p_metadata))
+                            .setPrice(p_price).setStock(stock, restock), LOCAL);
                 }
                 else
                 {
