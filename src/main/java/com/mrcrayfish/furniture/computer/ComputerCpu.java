@@ -26,10 +26,11 @@ public final class ComputerCpu
     /**
      * 标准频率下排版一页的时间（基准）：固定的一段 + 页面每 KB 一段。Claude 按现在实际的排版耗时定（11-16 开发环境实测：
      * 7.7 KB 的页约 240–260 ms、17.9 KB 的约 480 ms，不算第一次打开时的冷启动），配置项 {@code computer-layout-base-ms}、
-     * {@code computer-layout-per-kb-ms}；标准频率时不多等，只用来按比例算慢了多等多久
+     * {@code computer-layout-per-kb-ms}；标准频率时不多等，只用来按比例算慢了多等多久。
+     * 服主 11-16：按实测的量慢芯片几乎感觉不到，基准调大到 4 倍（200 ms + 100 ms/KB）
      */
-    public static final int DEFAULT_LAYOUT_BASE_MS = 50;
-    public static final int DEFAULT_LAYOUT_PER_KB_MS = 25;
+    public static final int DEFAULT_LAYOUT_BASE_MS = 200;
+    public static final int DEFAULT_LAYOUT_PER_KB_MS = 100;
 
     private ComputerCpu()
     {
