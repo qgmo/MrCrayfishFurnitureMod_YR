@@ -241,7 +241,39 @@ public final class Support
                 break;
             rows.add(row(o.number, o.time, o.items, undelivered.containsKey(o.number) ? "已付款，还没发货（等 " + name + " 上线就发）" : "已付款，已发货"));
         }
-        return SupportPrompt.system(name, MineBayPages.TIME.format(java.time.Instant.ofEpochMilli(now)), products, catalog.listings.size(), rows, total);
+        return SupportPrompt.system(name, MineBayPages.TIME.format(java.time.Instant.ofEpochMilli(now)), products, catalog.listings.size(), rows, total,
+                cart(catalog, shop, player, now));
+    }
+
+    /** 登录者的购物车：每样能不能结算、为什么不能（同购物车页的判断） */
+    static List<SupportPrompt.CartRow> cart(Catalog catalog, MineBayData shop, UUID player, long now)
+    {
+        List<Cart.Line> lines = shop.cart(player).lines();
+        Checkout.Plan plan = Checkout.plan(lines, catalog::listing, id ->
+        {
+            Listing l = catalog.listing(id);
+            return l == null ? -1 : shop.remaining(l.id, l.stock, now, player);
+        });
+        List<SupportPrompt.CartRow> out = new ArrayList<>();
+        for(Cart.Line line : lines)
+        {
+            Listing l = catalog.listing(line.id);
+            Checkout.Unavailable why = plan.unavailable.get(line.id);
+            String status;
+            if(why == Checkout.Unavailable.GONE)
+                status = "不能结算：已下架";
+            else if(why == Checkout.Unavailable.LIMIT)
+                status = "不能结算：这件一单最多买 " + Cart.limit(l.maxPerOrder) + " 份，要改少";
+            else if(why == Checkout.Unavailable.STOCK)
+            {
+                long left = shop.remaining(l.id, l.stock, now, player);
+                status = "不能结算：" + (left <= 0 ? "已卖完" : "库存只剩 " + left + " 份");
+            }
+            else
+                status = "能结算";
+            out.add(new SupportPrompt.CartRow(line.id, l == null ? line.id : l.sortName, line.quantity(), status));
+        }
+        return out;
     }
 
     static SupportPrompt.Product product(Catalog catalog, MineBayData shop, Listing l, UUID player, long now)

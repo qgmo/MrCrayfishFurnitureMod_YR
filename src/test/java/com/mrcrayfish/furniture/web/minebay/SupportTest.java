@@ -315,7 +315,10 @@ class SupportTest
                 new SupportPrompt.Product("youranscp:floppy", "工具软盘|端口扫描器", "软件", 1, 3, "钻石", "卖完了，约 3 小时后补 1 份", 4, "软盘里装着\n镜像"));
         List<SupportPrompt.OrderRow> orders = Collections.singletonList(
                 new SupportPrompt.OrderRow("MB00000007", "2026-11-15 10:00", "钻石 ×2 份", "10 绿宝石", "已付款，已发货"));
-        String sys = SupportPrompt.system("Alice", "2026-11-15 12:00", products, 2, orders, 1);
+        List<SupportPrompt.CartRow> cart = Arrays.asList(
+                new SupportPrompt.CartRow("config:abc", "钻石", 3, "能结算"),
+                new SupportPrompt.CartRow("youranscp:floppy", "工具软盘|端口扫描器", 1, "不能结算：已卖完"));
+        String sys = SupportPrompt.system("Alice", "2026-11-15 12:00", products, 2, orders, 1, cart);
         assertTrue(sys.contains("只答不办"));
         assertTrue(sys.contains("不能退款"));
         assertTrue(sys.contains("只用给你的数据"));
@@ -327,11 +330,14 @@ class SupportTest
         assertTrue(sys.contains("软盘里装着 镜像"), "说明里的换行压成一行");
         assertTrue(sys.contains("Alice 的订单（共 1 单"));
         assertTrue(sys.contains("MB00000007 | 2026-11-15 10:00 | 钻石 ×2 份 | 10 绿宝石 | 已付款，已发货"));
+        assertTrue(sys.contains("Alice 的购物车"));
+        assertTrue(sys.contains("- youranscp:floppy | 工具软盘/端口扫描器 | 1 | 不能结算：已卖完"), sys);
         assertTrue(sys.indexOf("【数据】") > sys.indexOf("只答不办"), "规则在数据前面");
-        String none = SupportPrompt.system("Bob", "t", Collections.<SupportPrompt.Product>emptyList(), 0, Collections.<SupportPrompt.OrderRow>emptyList(), 0);
+        String none = SupportPrompt.system("Bob", "t", Collections.<SupportPrompt.Product>emptyList(), 0, Collections.<SupportPrompt.OrderRow>emptyList(), 0, Collections.<SupportPrompt.CartRow>emptyList());
         assertTrue(none.contains("（没有订单）"));
+        assertTrue(none.contains("（购物车是空的）"));
         assertTrue(none.contains("（现在没有在卖的商品）"));
-        String cut = SupportPrompt.system("A", "t", products, 300, orders, 60);
+        String cut = SupportPrompt.system("A", "t", products, 300, orders, 60, cart);
         assertTrue(cut.contains("这里只列前 2 件"));
         assertTrue(cut.contains("这里只列最近 1 单"));
     }
