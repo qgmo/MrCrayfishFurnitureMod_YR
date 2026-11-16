@@ -19,14 +19,16 @@ import net.minecraft.network.play.server.SPacketSetSlot;
 import javax.annotation.Nullable;
 
 /**
- * 电脑的界面（悠然服务器魔改）：浏览器本身全在客户端，服务端这边只有能量单元卡槽、外设槽（放定位模块）和玩家背包（界面上的“物品”面板），
+ * 电脑的界面（悠然服务器魔改）：浏览器本身全在客户端，服务端这边只有能量单元卡槽、外设槽（什么外设都能插，只有定位模块起作用）和玩家背包（界面上的“物品”面板），
  * 并把缓存电量、工作状态同步给界面。原来 MineBay 的交易槽去掉了（MineBay 改成了网站）。
  * 外设槽只有操作者、且过保护检查（同接管电脑）的玩家能放、拿（服主 11-15）；旁观者点了服务端不认，并把界面重新同步给他。
  */
 public class ContainerComputer extends Container
 {
-    /** 面板大小与卡槽位置（相对面板左上角） */
-    public static final int PANEL_WIDTH = 176, PANEL_HEIGHT = 114;
+    /** 面板大小与卡槽位置（相对面板左上角）；卡槽那一排下面一行写 CPU（服主 11-16），再下面是玩家背包 */
+    public static final int PANEL_WIDTH = 176, PANEL_HEIGHT = 126;
+    public static final int CPU_Y = 31;
+    static final int INVENTORY_Y = 44;
     public static final int CARD_X = 8, CARD_Y = 8;
     /** 外设槽的位置（右上角，标签画在它右边） */
     public static final int PERIPHERAL_X = 104, PERIPHERAL_Y = 8;
@@ -47,12 +49,12 @@ public class ContainerComputer extends Container
         {
             for(int j = 0; j < 9; ++j)
             {
-                this.addSlotToContainer(new Slot(playerInventory, j + i * 9 + 9, j * 18 + 8, i * 18 + 32));
+                this.addSlotToContainer(new Slot(playerInventory, j + i * 9 + 9, j * 18 + 8, i * 18 + INVENTORY_Y));
             }
         }
         for(int i = 0; i < 9; i++)
         {
-            this.addSlotToContainer(new Slot(playerInventory, i, i * 18 + 8, 90));
+            this.addSlotToContainer(new Slot(playerInventory, i, i * 18 + 8, INVENTORY_Y + 58));
         }
         this.cardSlot = ApplianceContainers.cardSlot(computer, computer, CARD_X, CARD_Y);
         if(cardSlot != null)

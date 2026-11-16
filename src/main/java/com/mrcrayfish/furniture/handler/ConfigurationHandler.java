@@ -34,6 +34,9 @@ public class ConfigurationHandler
     public static boolean tvVideoEnabled = true;
     /** 电脑浏览器的默认主页（服务端；服主 11-15） */
     public static String computerHomePage = "http://180.yr";
+    /** 电脑浏览器排版的基准（服务端，随电脑方块发给客户端；服主 11-16）：标准频率 2.0 GHz 下排一页的时间 = 固定毫秒 + 每 KB 毫秒 */
+    public static int computerLayoutBaseMs = com.mrcrayfish.furniture.computer.ComputerCpu.DEFAULT_LAYOUT_BASE_MS;
+    public static int computerLayoutPerKbMs = com.mrcrayfish.furniture.computer.ComputerCpu.DEFAULT_LAYOUT_PER_KB_MS;
 
     /** 用水家具认的水（Forge 流体注册名，悠然服务器魔改） */
     public static String[] waterFluids = WaterFluids.DEFAULTS.clone();
@@ -87,6 +90,8 @@ public class ConfigurationHandler
         tvGifMaxPixels = config.getInt("tv-gif-max-pixels", CATEGORY_SETTINGS, 16777216, 65536, 268435456, "(Client) Maximum width x height x frames of a TV GIF (16777216 is about 64 MB once decoded). Larger GIFs are not displayed.");
         waterFluids = config.getStringList("water-fluids", CATEGORY_SETTINGS, WaterFluids.DEFAULTS, "(Server) Forge fluid names the water furniture accepts as water: basin, kitchen sink, bath, toilet and shower draw these from the fluid container below / behind them. Defaults: vanilla water, YouranMod mineral water (fuild_mineral_water), Tough As Nails purified water (purified_water), IC2 distilled water (ic2distilled_water). Names of fluids that are not installed are ignored. The tap accepts any fluid and does not use this list.");
         computerHomePage = config.getString("computer-home-page", CATEGORY_SETTINGS, "http://180.yr", "(Server) Default home page of the computer browser (http/https address, or about:home for the built-in page). Players can set their own home page per computer. When the home page cannot be opened the browser shows its built-in page about:home.");
+        computerLayoutBaseMs = config.getInt("computer-layout-base-ms", CATEGORY_SETTINGS, com.mrcrayfish.furniture.computer.ComputerCpu.DEFAULT_LAYOUT_BASE_MS, 0, 60000, "(Server) Computer browser: how long laying out one page takes at the standard CPU clock (YR-2000, 2.0 GHz), fixed part in milliseconds. At the standard clock the browser adds no wait; a slower CPU (capped by the chip's maximum frequency) waits this time x (2.0 GHz / actual clock - 1) longer before showing a page. Total = this + computer-layout-per-kb-ms x page size in KB.");
+        computerLayoutPerKbMs = config.getInt("computer-layout-per-kb-ms", CATEGORY_SETTINGS, com.mrcrayfish.furniture.computer.ComputerCpu.DEFAULT_LAYOUT_PER_KB_MS, 0, 10000, "(Server) Computer browser: layout time per KB of page at the standard CPU clock, in milliseconds (see computer-layout-base-ms).");
         tvVideoEnabled = config.getBoolean("tv-video", CATEGORY_SETTINGS, true, "(Server) Whether TV channels may play bilibili videos (BV.../av... channels). When false, TVs only play GIFs and video channels show a notice. Each player's client fetches and decodes the video itself; the server only stores channel, play/pause, position and volume.");
         config.addCustomCategoryComment(CATEGORY_RECIPE_SETTINGS, "Enabled or disable the default recipes");
         config.addCustomCategoryComment(CATEGORY_API, "RecipeAPI Configuration. How to use: http://mrcrayfishs-furniture-mod.wikia.com/wiki/Configuration");

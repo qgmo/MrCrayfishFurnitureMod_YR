@@ -11,7 +11,7 @@ import javax.annotation.Nullable;
 
 /**
  * 电脑相关的包在服务端主线程上的统一校验：区块已加载、方块实体是电脑、距离不超过 8 格、发包人开着这台电脑的界面；
- * 需要时再要求发包人是当前操作者、电脑有电。不合格就拒绝并记一条限频日志（{@link RejectLog}）。
+ * 需要时再要求发包人是当前操作者、电脑有电（且 CPU 没坏）。不合格就拒绝并记一条限频日志（{@link RejectLog}）。
  */
 public final class ComputerAccess
 {
@@ -52,6 +52,12 @@ public final class ComputerAccess
         if(powered && !computer.getAppliance().isRunning())
         {
             RejectLog.log(player, what + ": computer has no power at " + pos);
+            return null;
+        }
+        if(powered && computer.isCpuDead())
+        {
+            // CPU 报废的电脑通了电也没有反应（服主 11-16 的家具电脑主板）
+            RejectLog.log(player, what + ": computer CPU is broken at " + pos);
             return null;
         }
         return computer;

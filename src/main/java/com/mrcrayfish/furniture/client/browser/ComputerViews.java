@@ -125,6 +125,14 @@ public final class ComputerViews
         return BROWSERS.computeIfAbsent(key(pos), k -> new Browser(pos.toImmutable()));
     }
 
+    /** 这台电脑排这一页比标准频率多等多久（毫秒；按客户端世界里这台电脑的主板数据，找不到电脑时不等） */
+    static long extraLayoutMillis(BlockPos pos, int pageBytes)
+    {
+        net.minecraft.world.World w = Minecraft.getMinecraft().world;
+        net.minecraft.tileentity.TileEntity te = w == null ? null : w.getTileEntity(pos);
+        return te instanceof com.mrcrayfish.furniture.tileentity.TileEntityComputer ? ((com.mrcrayfish.furniture.tileentity.TileEntityComputer) te).extraLayoutMillis(pageBytes) : 0;
+    }
+
     private static String key(BlockPos pos)
     {
         Minecraft mc = Minecraft.getMinecraft();

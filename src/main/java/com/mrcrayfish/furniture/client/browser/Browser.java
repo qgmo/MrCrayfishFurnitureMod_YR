@@ -81,6 +81,12 @@ public final class Browser
         public final boolean builtin;
         public final FormState forms = new FormState();
         public int scroll;
+        /**
+         * 这台电脑排版完这一页的时刻（毫秒；0 为还没排过）与多等的总时长（服主 11-16：处理速度按 CPU 实际频率 ÷ 2.0 GHz）。
+         * 第一次显示时定下来，之后重开界面、换界面大小重画、前进后退回来都不再等
+         */
+        long layoutReadyAt;
+        long layoutExtra;
 
         /** 会话恢复出来的条目：只有网址 */
         static Entry placeholder(String url)
@@ -167,8 +173,14 @@ public final class Browser
     private Entry renderedEntry;
     private int renderVersion;
     private int renderRequest;
-    /** 已经交给渲染线程、还没回来 */
+    /** 已经交给渲染线程、还没回来（或回来了、电脑还在排版：{@link #layoutPage}） */
     private boolean renderPending;
+    /** 画好了、但这台电脑的 CPU 还没“排版”完的一页（CPU 比标准频率慢时）：到 {@link Entry#layoutReadyAt} 才显示 */
+    @Nullable
+    private RenderedPage layoutPage;
+    @Nullable
+    private Entry layoutEntry;
+    private int layoutRequest;
     private double lastScale = 2.0;
     @Nullable
     private Entry uploadedEntry;
@@ -605,9 +617,10 @@ public final class Browser
         fetch(s, req, 0, generation);
     }
 
-    /** 每帧调：等网络的请求，接上了就发，等太久就报错；把正在打的字同步给旁观者；到时间就自动刷新 */
+    /** 每帧调：等网络的请求，接上了就发，等太久就报错；把正在打的字同步给旁观者；到时间就自动刷新；排版完了就显示 */
     public void tick()
     {
+        finishLayout(System.currentTimeMillis());
         syncTyping();
         syncCanvases();
         reportHistory();
@@ -1030,6 +1043,8 @@ public final class Browser
             return;
         int req = ++renderRequest;
         renderPending = true;
+        layoutPage = null;
+        layoutEntry = null;
         if(status == Status.IDLE)
             setStatus(Status.RENDERING, ComputerViews.TR.t("cfm.browser.status.rendering"));
         double scale = lastScale;
@@ -1037,6 +1052,25 @@ public final class Browser
         {
             if(req != renderRequest)
                 return;
+            if(page != null)
+            {
+                // 这台电脑的 CPU 慢时多等一会儿再显示（第一次显示这一页时定下要等多久）
+                long now = System.currentTimeMillis();
+                if(e.layoutReadyAt == 0)
+                {
+                    e.layoutExtra = ComputerViews.extraLayoutMillis(pos, e.html.length);
+                    e.layoutReadyAt = now + e.layoutExtra;
+                }
+                if(now < e.layoutReadyAt)
+                {
+                    layoutPage = page;
+                    layoutEntry = e;
+                    layoutRequest = req;
+                    return;
+                }
+                show(e, page);
+                return;
+            }
             renderPending = false;
             if(status == Status.RENDERING)
                 setStatus(Status.IDLE, "");
@@ -1057,14 +1091,54 @@ public final class Browser
                 rendered = null;
                 renderedEntry = e;
                 renderVersion++;
-                return;
             }
-            e.forms.init(page.document);
-            rendered = page;
-            renderedEntry = e;
-            renderVersion++;
-            upload(e);
         });
+    }
+
+    /** 画好、排版完的一页：显示出来，传给旁观者 */
+    private void show(Entry e, RenderedPage page)
+    {
+        renderPending = false;
+        layoutPage = null;
+        layoutEntry = null;
+        if(status == Status.RENDERING)
+            setStatus(Status.IDLE, "");
+        e.forms.init(page.document);
+        rendered = page;
+        renderedEntry = e;
+        renderVersion++;
+        upload(e);
+    }
+
+    /** 排版的时间到了：显示（换了页面、重画过的丢掉） */
+    void finishLayout(long now)
+    {
+        if(layoutPage == null)
+            return;
+        if(layoutRequest != renderRequest || layoutEntry != current())
+        {
+            layoutPage = null;
+            layoutEntry = null;
+            return;
+        }
+        if(now >= layoutEntry.layoutReadyAt)
+            show(layoutEntry, layoutPage);
+    }
+
+    /** 页面交给渲染线程还没回来、或电脑还在排版 */
+    public boolean isRenderPending()
+    {
+        return renderPending;
+    }
+
+    /** 正在排版的进度（0–100）；没在等 CPU 时为 -1 */
+    public int layoutProgress()
+    {
+        Entry e = layoutEntry;
+        if(layoutPage == null || e == null || e != current() || e.layoutExtra <= 0)
+            return -1;
+        long left = e.layoutReadyAt - System.currentTimeMillis();
+        return (int) Math.max(0, Math.min(99, 100 - left * 100 / e.layoutExtra));
     }
 
     /** 关界面时释放渲染结果（再打开时重渲染），状态都留着 */
@@ -1074,6 +1148,8 @@ public final class Browser
         renderedEntry = null;
         renderRequest++;
         renderPending = false;
+        layoutPage = null;
+        layoutEntry = null;
         renderVersion++;
         uploadedEntry = null;
     }
