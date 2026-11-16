@@ -741,6 +741,7 @@ cfm.tv.config.cookie_paste=從剪貼簿貼上
 cfm.tv.config.cookie_clear=清除
 cfm.tv.config.cookie_empty=剪貼簿裡沒有內容
 cfm.tv.config.cookie_pasted=已貼上 cookie（不顯示原文），按儲存後生效
+cfm.tv.config.cookie_format=格式：SESSDATA=值\n值從瀏覽器裡原樣複製（帶 URL 編碼，如含 %%2C），不要解碼
 cfm.tv.config.save=儲存
 cfm.tv.config.saved=已儲存
 cfm.tv.config.discard=放棄修改

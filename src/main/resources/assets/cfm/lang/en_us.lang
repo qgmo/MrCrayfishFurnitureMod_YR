@@ -731,6 +731,7 @@ cfm.tv.config.cookie_paste=Paste
 cfm.tv.config.cookie_clear=Clear
 cfm.tv.config.cookie_empty=The clipboard is empty
 cfm.tv.config.cookie_pasted=Cookie pasted (not shown); press Save
+cfm.tv.config.cookie_format=Format: SESSDATA=value\nCopy the value from the browser as-is\n(URL-encoded, e.g. with %%2C), do not decode it
 cfm.tv.config.save=Save
 cfm.tv.config.saved=Saved
 cfm.tv.config.discard=Discard changes
