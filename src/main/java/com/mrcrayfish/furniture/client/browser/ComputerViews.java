@@ -70,6 +70,8 @@ public final class ComputerViews
         @Nullable
         public byte[] page;
         public int scroll;
+        /** 当前页面的上传编号（传屏幕缩略图时用）；没有页面为 -1 */
+        public int pageId = -1;
         /** 每收到一页加一 */
         public int version;
         /** 操作者正在打的字（框的编号 → 内容；地址栏是 {@link TypingSync#ADDRESS}）；换页面清空 */
@@ -149,13 +151,14 @@ public final class ComputerViews
     }
 
     /** 服务端发来的（主线程） */
-    public static void receive(BlockPos pos, int kind, int scroll, byte[] data)
+    public static void receive(BlockPos pos, int kind, int scroll, int id, byte[] data)
     {
         View v = view(pos);
         if(kind == MessageComputerView.PAGE)
         {
             v.page = data;
             v.scroll = scroll;
+            v.pageId = id;
             v.version++;
             v.typed.clear();
             v.canvases.clear();
@@ -164,6 +167,7 @@ public final class ComputerViews
         {
             v.page = null;
             v.scroll = 0;
+            v.pageId = -1;
             v.version++;
             v.typed.clear();
             v.canvases.clear();
@@ -293,6 +297,7 @@ public final class ComputerViews
             {
                 PageDocument doc = PageDocument.parse(html, mode, url, ComputerViews::itemName, ComputerViews::translate, PageRenderer.VIEW_WIDTH);
                 page = PageRenderer.render(doc, images, scale);
+                page.source = new RenderedPage.Source(html, mode, url, images);
             }
             catch(PageDocument.Invalid e)
             {

@@ -1,5 +1,8 @@
 package com.mrcrayfish.furniture.client.browser;
 
+import com.mrcrayfish.furniture.computer.PageParser;
+
+import javax.annotation.Nullable;
 import java.awt.image.BufferedImage;
 import java.util.Collections;
 import java.util.List;
@@ -18,6 +21,26 @@ public final class RenderedPage
     /** 内容本来的高度 */
     public final int fullHeight;
     public final Map<Integer, List<Rect>> regions;
+    /** 这一页是从什么画出来的（{@link ComputerViews#render} 填；按固定倍数再画一张屏幕缩略图时用） */
+    @Nullable
+    volatile Source source;
+
+    /** 画这一页用的原文、解析方式、地址、图片 */
+    static final class Source
+    {
+        final byte[] html;
+        final PageParser.Mode mode;
+        final String url;
+        final Map<String, byte[]> images;
+
+        Source(byte[] html, PageParser.Mode mode, String url, Map<String, byte[]> images)
+        {
+            this.html = html;
+            this.mode = mode;
+            this.url = url;
+            this.images = images;
+        }
+    }
 
     public static final class Rect
     {

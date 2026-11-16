@@ -8,6 +8,8 @@ import com.mrcrayfish.furniture.computer.ComputerNetwork;
 import com.mrcrayfish.furniture.computer.ComputerPeripherals;
 import com.mrcrayfish.furniture.computer.ComputerSync;
 import com.mrcrayfish.furniture.computer.PageFacts;
+import com.mrcrayfish.furniture.computer.ComputerScreen;
+import com.mrcrayfish.furniture.computer.ScreenThumb;
 import com.mrcrayfish.furniture.computer.TypingSync;
 import com.mrcrayfish.furniture.client.browser.PageDocument;
 import com.mrcrayfish.furniture.gui.containers.ContainerComputer;
@@ -55,6 +57,9 @@ import java.util.UUID;
  * 主板（服主 11-16）：合成时从家具电脑主板带进来的芯片数据（{@value ComputerCpu#TAG_BOARD}），一片 YR-2000 决定浏览器的处理速度
  * （{@link ComputerCpu}）。进存档、随方块更新发给客户端（浏览器在操作者的客户端上），拆下时随掉落物走。没有的（以前放下的、创造模式拿的）
  * 按标准 2.0 GHz。
+ * <p>
+ * 世界里的屏幕（服主 11-16）：开着界面的人上传当前页面的缩略图，服务端按 {@link ComputerScreen} 定下一帧，发给看得到这个区块的人，
+ * 客户端画在模型的屏幕上（{@code ComputerScreenRenderer}）。只在内存，不进存档；后来走近的人随区块数据（{@link #getUpdateTag}）拿到。
  */
 public class TileEntityComputer extends TileEntityFurniture implements ITickable, IAppliance, moe.qingu.youran.api.peripheral.PeripheralHost
 {
@@ -98,6 +103,21 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
     private int scroll;
     private int retryTicks;
     private int ticks;
+    /** 屏幕缩略图（服务端）：投票与现在显示的那一帧 */
+    private final ComputerScreen screen = new ComputerScreen();
+    /** 现在显示的那一帧（{@link ScreenThumb#encodeFrame}，两端都有；没有为 null）。不进存档 */
+    @Nullable
+    private byte[] screenFrame;
+
+    // ---- 只在客户端 ----
+    /** 服务端配置的缩略图规格（随方块更新发来；收到前用默认值） */
+    private ScreenThumb.Spec screenSpec = ScreenThumb.Spec.DEFAULT;
+    @Nullable
+    private ScreenThumb.Frame screenDecoded;
+    /** 每换一帧加一（渲染器据此重传贴图） */
+    private int screenVersion;
+    /** 客户端的方块实体卸载时（区块卸载、拆掉）调：释放屏幕贴图（客户端代理设置；服务端什么也不做） */
+    public static java.util.function.Consumer<TileEntityComputer> onClientUnload = t -> { };
 
     public TileEntityComputer()
     {
@@ -369,6 +389,70 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         return true;
     }
 
+    // ---- 屏幕缩略图 ----
+
+    /** 开着界面、有电、CPU 没坏：屏幕亮着（两端都能用；客户端按同步来的状态） */
+    public boolean isScreenOn()
+    {
+        return switchedOn && energy.isRunning() && !isCpuDead();
+    }
+
+    /** 缩略图规格：服务端按配置，客户端按服务端发来的 */
+    public ScreenThumb.Spec getScreenSpec()
+    {
+        return world != null && !world.isRemote ? ComputerSync.screenSpec() : screenSpec;
+    }
+
+    /** 客户端：现在显示的那一帧（解好的）；没有为 null */
+    @Nullable
+    public ScreenThumb.Frame getScreenFrame()
+    {
+        return screenDecoded;
+    }
+
+    public int getScreenVersion()
+    {
+        return screenVersion;
+    }
+
+    /** 客户端：服务端发来的一帧（null 为清屏） */
+    public void setScreenFrame(@Nullable byte[] frame)
+    {
+        this.screenFrame = frame;
+        this.screenDecoded = ScreenThumb.decodeFrame(frame);
+        this.screenVersion++;
+    }
+
+    /** 服务端：有人传来一张缩略图（格式、权限已经查过） */
+    public void submitThumb(EntityPlayerMP player, int page, int scroll, byte[] pixels)
+    {
+        if(screen.submit(player.getUniqueID(), page, scroll, pixels, pageId, this.scroll, viewerIds(), operator, System.currentTimeMillis()))
+            publishScreen();
+    }
+
+    private List<UUID> viewerIds()
+    {
+        List<UUID> ids = new ArrayList<>();
+        for(EntityPlayerMP p : getViewers())
+            ids.add(p.getUniqueID());
+        return ids;
+    }
+
+    /** 显示的那一帧变了：编好、发给看得到这个区块的人 */
+    private void publishScreen()
+    {
+        byte[] f = screen.frame();
+        ScreenThumb.Spec spec = getScreenSpec();
+        if(f != null && f.length != spec.pixels())
+        {
+            // 配置改了尺寸：旧的不要了
+            screen.clear();
+            f = null;
+        }
+        this.screenFrame = f == null ? null : ScreenThumb.encodeFrame(spec, f);
+        ComputerSync.broadcastScreen(this, screenFrame == null ? new byte[0] : screenFrame);
+    }
+
     /** 电源开关（操作者） */
     public void togglePower()
     {
@@ -387,6 +471,15 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         this.page = compressed;
         this.pageFacts = compressed == null ? PageFacts.NONE : facts;
         this.pageId = compressed == null ? -1 : id;
+        if(compressed == null)
+        {
+            if(screen.clear())
+                publishScreen();
+        }
+        else
+        {
+            screen.pageChanged();
+        }
         this.typed.clear();
         this.canvases.clear();
         this.scroll = 0;
@@ -406,6 +499,9 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
             return;
         this.operator = id;
         this.operatorName = player == null ? "" : player.getName();
+        // 换了另一个人操作：屏幕清掉（走开、没人操作时留着最后一帧）
+        if(screen.operatorChanged(id))
+            publishScreen();
         if(id != null)
         {
             ComputerSync.ungrant(id, this);
@@ -433,6 +529,17 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         dropLegacySlot();
         // CPU 坏了：照样耗电，但电脑没有反应，网卡不上电
         updateDevice(running && !isCpuDead());
+        // 屏幕缩略图：关机、没电、CPU 坏了清掉；有票时每 5 tick 定一次（等别人的票、丢掉过时的）
+        if(!(switchedOn && running && !isCpuDead()))
+        {
+            if(screen.clear())
+                publishScreen();
+        }
+        else if(screen.hasPendingVotes() && ticks % 5 == 0)
+        {
+            if(screen.decide(pageId, scroll, viewerIds(), operator, System.currentTimeMillis()))
+                publishScreen();
+        }
         // 旁观者的放行：每秒查一次谁不看了，每分钟给还在看的续期
         if(++ticks % 20 == 0)
             ComputerSync.refreshSpectators(this, ticks % 1200 == 0);
@@ -488,6 +595,8 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
     {
         super.invalidate();
         releaseDevice();
+        if(world != null && world.isRemote)
+            onClientUnload.accept(this);
     }
 
     @Override
@@ -495,6 +604,8 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
     {
         super.onChunkUnload();
         releaseDevice();
+        if(world != null && world.isRemote)
+            onClientUnload.accept(this);
     }
 
     private void releaseDevice()
@@ -553,6 +664,7 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         }
         tag.setInteger("LayoutBaseMs", com.mrcrayfish.furniture.handler.ConfigurationHandler.computerLayoutBaseMs);
         tag.setInteger("LayoutPerKbMs", com.mrcrayfish.furniture.handler.ConfigurationHandler.computerLayoutPerKbMs);
+        tag.setIntArray("ScreenSpec", ComputerSync.screenSpec().toIntArray());
         return tag;
     }
 
@@ -580,6 +692,12 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
             this.layoutBaseMs = tag.getInteger("LayoutBaseMs");
         if(tag.hasKey("LayoutPerKbMs"))
             this.layoutPerKbMs = tag.getInteger("LayoutPerKbMs");
+        ScreenThumb.Spec spec = ScreenThumb.Spec.fromIntArray(tag.getIntArray("ScreenSpec"));
+        if(spec != null)
+            this.screenSpec = spec;
+        // 屏幕那一帧只随区块数据来（getUpdateTag）；方块更新包里没有，不动
+        if(tag.hasKey("Screen"))
+            setScreenFrame(tag.getByteArray("Screen"));
     }
 
     @Override
@@ -588,10 +706,14 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         return new SPacketUpdateTileEntity(pos, getBlockMetadata(), syncTag());
     }
 
+    /** 区块数据（玩家走近、区块发过去时）：多带上屏幕现在显示的那一帧 */
     @Override
     public NBTTagCompound getUpdateTag()
     {
-        return syncTag();
+        NBTTagCompound tag = syncTag();
+        if(screenFrame != null)
+            tag.setByteArray("Screen", screenFrame);
+        return tag;
     }
 
     @Override

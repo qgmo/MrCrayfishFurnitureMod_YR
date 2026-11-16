@@ -1,9 +1,13 @@
 package com.mrcrayfish.furniture.computer;
 
+import com.mrcrayfish.furniture.handler.ConfigurationHandler;
 import com.mrcrayfish.furniture.network.PacketHandler;
+import com.mrcrayfish.furniture.network.message.MessageComputerScreen;
 import com.mrcrayfish.furniture.network.message.MessageComputerView;
 import com.mrcrayfish.furniture.tileentity.TileEntityComputer;
+import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.entity.player.EntityPlayerMP;
+import net.minecraft.world.WorldServer;
 import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
 import net.minecraftforge.fml.common.gameevent.PlayerEvent;
 
@@ -11,9 +15,12 @@ import moe.qingu.youran.api.network.Ipv6Address;
 import moe.qingu.youran.api.network.PlayerAddresses;
 
 import javax.annotation.Nullable;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -37,6 +44,8 @@ public final class ComputerSync
     private static final Map<UUID, RateLimiter> CANVAS = new HashMap<>();
     /** 每个玩家报 Cookie 的频率 */
     private static final Map<UUID, RateLimiter> COOKIES = new HashMap<>();
+    /** 每个玩家传屏幕缩略图的频率 */
+    private static final Map<UUID, RateLimiter> THUMBS = new HashMap<>();
     /** 旁观者的玩家临时地址放行页面里图片所在主机的用途（服主 11-14：旁观者自己下载图片） */
     public static final String SPECTATE_PURPOSE = "cfm:spectate";
     /** 放行的有效期；看着的时候每分钟续一次 */
@@ -49,6 +58,52 @@ public final class ComputerSync
     public static boolean allowScroll(EntityPlayerMP player, long now)
     {
         return SCROLL.computeIfAbsent(player.getUniqueID(), k -> new RateLimiter(8, 8)).tryAcquire(now, 1);
+    }
+
+    /** 屏幕缩略图：客户端每 {@code intervalMs} 最多传一张，服务端放宽到两倍、攒 4 张 */
+    public static boolean allowThumb(EntityPlayerMP player, long now)
+    {
+        double rate = 2000.0 / screenSpec().intervalMs;
+        return THUMBS.computeIfAbsent(player.getUniqueID(), k -> new RateLimiter(rate, 4)).tryAcquire(now, 1);
+    }
+
+    private static ScreenThumb.Spec cachedSpec;
+    private static String cachedSpecConfig;
+
+    /** 配置里的屏幕缩略图规格（写得不对的改回默认，记一次日志） */
+    public static synchronized ScreenThumb.Spec screenSpec()
+    {
+        String key = ConfigurationHandler.computerScreenThumbnail + "|" + ConfigurationHandler.computerScreenWidth
+                + "|" + ConfigurationHandler.computerScreenHeight + "|" + ConfigurationHandler.computerScreenIntervalMs
+                + "|" + Arrays.toString(ConfigurationHandler.computerScreenPalette);
+        if(cachedSpec == null || !key.equals(cachedSpecConfig))
+        {
+            List<String> problems = new ArrayList<>();
+            cachedSpec = ScreenThumb.fromConfig(ConfigurationHandler.computerScreenThumbnail, ConfigurationHandler.computerScreenWidth,
+                    ConfigurationHandler.computerScreenHeight, ConfigurationHandler.computerScreenIntervalMs,
+                    ConfigurationHandler.computerScreenPalette, problems);
+            cachedSpecConfig = key;
+            for(String p : problems)
+                com.mrcrayfish.furniture.MrCrayfishFurnitureMod.logger().warn(p);
+        }
+        return cachedSpec;
+    }
+
+    /**
+     * 屏幕缩略图变了（{@code frame} 为空数组是清屏）：发给所有看得到这个区块的人（不只是开着界面的），后来走近的人随区块数据拿到。
+     */
+    public static void broadcastScreen(TileEntityComputer computer, byte[] frame)
+    {
+        if(!(computer.getWorld() instanceof WorldServer))
+            return;
+        WorldServer ws = (WorldServer) computer.getWorld();
+        int cx = computer.getPos().getX() >> 4, cz = computer.getPos().getZ() >> 4;
+        MessageComputerScreen msg = new MessageComputerScreen(computer.getPos(), frame);
+        for(EntityPlayer p : ws.playerEntities)
+        {
+            if(p instanceof EntityPlayerMP && ws.getPlayerChunkMap().isPlayerWatchingChunk((EntityPlayerMP) p, cx, cz))
+                PacketHandler.INSTANCE.sendTo(msg, (EntityPlayerMP) p);
+        }
     }
 
     public static boolean allowTyping(EntityPlayerMP player, long now)
@@ -95,7 +150,7 @@ public final class ComputerSync
     /** 配置里的默认主页（规范化过；写得不对时 about:home，记一次日志） */
     public static synchronized String serverHome()
     {
-        String c = com.mrcrayfish.furniture.handler.ConfigurationHandler.computerHomePage;
+        String c = ConfigurationHandler.computerHomePage;
         if(cachedHome == null || !String.valueOf(c).equals(cachedHomeConfig))
         {
             String[] problem = new String[1];
@@ -153,7 +208,7 @@ public final class ComputerSync
         }
         byte[] page = computer.getPage();
         PacketHandler.INSTANCE.sendTo(page == null ? MessageComputerView.clear(computer.getPos())
-                : MessageComputerView.page(computer.getPos(), page, computer.getScroll()), player);
+                : MessageComputerView.page(computer.getPos(), page, computer.getScroll(), computer.getPageId()), player);
         if(!computer.isOperator(player))
         {
             for(TypingSync.Typed t : computer.getTyped())
@@ -274,6 +329,7 @@ public final class ComputerSync
             HISTORY.remove(event.player.getUniqueID());
             CANVAS.remove(event.player.getUniqueID());
             COOKIES.remove(event.player.getUniqueID());
+            THUMBS.remove(event.player.getUniqueID());
             // 临时地址下线就收回了，放行跟着没了
             SPECTATING.remove(event.player.getUniqueID());
         }

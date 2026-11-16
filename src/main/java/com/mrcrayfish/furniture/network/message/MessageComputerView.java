@@ -25,6 +25,8 @@ public class MessageComputerView implements IMessage, IMessageHandler<MessageCom
     private int kind;
     private int scroll;
     private byte[] data = new byte[0];
+    /** 页面的上传编号（只有 {@link #PAGE} 带；旁观者传屏幕缩略图时按它对上页面） */
+    private int id = -1;
 
     public MessageComputerView() {}
 
@@ -36,9 +38,11 @@ public class MessageComputerView implements IMessage, IMessageHandler<MessageCom
         this.data = data;
     }
 
-    public static MessageComputerView page(BlockPos pos, byte[] page, int scroll)
+    public static MessageComputerView page(BlockPos pos, byte[] page, int scroll, int id)
     {
-        return new MessageComputerView(pos, PAGE, scroll, page);
+        MessageComputerView m = new MessageComputerView(pos, PAGE, scroll, page);
+        m.id = id;
+        return m;
     }
 
     public static MessageComputerView clear(BlockPos pos)
@@ -112,6 +116,8 @@ public class MessageComputerView implements IMessage, IMessageHandler<MessageCom
             throw new IllegalArgumentException("computer view too large");
         this.data = new byte[len];
         buf.readBytes(this.data);
+        if(kind == PAGE)
+            this.id = buf.readInt();
     }
 
     @Override
@@ -122,12 +128,14 @@ public class MessageComputerView implements IMessage, IMessageHandler<MessageCom
         buf.writeInt(scroll);
         buf.writeInt(data.length);
         buf.writeBytes(data);
+        if(kind == PAGE)
+            buf.writeInt(id);
     }
 
     @Override
     public IMessage onMessage(MessageComputerView message, MessageContext ctx)
     {
-        Minecraft.getMinecraft().addScheduledTask(() -> com.mrcrayfish.furniture.client.browser.ComputerViews.receive(message.pos, message.kind, message.scroll, message.data));
+        Minecraft.getMinecraft().addScheduledTask(() -> com.mrcrayfish.furniture.client.browser.ComputerViews.receive(message.pos, message.kind, message.scroll, message.id, message.data));
         return null;
     }
 }

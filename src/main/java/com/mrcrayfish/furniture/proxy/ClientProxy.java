@@ -67,6 +67,10 @@ public class ClientProxy extends CommonProxy
         ClientRegistry.bindTileEntitySpecialRenderer(TileEntityTV.class, new TVRenderer());
         ClientRegistry.bindTileEntitySpecialRenderer(TileEntityCoffeeTable.class, new CoffeeTableRenderer());
         ClientRegistry.bindTileEntitySpecialRenderer(TileEntityPhotoFrame.class, new PhotoFrameRenderer());
+        // 电脑在世界里的屏幕显示页面缩略图（悠然服务器魔改，服主 11-16）
+        ClientRegistry.bindTileEntitySpecialRenderer(TileEntityComputer.class, new ComputerScreenRenderer());
+        TileEntityComputer.onClientUnload = ComputerScreenRenderer::release;
+        MinecraftForge.EVENT_BUS.register(new ComputerScreenRenderer.Events());
 
         MinecraftForge.EVENT_BUS.register(GifCache.INSTANCE);
         MinecraftForge.EVENT_BUS.register(new MirrorRenderer());

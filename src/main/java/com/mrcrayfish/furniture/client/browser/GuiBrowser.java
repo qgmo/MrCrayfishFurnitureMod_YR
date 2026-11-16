@@ -99,6 +99,9 @@ public class GuiBrowser extends GuiContainer
     private PageSnapshot spectatorSnapshot;
     private int spectatorRender;
     private double spectatorScroll;
+    /** 屏幕缩略图：把看到的页面画小了传给服务端（服主 11-16） */
+    @Nullable
+    private ThumbUploader thumbs;
 
     private String hoverText = "";
     /** 画板编辑器（操作者点了网页里的画板时开着；服主 11-15） */
@@ -247,6 +250,8 @@ public class GuiBrowser extends GuiContainer
 
     /** 上一帧是不是操作者（判断“被换下来”） */
     private boolean wasOperator;
+    /** 上一 tick 屏幕亮不亮（关机、没电后再亮时把页面重新传给服务端） */
+    private boolean wasOn = true;
 
     @Override
     public void onGuiClosed()
@@ -265,6 +270,11 @@ public class GuiBrowser extends GuiContainer
         ComputerViews.view(computer.getPos()).cookies = null;
         cookieMenu = 0;
         homeMenu = false;
+        if(thumbs != null)
+        {
+            thumbs.close();
+            thumbs = null;
+        }
         // 画板：只关编辑器、丢贴图，画的东西在表单里留着
         closeEditor();
         for(CanvasTexture t : canvasTextures.values())
@@ -296,7 +306,14 @@ public class GuiBrowser extends GuiContainer
     {
         super.updateScreen();
         Browser b = browser();
-        if(b != null && screenOn())
+        boolean on = screenOn();
+        if(b != null && on && !wasOn)
+        {
+            // 关机、没电时服务端清掉了页面（界面一直开着，本地还是原来那页）：重新传上去
+            b.resync();
+        }
+        wasOn = on;
+        if(b != null && on)
         {
             b.setScale(deviceScale);
             b.ensureStarted();
@@ -339,6 +356,28 @@ public class GuiBrowser extends GuiContainer
         {
             viewVersion = -1;
         }
+        updateThumbnail(b, operator);
+    }
+
+    /** 屏幕缩略图（服主 11-16）：操作者按自己传上去的那一页和报上去的滚动位置，旁观者按服务端发来的 */
+    private void updateThumbnail(@Nullable Browser b, boolean operator)
+    {
+        if(thumbs == null)
+            thumbs = new ThumbUploader(computer.getPos());
+        RenderedPage p = page();
+        int pageId, scroll;
+        if(operator)
+        {
+            pageId = b == null ? -1 : b.syncedPageId();
+            scroll = b == null ? -1 : b.syncedScroll();
+        }
+        else
+        {
+            ComputerViews.View v = ComputerViews.view(computer.getPos());
+            pageId = v.page == null ? -1 : v.pageId;
+            scroll = v.scroll;
+        }
+        thumbs.tick(p, pageId, scroll, computer.getScreenSpec(), System.currentTimeMillis());
     }
 
     /** 旁观者用自己的玩家临时地址取页面里的图（服务器只放行这一页图片所在的主机），规则同操作者（{@link ImageFetcher}） */
