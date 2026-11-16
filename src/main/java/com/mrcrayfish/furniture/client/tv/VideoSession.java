@@ -162,6 +162,11 @@ public final class VideoSession
         return (int) Math.max(VIDEO_QUEUE_MIN, Math.min(VIDEO_QUEUE_MAX, n));
     }
 
+    public int getMaxQuality()
+    {
+        return maxQuality;
+    }
+
     public BlockPos getPos()
     {
         return pos;

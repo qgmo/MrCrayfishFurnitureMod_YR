@@ -710,6 +710,7 @@ cfm.tv.settings.rejected=The server rejected the change; your input is kept
 cfm.tv.config.title=TV Video Settings (this computer only)
 cfm.tv.config.quality=Max quality: %s
 cfm.tv.config.quality_hint=Without a cookie at most 480P is used
+cfm.tv.config.quality_fullscreen=720P / 1080P only apply while watching a TV in fullscreen (right-click its screen); otherwise at most 480P
 cfm.tv.config.decoders=TVs playing at once: %s
 cfm.tv.config.danmaku_shown=Danmaku: follow each TV
 cfm.tv.config.danmaku_hidden=Danmaku: always hidden

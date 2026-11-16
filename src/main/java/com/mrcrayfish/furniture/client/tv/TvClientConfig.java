@@ -94,7 +94,7 @@ public final class TvClientConfig
         }
         config.load();
         Values v = new Values();
-        v.maxQuality = nearestQuality(config.getInt("max-quality", CATEGORY, BiliData.QN_480P, BiliData.QN_360P, BiliData.QN_1080P, "Highest bilibili quality code to request: 16 = 360P, 32 = 480P, 64 = 720P, 80 = 1080P. Without a cookie at most 32 (480P) is used."));
+        v.maxQuality = nearestQuality(config.getInt("max-quality", CATEGORY, BiliData.QN_480P, BiliData.QN_360P, BiliData.QN_1080P, "Highest bilibili quality code to request: 16 = 360P, 32 = 480P, 64 = 720P, 80 = 1080P. Without a cookie at most 32 (480P) is used. Above 480P only applies while watching a TV in fullscreen."));
         v.startRange = config.getInt("start-range", CATEGORY, 32, 4, 128, "TVs closer than this many blocks start fetching and showing video.");
         v.hearRange = config.getInt("hear-range", CATEGORY, 16, 1, 64, "TVs closer than this many blocks can be heard (volume fades with distance).");
         v.maxDecoders = config.getInt("max-decoders", CATEGORY, 2, 1, 8, "At most this many TVs decode video at the same time; the others show the video cover.");

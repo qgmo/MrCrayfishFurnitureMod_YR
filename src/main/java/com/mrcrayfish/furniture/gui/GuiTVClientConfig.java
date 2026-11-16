@@ -308,8 +308,14 @@ public class GuiTVClientConfig extends GuiScreen
         for(GuiTextField f : fields())
             f.drawTextBox();
         drawCenteredString(fontRenderer, status, width / 2, top + ROW_STATUS, 0xFFFF80);
-        if(quality.isMouseOver() && !values.hasCookie() && values.maxQuality > BiliData.QN_480P)
-            drawHoveringText(I18n.format("cfm.tv.config.quality_hint"), mouseX, mouseY);
+        if(quality.isMouseOver() && values.maxQuality > BiliData.QN_480P)
+        {
+            java.util.List<String> tip = new java.util.ArrayList<>();
+            tip.add(I18n.format("cfm.tv.config.quality_fullscreen"));
+            if(!values.hasCookie())
+                tip.add(I18n.format("cfm.tv.config.quality_hint"));
+            drawHoveringText(tip, mouseX, mouseY);
+        }
         if(pasteCookie.isMouseOver())
             drawHoveringText(java.util.Arrays.asList(I18n.format("cfm.tv.config.cookie_format").split("\\n")), mouseX, mouseY);
         super.drawScreen(mouseX, mouseY, partialTicks);

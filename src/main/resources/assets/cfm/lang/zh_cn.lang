@@ -700,6 +700,7 @@ cfm.tv.settings.rejected=服务器拒绝了这次修改，填的内容还在
 cfm.tv.config.title=电视视频设置（只在本机）
 cfm.tv.config.quality=清晰度上限：%s
 cfm.tv.config.quality_hint=没有 cookie 时最高 480P
+cfm.tv.config.quality_fullscreen=720P / 1080P 只在大屏观看时生效（右键电视屏幕），其余时候最高 480P
 cfm.tv.config.decoders=同时解码：%s 台
 cfm.tv.config.danmaku_shown=弹幕：跟着电视的开关
 cfm.tv.config.danmaku_hidden=弹幕：始终隐藏

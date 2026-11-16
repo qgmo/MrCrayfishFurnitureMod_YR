@@ -85,6 +85,8 @@ public final class TvVideoManager
     private final Map<BlockPos, String> reported = new HashMap<>();
     @Nullable
     private BlockPos fullscreen;
+    /** 换清晰度上限重开会话时，旧会话留着画到新会话出第一帧（避免黑一下），声音静音 */
+    private final Map<BlockPos, VideoSession> retiring = new HashMap<>();
     private int ticks;
     private long lastSyncLog;
 
@@ -93,8 +95,21 @@ public final class TvVideoManager
     public void setFullscreen(@Nullable BlockPos pos)
     {
         this.fullscreen = pos;
-        if(pos != null)
-            select();
+        select();
+    }
+
+    /**
+     * 一台电视的清晰度上限：玩家设置的生效上限只在这台是大屏时用，否则最高 480P。
+     */
+    static int capFor(int effectiveQuality, boolean fullscreen)
+    {
+        return fullscreen ? effectiveQuality : Math.min(effectiveQuality, BiliData.QN_480P);
+    }
+
+    /** 现有会话的上限和现在该用的不一样才重开（玩家设置本来就 ≤480P 或没 cookie 时，进出大屏都不会重开） */
+    static boolean needsRestart(int currentCap, int effectiveQuality, boolean fullscreen)
+    {
+        return currentCap != capFor(effectiveQuality, fullscreen);
     }
 
     @Nullable
@@ -177,6 +192,18 @@ public final class TvVideoManager
             catch(RuntimeException e)
             {
                 MrCrayfishFurnitureMod.logger().warn("TV video at {}: {}", p, e.toString());
+            }
+            VideoSession old = retiring.get(p);
+            if(old != null)
+            {
+                try
+                {
+                    old.update(clock, now, 0, x, y, z, false);
+                }
+                catch(RuntimeException e)
+                {
+                    MrCrayfishFurnitureMod.logger().warn("TV video at {}: {}", p, e.toString());
+                }
             }
             if(logSync)
             {
@@ -262,6 +289,14 @@ public final class TvVideoManager
                 e.getValue().close();
                 it.remove();
             }
+            else if(needsRestart(e.getValue().getMaxQuality(), cfg.effectiveQuality(), e.getKey().equals(fullscreen)))
+            {
+                // 上限变了：从现在的位置换一路新的，旧的先留着当画面
+                VideoSession old = retiring.put(e.getKey(), e.getValue());
+                if(old != null)
+                    old.close();
+                it.remove();
+            }
         }
         reportDurations(world);
         long latency = latencyMs(mc);
@@ -271,9 +306,17 @@ public final class TvVideoManager
             {
                 TileEntity te = world.getTileEntity(e.getKey());
                 long start = te instanceof TileEntityTV ? ((TileEntityTV) te).clientClock(latency).targetAt(now) : 0;
-                sessions.put(e.getKey(), new VideoSession(e.getKey(), e.getValue(), cfg.effectiveQuality(), start));
+                sessions.put(e.getKey(), new VideoSession(e.getKey(), e.getValue(), capFor(cfg.effectiveQuality(), e.getKey().equals(fullscreen)), start));
             }
         }
+        retiring.entrySet().removeIf(r ->
+        {
+            VideoSession now2 = sessions.get(r.getKey());
+            boolean done = now2 == null || now2.hasPicture() || now2.getStatus() == VideoSession.Status.ERROR;
+            if(done)
+                r.getValue().close();
+            return done;
+        });
     }
 
     /** 取到时长的视频报给服务端（频道还对得上、这个编号没报过时） */
@@ -313,6 +356,9 @@ public final class TvVideoManager
         for(VideoSession s : sessions.values())
             s.close();
         sessions.clear();
+        for(VideoSession s : retiring.values())
+            s.close();
+        retiring.clear();
         offSince.clear();
         reported.clear();
         fullscreen = null;
@@ -344,6 +390,9 @@ public final class TvVideoManager
                 break;
         }
         VideoSession session = sessions.get(tv.getPos());
+        VideoSession old = retiring.get(tv.getPos());
+        if(session != null && old != null && !session.hasPicture() && old.hasPicture() && session.getStatus() != VideoSession.Status.ERROR)
+            session = old;
         if(session == null)
         {
             // 超出同时解码的台数：显示封面
