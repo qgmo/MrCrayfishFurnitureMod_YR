@@ -88,6 +88,30 @@ class StockTest
         assertEquals(2, Stock.available(s));
     }
 
+    /** 掩模（服主 11-16）：每种每月 1 套，卖完了这个月都没有，下个月 1 日补回 1 套；几个月没人买也只有 1 套 */
+    @Test
+    void monthlyOne()
+    {
+        Stock.Spec spec = new Stock.Spec(1, Stock.Rule.MONTHLY);
+        Stock.State s = Stock.advance(null, spec, T0);
+        assertEquals(1, Stock.available(s));
+        assertTrue(Stock.take(s, 1));
+        assertFalse(Stock.take(s, 1), "这个月卖完了");
+        long dec1 = ZonedDateTime.of(2026, 12, 1, 0, 0, 0, 0, BJ).toInstant().toEpochMilli();
+        Stock.advance(s, spec, dec1 - 1);
+        assertEquals(0, Stock.available(s));
+        Stock.advance(s, spec, dec1);
+        assertEquals(1, Stock.available(s), "下个月 1 日补回");
+        long mar1 = ZonedDateTime.of(2027, 3, 1, 0, 0, 0, 0, BJ).toInstant().toEpochMilli();
+        Stock.advance(s, spec, mar1);
+        assertEquals(1, Stock.available(s), "不攒：几个月没人买也只有 1 套");
+        Stock.State back = Stock.State.read(s.write());
+        assertNotNull(back);
+        assertTrue(Stock.take(back, 1));
+        Stock.advance(back, spec, mar1 + 20 * DAY);
+        assertEquals(0, Stock.available(back), "存档读回后照旧");
+    }
+
     /** 上限变了截到新上限；规则变了从满的重来 */
     @Test
     void specChanges()

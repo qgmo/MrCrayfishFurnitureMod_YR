@@ -27,6 +27,9 @@ public final class Orders
         /** 网站给的名字；null 时浏览器按图标物品显示 */
         @Nullable
         public final String name;
+        /** 名字的翻译键（浏览器按玩家语言显示，翻不了时显示 {@link #name}）；没有时为 null */
+        @Nullable
+        public final String nameKey;
         public final String sortName;
         public final int quantity;
         public final String currency;
@@ -34,6 +37,12 @@ public final class Orders
 
         public Item(String id, String icon, int count, @Nullable String name, String sortName, int quantity, String currency, long cost)
         {
+            this(id, icon, count, name, null, sortName, quantity, currency, cost);
+        }
+
+        public Item(String id, String icon, int count, @Nullable String name, @Nullable String nameKey, String sortName, int quantity, String currency, long cost)
+        {
+            this.nameKey = nameKey;
             this.id = id;
             this.icon = icon;
             this.count = count;
@@ -153,6 +162,8 @@ public final class Orders
             it.setInteger("count", i.count);
             if(i.name != null)
                 it.setString("name", i.name);
+            if(i.nameKey != null)
+                it.setString("nameKey", i.nameKey);
             it.setString("sort", i.sortName);
             it.setInteger("n", i.quantity);
             it.setString("cur", i.currency);
@@ -168,8 +179,9 @@ public final class Orders
         for(int j = 0; j < items.tagCount() && parsed.size() < Cart.MAX_LINES; j++)
         {
             NBTTagCompound it = items.getCompoundTagAt(j);
+            String key = it.getString("nameKey");
             parsed.add(new Item(it.getString("id"), it.getString("icon"), it.getInteger("count"), it.hasKey("name", Constants.NBT.TAG_STRING) ? it.getString("name") : null,
-                    it.getString("sort"), it.getInteger("n"), it.getString("cur"), it.getLong("cost")));
+                    MineBayProduct.LANG_KEY.matcher(key).matches() ? key : null, it.getString("sort"), it.getInteger("n"), it.getString("cur"), it.getLong("cost")));
         }
         return parsed;
     }

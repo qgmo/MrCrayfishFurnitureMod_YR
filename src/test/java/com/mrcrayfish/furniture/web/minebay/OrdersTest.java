@@ -46,4 +46,21 @@ class OrdersTest
         assertEquals(16, b.items.get(0).count);
         assertEquals(Collections.singletonList(42L), Arrays.asList(back.list().get(0).number));
     }
+
+    /** 用翻译键起名的商品：订单里记着键（浏览器按玩家语言显示）和服务端的中文名；读回时不合写法的键丢掉、名字照旧 */
+    @Test
+    void nameKeySaved()
+    {
+        Orders o = new Orders();
+        o.add(new Orders.Order(7, 1_700_000_000_007L, Arrays.asList(
+                new Orders.Item("youranmod:tool_disk/basic", "youranmod:floppy_disk", 1, "BASIC 软盘", "youranmod.minebay.tool_disk.basic.name", "BASIC 软盘", 1,
+                        "minecraft:emerald", 16),
+                new Orders.Item("mod:x", "minecraft:paper", 1, "坏键", "bad key<>", "坏键", 1, "minecraft:emerald", 1))));
+        Orders.Order back = Orders.read(o.write()).find(7);
+        assertNotNull(back);
+        assertEquals("youranmod.minebay.tool_disk.basic.name", back.items.get(0).nameKey);
+        assertEquals("BASIC 软盘", back.items.get(0).name);
+        assertNull(back.items.get(1).nameKey);
+        assertEquals("坏键", back.items.get(1).name);
+    }
 }

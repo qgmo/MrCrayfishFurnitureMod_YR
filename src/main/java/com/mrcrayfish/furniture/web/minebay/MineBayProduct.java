@@ -18,6 +18,8 @@ import java.util.Objects;
  *         .icon(new ItemStack(ScpItems.FLOPPY))
  *         .price(new ItemStack(Items.DIAMOND), 3)
  *         .description("软盘里装着端口扫描器的镜像。")
+ *         // 或者用翻译键：网页上按玩家的语言显示（客户端语言文件里的键），服务端（搜索、排序、订单）用简体中文那句
+ *         // .nameKey("youranscp.minebay.portscan.name").descriptionKey("youranscp.minebay.portscan.desc")
  *         .delivery((buyer, n) -> makeFloppies(buyer, n))
  *         .maxPerOrder(4)
  *         .build());
@@ -32,11 +34,16 @@ public final class MineBayProduct
     public static final int MAX_KEYWORDS = 16;
     /** 单价上限 */
     public static final int MAX_PRICE = 1_000_000;
+    /** 翻译键的写法（同浏览器 {@code data-yr-lang}）：字母数字与 {@code ._-}，最多 128 个 */
+    public static final java.util.regex.Pattern LANG_KEY = java.util.regex.Pattern.compile("[A-Za-z0-9._-]{1,128}");
 
     public final String id;
     public final String category;
     @Nullable
     public final String name;
+    /** 名字的翻译键（网页上按玩家语言显示）；没有时为 null。与 {@link #name} 只能有一个 */
+    @Nullable
+    public final String nameKey;
     /** 图标（也是没写名字时显示的物品名） */
     public final ItemStack icon;
     public final ItemStack currency;
@@ -47,6 +54,8 @@ public final class MineBayProduct
     public final MineBayDelivery delivery;
     public final int maxPerOrder;
     public final List<String> description;
+    /** 用翻译键写的说明（每行一个键，排在 {@link #description} 后面；网页上按玩家语言显示） */
+    public final List<String> descriptionKeys;
     public final List<String> keywords;
     /** 库存（全服统一）；不限量为 null */
     @Nullable
@@ -57,6 +66,7 @@ public final class MineBayProduct
         this.id = b.id;
         this.category = b.category;
         this.name = b.name;
+        this.nameKey = b.nameKey;
         this.icon = b.icon.copy();
         this.currency = b.currency.copy();
         this.price = b.price;
@@ -64,6 +74,7 @@ public final class MineBayProduct
         this.delivery = b.delivery;
         this.maxPerOrder = b.maxPerOrder;
         this.description = Collections.unmodifiableList(new ArrayList<>(b.description));
+        this.descriptionKeys = Collections.unmodifiableList(new ArrayList<>(b.descriptionKeys));
         this.keywords = Collections.unmodifiableList(new ArrayList<>(b.keywords));
         this.stock = b.stock;
     }
@@ -80,6 +91,8 @@ public final class MineBayProduct
         private String category = Categories.MISC;
         @Nullable
         private String name;
+        @Nullable
+        private String nameKey;
         private ItemStack icon = ItemStack.EMPTY;
         private ItemStack currency = ItemStack.EMPTY;
         private int price;
@@ -88,6 +101,7 @@ public final class MineBayProduct
         private MineBayDelivery delivery;
         private int maxPerOrder = Cart.MAX_QUANTITY;
         private final List<String> description = new ArrayList<>();
+        private final List<String> descriptionKeys = new ArrayList<>();
         private final List<String> keywords = new ArrayList<>();
         @Nullable
         private Stock.Spec stock;
@@ -108,6 +122,16 @@ public final class MineBayProduct
         public Builder name(String name)
         {
             this.name = name;
+            return this;
+        }
+
+        /**
+         * 名字用翻译键：网页上由浏览器按玩家的语言显示（键在客户端的语言文件里，例如模组自己的 lang），服务端（搜索、按名字排序、订单记录）
+         * 用服务端翻译里简体中文的那句（YouranMod 的 {@code ServerLang}，读得到模组 jar 里的 zh_cn.lang）。不能和 {@link #name} 同时用
+         */
+        public Builder nameKey(String key)
+        {
+            this.nameKey = key;
             return this;
         }
 
@@ -153,6 +177,13 @@ public final class MineBayProduct
             return this;
         }
 
+        /** 商品说明里的一行，用翻译键（网页上按玩家语言显示，服务端用简体中文那句），排在 {@link #description} 那些行后面 */
+        public Builder descriptionKey(String key)
+        {
+            this.descriptionKeys.add(key);
+            return this;
+        }
+
         /**
          * 限量（全服统一，按现实时间）：每月最多卖 {@code perMonth} 份（1–100000）。{@link Stock.Rule#DAILY} 每天补上限的 1/30（连续补，
          * 卖完要等补回来）；{@link Stock.Rule#MONTHLY} 每个现实月 1 日补满、平时不补。不调用就不限量。
@@ -180,6 +211,8 @@ public final class MineBayProduct
                 throw new IllegalArgumentException("MineBay 没有这个分类（先 registerCategory）：" + category);
             if(name != null && (name.trim().isEmpty() || name.codePointCount(0, name.length()) > MAX_NAME))
                 throw new IllegalArgumentException("MineBay 商品名要有 1–" + MAX_NAME + " 个字：" + name);
+            if(nameKey != null && (name != null || !LANG_KEY.matcher(nameKey).matches()))
+                throw new IllegalArgumentException("MineBay 商品名的翻译键要写成字母数字与 ._-（最多 128 个），且不能和 name 同时用：" + id);
             if(currency.isEmpty() || price < 1 || price > MAX_PRICE)
                 throw new IllegalArgumentException("MineBay 商品要有货币，单价 1–" + MAX_PRICE + "：" + id);
             if(item.isEmpty() == (delivery == null))
@@ -190,12 +223,17 @@ public final class MineBayProduct
                 throw new IllegalArgumentException("MineBay 用发货回调的商品要设图标（icon）：" + id);
             if(maxPerOrder < 1 || maxPerOrder > Cart.MAX_QUANTITY)
                 throw new IllegalArgumentException("MineBay 一单上限要在 1–" + Cart.MAX_QUANTITY + "：" + id);
-            if(description.size() > MAX_DESCRIPTION_LINES)
+            if(description.size() + descriptionKeys.size() > MAX_DESCRIPTION_LINES)
                 throw new IllegalArgumentException("MineBay 商品说明最多 " + MAX_DESCRIPTION_LINES + " 行：" + id);
             for(String d : description)
             {
                 if(d == null || d.codePointCount(0, d.length()) > MAX_DESCRIPTION_LINE)
                     throw new IllegalArgumentException("MineBay 商品说明每行最多 " + MAX_DESCRIPTION_LINE + " 个字：" + id);
+            }
+            for(String k : descriptionKeys)
+            {
+                if(k == null || !LANG_KEY.matcher(k).matches())
+                    throw new IllegalArgumentException("MineBay 商品说明的翻译键要写成字母数字与 ._-（最多 128 个）：" + id);
             }
             if(keywords.size() > MAX_KEYWORDS)
                 throw new IllegalArgumentException("MineBay 搜索词最多 " + MAX_KEYWORDS + " 个：" + id);

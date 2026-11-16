@@ -236,7 +236,7 @@ public final class MineBayPages
         sb.append("<td class=\"cell\"><div class=\"card\">");
         sb.append("<div class=\"pic\"><a class=\"i48\" href=\"").append(attr(url)).append("\" data-yr-item=\"").append(attr(l.icon)).append("\"></a></div>");
         sb.append("<div class=\"nm\">");
-        nameLink(sb, l.name, l.sortName, l.icon, url);
+        nameLink(sb, l.name, l.nameKey, l.sortName, l.icon, url);
         if(l.count > 1)
             sb.append(" <span class=\"cnt\">&#215;").append(l.count).append("</span>");
         sb.append("</div><div class=\"pr\">");
@@ -266,11 +266,11 @@ public final class MineBayPages
         if(cat != null)
             sb.append(" &#8250; <a href=\"").append(attr(listUrl(cat.id, "", ShopParams.Sort.DEFAULT, 1))).append("\">").append(Html.escape(cat.name)).append("</a>");
         sb.append(" &#8250; <b>");
-        name(sb, l.name, l.sortName, l.icon);
+        name(sb, l.name, l.nameKey, l.sortName, l.icon);
         sb.append("</b></div>\n");
         sb.append("<table class=\"detail\"><tr><td class=\"big\"><div class=\"bigbox\"><span class=\"i96\" data-yr-item=\"").append(attr(l.icon)).append("\"></span></div>");
         sb.append("<div class=\"dim small\">鼠标指着图标看说明</div></td>\n<td class=\"info\"><h1>");
-        name(sb, l.name, l.sortName, l.icon);
+        name(sb, l.name, l.nameKey, l.sortName, l.icon);
         sb.append("</h1>\n<table class=\"facts\">");
         sb.append("<tr><th>价格</th><td><span class=\"bigprice\">");
         price(sb, l.currency, l.price, true);
@@ -362,7 +362,7 @@ public final class MineBayPages
             {
                 String url = itemUrl(l.id);
                 sb.append("<td class=\"ic\"><a class=\"i32\" href=\"").append(attr(url)).append("\" data-yr-item=\"").append(attr(l.icon)).append("\"></a></td><td class=\"nm\">");
-                nameLink(sb, l.name, l.sortName, l.icon, url);
+                nameLink(sb, l.name, l.nameKey, l.sortName, l.icon, url);
                 if(l.count > 1)
                     sb.append(" <span class=\"cnt\">&#215;").append(l.count).append("</span>");
                 if(why == Checkout.Unavailable.GONE)
@@ -419,7 +419,7 @@ public final class MineBayPages
             sb.append("<span class=\"i32\" data-yr-item=\"").append(attr(l.icon)).append("\"></span>");
         sb.append("</td><td>确定要把 <b>");
         if(l != null)
-            name(sb, l.name, l.sortName, l.icon);
+            name(sb, l.name, l.nameKey, l.sortName, l.icon);
         else
             sb.append(Html.escape(id));
         sb.append("</b>（").append(quantity).append(" 份）从购物车里删除吗？</td></tr></table>");
@@ -452,7 +452,7 @@ public final class MineBayPages
             sb.append("<tr><td class=\"ic\"><span class=\"i32\" data-yr-item=\"").append(attr(l == null ? "" : l.icon)).append("\"></span></td><td class=\"nm\">");
             if(l != null)
             {
-                name(sb, l.name, l.sortName, l.icon);
+                name(sb, l.name, l.nameKey, l.sortName, l.icon);
                 if(l.count > 1)
                     sb.append(" <span class=\"cnt\">&#215;").append(l.count).append("</span>");
                 if(l.stock != null)
@@ -585,7 +585,7 @@ public final class MineBayPages
         {
             Orders.Item it = o.items.get(i);
             sb.append("<tr><td class=\"ic\"><span class=\"i24\" data-yr-item=\"").append(attr(it.icon)).append("\"></span></td><td>");
-            name(sb, it.name, it.sortName, it.icon);
+            name(sb, it.name, it.nameKey, it.sortName, it.icon);
             if(it.count > 1)
                 sb.append(" <span class=\"cnt\">&#215;").append(it.count).append("</span>");
             sb.append("</td><td class=\"q\">").append(it.quantity).append(" 份</td><td class=\"r\">");
@@ -780,18 +780,23 @@ public final class MineBayPages
         return s.codePointCount(0, s.length()) <= max ? s : s.substring(0, s.offsetByCodePoints(0, max));
     }
 
-    private static void name(StringBuilder sb, @Nullable String name, String fallback, String icon)
+    /** 商品名：有翻译键时浏览器按玩家语言翻（翻不了显示网站给的名字），有网站给的名字时照写，否则浏览器按图标物品显示 */
+    private static void name(StringBuilder sb, @Nullable String name, @Nullable String nameKey, String fallback, String icon)
     {
-        if(name != null)
+        if(nameKey != null)
+            sb.append("<span data-yr-lang=\"").append(attr(nameKey)).append("\">").append(Html.escape(name != null ? name : fallback)).append("</span>");
+        else if(name != null)
             sb.append(Html.escape(name));
         else
             sb.append("<span data-yr-item-name=\"").append(attr(icon)).append("\">").append(Html.escape(fallback)).append("</span>");
     }
 
-    private static void nameLink(StringBuilder sb, @Nullable String name, String fallback, String icon, String url)
+    private static void nameLink(StringBuilder sb, @Nullable String name, @Nullable String nameKey, String fallback, String icon, String url)
     {
         sb.append("<a href=\"").append(attr(url)).append("\"");
-        if(name == null)
+        if(nameKey != null)
+            sb.append(" data-yr-lang=\"").append(attr(nameKey)).append("\">").append(Html.escape(name != null ? name : fallback));
+        else if(name == null)
             sb.append(" data-yr-item-name=\"").append(attr(icon)).append("\">").append(Html.escape(fallback));
         else
             sb.append(">").append(Html.escape(name));
