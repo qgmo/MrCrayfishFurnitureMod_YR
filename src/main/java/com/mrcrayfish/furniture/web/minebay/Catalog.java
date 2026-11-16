@@ -148,7 +148,8 @@ final class Catalog
             Stock.Spec stock = stockOf(d);
             if(d.getStock() != 0 && stock == null)
                 continue;
-            Listing l = listing(id, out.size(), classify(in), in, in.getCount(), custom, cur, d.getPrice(), Cart.MAX_QUANTITY, Collections.<String>emptyList(), Collections.<String>emptyList(), stock);
+            Listing l = listing(id, out.size(), classify(in), in, in.getCount(), custom, null, cur, d.getPrice(), Cart.MAX_QUANTITY, Collections.<String>emptyList(),
+                    Collections.<String>emptyList(), Collections.<String>emptyList(), stock);
             out.add(l);
             byId.put(id, new Entry(l, cur.copy(), in.copy(), null));
         }
@@ -156,9 +157,11 @@ final class Catalog
         {
             ItemStack shown = p.item.isEmpty() ? p.icon : p.item;
             int count = p.item.isEmpty() ? 1 : p.item.getCount();
-            Listing l = listing(p.id, out.size(), p.category, p.icon, count, p.name, p.currency, p.price, p.maxPerOrder, p.description, p.keywords, p.stock);
-            if(shown != p.icon && p.name == null && shown.hasDisplayName())
-                l = listing(p.id, out.size(), p.category, p.icon, count, strip(shown.getDisplayName()), p.currency, p.price, p.maxPerOrder, p.description, p.keywords, p.stock);
+            String name = p.nameKey != null ? strip(ServerLang.get(ServerLang.ZH_CN, p.nameKey)) : p.name;
+            if(name == null && shown != p.icon && shown.hasDisplayName())
+                name = strip(shown.getDisplayName());
+            Listing l = listing(p.id, out.size(), p.category, p.icon, count, name, p.nameKey, p.currency, p.price, p.maxPerOrder, p.description,
+                    p.descriptionKeys, p.keywords, p.stock);
             out.add(l);
             byId.put(p.id, new Entry(l, p.currency.copy(), p.item.copy(), p.delivery));
         }
@@ -177,8 +180,9 @@ final class Catalog
         return new Stock.Spec(d.getStock(), r);
     }
 
-    private static Listing listing(String id, int seq, String category, ItemStack stack, int count, @Nullable String name, ItemStack currency, int price, int max,
-                                   List<String> extraDescription, List<String> keywords, @Nullable Stock.Spec stock)
+    private static Listing listing(String id, int seq, String category, ItemStack stack, int count, @Nullable String name, @Nullable String nameKey,
+                                   ItemStack currency, int price, int max, List<String> extraDescription, List<String> descriptionKeys, List<String> keywords,
+                                   @Nullable Stock.Spec stock)
     {
         String english = english(stack);
         String chinese = chinese(stack);
@@ -186,6 +190,8 @@ final class Catalog
         List<List<Listing.Part>> desc = description(stack);
         for(String line : extraDescription)
             desc.add(Collections.singletonList(Listing.Part.text(line)));
+        for(String key : descriptionKeys)
+            desc.add(Collections.singletonList(Listing.Part.lang(key, strip(ServerLang.get(ServerLang.ZH_CN, key)))));
         StringBuilder search = new StringBuilder();
         search.append(sortName).append(' ').append(english).append(' ');
         if(chinese != null)
@@ -204,7 +210,17 @@ final class Catalog
         }
         for(String k : keywords)
             search.append(k).append(' ');
-        return new Listing(id, seq, category, iconId(stack), count, name, sortName, search.toString().toLowerCase(Locale.ROOT), itemId(currency), price, max, desc, stock);
+        // 用翻译键写的名字与说明：各语言的叫法都能搜到（英文、简体、繁体）
+        List<String> keys = new ArrayList<>(descriptionKeys);
+        if(nameKey != null)
+            keys.add(nameKey);
+        if(!keys.isEmpty())
+        {
+            for(String n : ServerLang.names(keys.toArray(new String[0])))
+                search.append(n).append(' ');
+        }
+        return new Listing(id, seq, category, iconId(stack), count, name, nameKey, sortName, search.toString().toLowerCase(Locale.ROOT), itemId(currency), price, max,
+                desc, stock);
     }
 
     /** 这件商品的货币的名字（服务端的中文名，没有时英文名；客服用） */

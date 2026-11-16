@@ -165,6 +165,43 @@ class MineBayPagesTest
         return new Listing(l.id, l.seq, l.category, l.icon, l.count, "BASIC 盘", l.sortName, l.searchText, l.currency, l.price, 4, l.description, new Stock.Spec(14, rule));
     }
 
+    /** 用翻译键起名、写说明的模组商品：列表、详情、购物车、订单都用 data-yr-lang（浏览器按玩家语言翻，翻不了显示服务端的中文） */
+    @Test
+    void langKeyNamesAndDescriptions() throws Exception
+    {
+        List<List<Listing.Part>> desc = new ArrayList<>();
+        desc.add(Collections.singletonList(Listing.Part.lang("youranmod.minebay.tool_disk.basic.desc", "GW-BASIC 和几个示例程序")));
+        Listing l = new Listing("youranmod:tool_disk/basic", 0, Categories.MISC, "youranmod:floppy_disk", 1, "BASIC 软盘", "youranmod.minebay.tool_disk.basic.name",
+                "BASIC 软盘", "basic 软盘", "minecraft:emerald", 16, 64, desc, null);
+        List<Listing> one = Collections.singletonList(l);
+        Map<String, String> en = new HashMap<>();
+        en.put("youranmod.minebay.tool_disk.basic.name", "BASIC Disk");
+        en.put("youranmod.minebay.tool_disk.basic.desc", "GW-BASIC and a few examples");
+        String list = MineBayPages.list(VIEWER, one, one, null, "", ShopParams.Sort.DEFAULT, 1, null);
+        check(list);
+        assertTrue(list.contains("data-yr-lang=\"youranmod.minebay.tool_disk.basic.name\">BASIC 软盘</a>"), "卡片的名字是带键的链接");
+        assertFalse(list.contains("data-yr-item-name=\"youranmod:floppy_disk\">"), "不再按图标物品起名");
+        String item = MineBayPages.item(VIEWER, l, 0, null, null);
+        check(item);
+        assertTrue(item.contains("<h1><span data-yr-lang=\"youranmod.minebay.tool_disk.basic.name\">BASIC 软盘</span></h1>"));
+        assertTrue(item.contains("<span data-yr-lang=\"youranmod.minebay.tool_disk.basic.desc\">GW-BASIC 和几个示例程序</span>"));
+        byte[] html = item.getBytes(StandardCharsets.UTF_8);
+        String text = PageDocument.parse(html, "https://minebay.yr/", id -> null, en::get, 600).dom.getElementsByTagName("body").item(0).getTextContent();
+        assertTrue(text.contains("BASIC Disk") && text.contains("GW-BASIC and a few examples"), "英文客户端看到英文");
+        assertFalse(text.contains("BASIC 软盘"), "页面正文里没有服务端的中文名（标题栏照旧用服务端的名字）");
+        Cart cart = new Cart();
+        cart.add(l.id, 2, 64);
+        Checkout.Plan plan = Checkout.plan(cart.lines(), id -> l, id -> -1);
+        String c = MineBayPages.cart(VIEWER, cart, id -> l, plan, null, Collections.<String, String>emptyMap());
+        check(c);
+        assertTrue(c.contains("data-yr-lang=\"youranmod.minebay.tool_disk.basic.name\""));
+        Orders.Order o = new Orders.Order(9, 1_700_000_000_000L, Collections.singletonList(
+                new Orders.Item(l.id, l.icon, 1, l.name, l.nameKey, l.sortName, 2, l.currency, 32)));
+        String orders = MineBayPages.orders(VIEWER, Collections.singletonList(o), 1, null, 9);
+        check(orders);
+        assertTrue(orders.contains("data-yr-lang=\"youranmod.minebay.tool_disk.basic.name\">BASIC 软盘</span>"));
+    }
+
     /** 限量商品：卡片、详情、购物车、结算都显示剩余；卖完没有购买按钮 */
     @Test
     void stockShownEverywhere() throws Exception

@@ -45,6 +45,9 @@ public final class Listing implements Checkout.Offer
     /** 网站给的名字（模组登记的商品、改过名的物品）；null 时用浏览器本地化的物品名 */
     @Nullable
     public final String name;
+    /** 名字的翻译键（模组商品用 {@code nameKey} 登记的）：浏览器按玩家语言显示，翻不了时显示 {@link #name}；没有时为 null */
+    @Nullable
+    public final String nameKey;
     /** 服务端能拿到的名字（搜索、按名字排序、订单记录用）：网站给的名字、中文名、英文名 */
     public final String sortName;
     /** 搜索用的文字（小写） */
@@ -67,7 +70,14 @@ public final class Listing implements Checkout.Offer
     public Listing(String id, int seq, String category, String icon, int count, @Nullable String name, String sortName, String searchText,
                    String currency, long price, int maxPerOrder, List<List<Part>> description, @Nullable Stock.Spec stock)
     {
+        this(id, seq, category, icon, count, name, null, sortName, searchText, currency, price, maxPerOrder, description, stock);
+    }
+
+    public Listing(String id, int seq, String category, String icon, int count, @Nullable String name, @Nullable String nameKey, String sortName,
+                   String searchText, String currency, long price, int maxPerOrder, List<List<Part>> description, @Nullable Stock.Spec stock)
+    {
         this.stock = stock;
+        this.nameKey = nameKey;
         this.id = id;
         this.seq = seq;
         this.category = category;

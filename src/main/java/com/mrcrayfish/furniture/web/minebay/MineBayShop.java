@@ -179,7 +179,7 @@ public final class MineBayShop
         {
             Checkout.Item i = plan.items.get(k);
             Listing l = (Listing) i.offer;
-            items.add(new Orders.Item(l.id, l.icon, l.count, l.name, l.sortName, i.quantity, l.currency, i.cost));
+            items.add(new Orders.Item(l.id, l.icon, l.count, l.name, l.nameKey, l.sortName, i.quantity, l.currency, i.cost));
             List<NBTTagCompound> g = new ArrayList<>();
             for(ItemStack s : goods.get(k))
                 g.add(s.writeToNBT(new NBTTagCompound()));
