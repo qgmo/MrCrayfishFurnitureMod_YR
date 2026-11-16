@@ -15,28 +15,32 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/** 电脑的外设槽：只收定位模块（按外设接口的种类认）、能力按外设报的能力算、存档 */
+/** 电脑的外设槽：什么外设都能插（服主 11-16），只有定位模块起作用（能力按外设报的能力算）、存档 */
 class ComputerPeripheralsTest
 {
     static Item locator;
     static Item other;
+    static Item hanzi;
 
     @BeforeAll
     static void items()
     {
         Bootstrap.register();
-        // 外设接口（YouranMod api.peripheral）：定位模块是种类 locator、能力 location 的外设；软驱是别的外设，家具电脑不收
+        // 外设接口（YouranMod api.peripheral）：定位模块是种类 locator、能力 location 的外设；软驱、汉卡是别的外设，插得上但不起作用
         locator = new PeripheralItem(Peripherals.KIND_LOCATOR, 16, Peripherals.CAP_LOCATION).setRegistryName("youranmod", "locator_module");
         other = new PeripheralItem(Peripherals.KIND_FLOPPY, 16).setRegistryName("youranmod", "floppy_drive");
+        hanzi = new PeripheralItem(Peripherals.KIND_HANZI, 16).setRegistryName("youranmod", "hanzi_card");
     }
 
     @Test
-    void onlyLocatorAndCapabilities()
+    void anyPeripheralButOnlyLocatorWorks()
     {
         AtomicInteger changes = new AtomicInteger();
         ComputerPeripherals p = new ComputerPeripherals(changes::incrementAndGet);
         assertTrue(ComputerPeripherals.accepts(0, new ItemStack(locator)));
-        assertFalse(ComputerPeripherals.accepts(0, new ItemStack(other)));
+        assertTrue(ComputerPeripherals.accepts(0, new ItemStack(other)), "软驱插得上");
+        assertTrue(ComputerPeripherals.accepts(0, new ItemStack(hanzi)), "汉卡插得上");
+        assertFalse(ComputerPeripherals.accepts(0, new ItemStack(Item.getItemFromBlock(net.minecraft.init.Blocks.STONE))), "不是外设的不收");
         assertFalse(ComputerPeripherals.accepts(0, ItemStack.EMPTY));
         assertFalse(ComputerPeripherals.accepts(1, new ItemStack(locator)), "只有一格");
         assertTrue(p.capabilities().isEmpty());
@@ -48,6 +52,13 @@ class ComputerPeripheralsTest
         ItemStack old = p.set(0, ItemStack.EMPTY);
         assertEquals(locator, old.getItem());
         assertFalse(p.hasLocator(), "拿出来就没有");
+        // 插着软驱、汉卡：没有任何能力
+        p.set(0, new ItemStack(other));
+        assertTrue(p.capabilities().isEmpty(), "软驱插着不起作用");
+        assertEquals(1, p.installed().size());
+        p.set(0, new ItemStack(hanzi));
+        assertTrue(p.capabilities().isEmpty(), "汉卡插着不起作用");
+        assertFalse(p.hasLocator());
     }
 
     @Test

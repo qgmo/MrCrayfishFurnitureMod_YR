@@ -10,6 +10,7 @@ import net.minecraft.block.state.IBlockState;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityLivingBase;
 import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.tileentity.TileEntity;
 import net.minecraft.util.EnumFacing;
@@ -20,6 +21,14 @@ import net.minecraft.util.text.TextComponentTranslation;
 import net.minecraft.world.IBlockAccess;
 import net.minecraft.world.World;
 
+import com.mrcrayfish.furniture.computer.ComputerCpu;
+import net.minecraft.client.util.ITooltipFlag;
+import net.minecraft.nbt.NBTTagCompound;
+import net.minecraft.util.NonNullList;
+import net.minecraftforge.fml.relauncher.Side;
+import net.minecraftforge.fml.relauncher.SideOnly;
+
+import javax.annotation.Nullable;
 import java.util.List;
 
 public class BlockComputer extends BlockFurnitureTile
@@ -68,6 +77,71 @@ public class BlockComputer extends BlockFurnitureTile
                 ((TileEntityComputer) te).dropPeripherals();
         }
         super.breakBlock(world, pos, state);
+    }
+
+    /** 掉落的电脑带着主板的数据（服主 11-16：芯片品质跟着电脑走）；外设、能量单元卡照旧另外掉出来 */
+    @Override
+    public void getDrops(NonNullList<ItemStack> drops, IBlockAccess world, BlockPos pos, IBlockState state, int fortune)
+    {
+        super.getDrops(drops, world, pos, state, fortune);
+        TileEntity te = world.getTileEntity(pos);
+        if(te instanceof TileEntityComputer && ((TileEntityComputer) te).getBoard() != null)
+        {
+            for(ItemStack drop : drops)
+            {
+                if(drop.getItem() == Item.getItemFromBlock(this))
+                {
+                    NBTTagCompound bet = new NBTTagCompound();
+                    bet.setTag(ComputerCpu.TAG_BOARD, ((TileEntityComputer) te).getBoard().copy());
+                    drop.setTagInfo("BlockEntityTag", bet);
+                }
+            }
+        }
+    }
+
+    /** 玩家挖时先掉东西再拆方块（不然掉落时方块实体已经没了，主板数据丢了） */
+    @Override
+    public boolean removedByPlayer(IBlockState state, World world, BlockPos pos, EntityPlayer player, boolean willHarvest)
+    {
+        return willHarvest || super.removedByPlayer(state, world, pos, player, willHarvest);
+    }
+
+    @Override
+    public void harvestBlock(World world, EntityPlayer player, BlockPos pos, IBlockState state, @Nullable TileEntity te, ItemStack stack)
+    {
+        super.harvestBlock(world, player, pos, state, te, stack);
+        world.setBlockToAir(pos);
+    }
+
+    /** 物品提示：CPU 型号与频率（服主 11-16） */
+    @SideOnly(Side.CLIENT)
+    @Override
+    public void addInformation(ItemStack stack, @Nullable World world, List<String> tooltip, ITooltipFlag flag)
+    {
+        super.addInformation(stack, world, tooltip, flag);
+        NBTTagCompound bet = stack.getSubCompound("BlockEntityTag");
+        tooltip.add(cpuLine(ComputerCpu.board(bet)));
+    }
+
+    /** “CPU：YR-2000，2.00 GHz” 这一行（物品提示、电脑界面共用） */
+    @SideOnly(Side.CLIENT)
+    public static String cpuLine(@Nullable NBTTagCompound board)
+    {
+        return cpuLine(board, false);
+    }
+
+    /** {@code brief}：不写“被最大频率封顶”那半句（电脑界面里地方小，那半句放在指着这一行时的提示里） */
+    @SideOnly(Side.CLIENT)
+    public static String cpuLine(@Nullable NBTTagCompound board, boolean brief)
+    {
+        String model = net.minecraft.client.resources.I18n.format("youranmod.chip.model." + ComputerCpu.modelId(board));
+        if(ComputerCpu.dead(board))
+            return net.minecraft.client.resources.I18n.format("cfm.computer.cpu.dead", model);
+        String freq = ComputerCpu.formatFreq(ComputerCpu.clockKHz(board));
+        if(ComputerCpu.capped(board) && !brief)
+            return net.minecraft.client.resources.I18n.format("cfm.computer.cpu.capped", model, freq,
+                    ComputerCpu.formatFreq(moe.qingu.youran.api.pcb.BoardNbt.cpuStandardKHz(board)));
+        return net.minecraft.client.resources.I18n.format("cfm.computer.cpu", model, freq);
     }
 
     @Override

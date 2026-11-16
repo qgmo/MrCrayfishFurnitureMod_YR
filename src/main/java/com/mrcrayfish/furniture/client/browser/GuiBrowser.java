@@ -154,7 +154,7 @@ public class GuiBrowser extends GuiContainer
 
     private boolean screenOn()
     {
-        return computer.isSwitchedOn() && computer.getAppliance().isRunning();
+        return computer.isSwitchedOn() && computer.getAppliance().isRunning() && !computer.isCpuDead();
     }
 
     @Nullable
@@ -469,7 +469,8 @@ public class GuiBrowser extends GuiContainer
         else
         {
             Gui.drawRect(sx + 2, sy + 2, sx + sw - 2, sy + sh - 2, 0xFF000000);
-            String msg = I18n.format(computer.isSwitchedOn() ? "cfm.browser.no_power" : "cfm.browser.off");
+            // CPU 报废了：有电也没有反应（服主 11-16 的家具电脑主板）
+            String msg = I18n.format(!computer.isSwitchedOn() ? "cfm.browser.off" : !computer.getAppliance().isRunning() ? "cfm.browser.no_power" : "cfm.browser.no_response");
             drawCenteredString(fontRenderer, msg, sx + sw / 2, sy + sh / 2 - 4, 0xFF8A8A8A);
             for(ToolButton t : tools)
                 t.visible = t.id.equals("power") || t.id.equals("items");
@@ -483,7 +484,7 @@ public class GuiBrowser extends GuiContainer
             List<String> power = ApplianceGui.tooltip(guiLeft, guiTop, ContainerComputer.CARD_X, ContainerComputer.CARD_Y, container.getCardSlot(), computer.getAppliance(), mouseX, mouseY);
             if(power != null)
                 drawHoveringText(power, mouseX, mouseY);
-            else
+            else if(!drawCpuHint(mouseX, mouseY))
                 drawPeripheralHint(mouseX, mouseY);
         }
         if(homeMenu && on && browser() != null)
@@ -539,9 +540,13 @@ public class GuiBrowser extends GuiContainer
         boolean focused = focus == FOCUS_ADDRESS && op;
         Gui.drawRect(addrX, toolbarY, addrX + addrW, toolbarY + 14, focused ? FIELD_FOCUS : FIELD_BORDER);
         Gui.drawRect(addrX + 1, toolbarY + 1, addrX + addrW - 1, toolbarY + 13, FIELD);
+        // 正在排版（CPU 比标准频率慢，服主 11-16）：地址栏右头写“正在排版……”，底下一道进度
+        int layout = op ? b.layoutProgress() : -1;
+        String layoutLabel = layout >= 0 ? I18n.format("cfm.browser.status.layout") : "";
+        int layoutW = layout >= 0 ? fontRenderer.getStringWidth(layoutLabel) + 6 : 0;
         if(op)
         {
-            drawTextEdit(b.address, addrX + 3, toolbarY + 3, addrW - 6, focused, false, TEXT);
+            drawTextEdit(b.address, addrX + 3, toolbarY + 3, addrW - 6 - layoutW, focused, false, TEXT);
         }
         else
         {
@@ -550,6 +555,13 @@ public class GuiBrowser extends GuiContainer
             boolean typing = typed != null && !typed.text.isEmpty() && !typed.text.equals(UrlInput.display(url));
             String shown = fontRenderer.trimStringToWidth(typing ? typed.text : UrlInput.display(url), addrW - 6);
             fontRenderer.drawString(shown, addrX + 3, toolbarY + 3, typing ? TEXT : TEXT_DIM);
+        }
+        if(layout >= 0 && layoutW < addrW - 20)
+        {
+            int lx = addrX + addrW - 1 - layoutW;
+            Gui.drawRect(lx, toolbarY + 1, addrX + addrW - 1, toolbarY + 13, 0xFFE8F0FE);
+            fontRenderer.drawString(layoutLabel, lx + 3, toolbarY + 3, 0xFF1A73E8);
+            Gui.drawRect(addrX + 1, toolbarY + 12, addrX + 1 + (addrW - 2) * layout / 100, toolbarY + 13, 0xFF1A73E8);
         }
     }
 
@@ -639,6 +651,8 @@ public class GuiBrowser extends GuiContainer
     {
         Browser b = browser();
         String left = hoverText;
+        if(left.isEmpty() && b != null && b.layoutProgress() >= 0)
+            left = I18n.format("cfm.browser.status.layout");
         if(left.isEmpty() && b != null && b.status() != Browser.Status.IDLE)
             left = b.statusText();
         if(left.isEmpty() && b != null && b.status() == Browser.Status.IDLE)
@@ -682,8 +696,11 @@ public class GuiBrowser extends GuiContainer
         {
             Browser b = browser();
             String msg;
-            if(b != null)
-                msg = b.status() == Browser.Status.IDLE && b.current() != null && b.rendered() == null ? I18n.format("cfm.browser.render_failed") : I18n.format("cfm.browser.status.rendering");
+            if(b != null && b.layoutProgress() >= 0)
+                msg = I18n.format("cfm.browser.status.layout");
+            else if(b != null)
+                msg = b.status() == Browser.Status.IDLE && b.current() != null && b.rendered() == null && !b.isRenderPending()
+                        ? I18n.format("cfm.browser.render_failed") : I18n.format("cfm.browser.status.rendering");
             else
                 msg = ComputerViews.view(computer.getPos()).page == null ? I18n.format("cfm.browser.no_page") : I18n.format("cfm.browser.status.rendering");
             drawCenteredString(fontRenderer, msg, vpX + vpW / 2, vpY + vpH / 2 - 4, TEXT_DIM);
@@ -1633,6 +1650,30 @@ public class GuiBrowser extends GuiContainer
     {
         fontRenderer.drawString(I18n.format("cfm.browser.panel.card"), ContainerComputer.CARD_X + 30, ContainerComputer.CARD_Y + 5, 0xFF404040);
         fontRenderer.drawString(I18n.format("cfm.browser.panel.peripheral"), ContainerComputer.PERIPHERAL_X + 20, ContainerComputer.PERIPHERAL_Y + 5, 0xFF404040);
+        // 这台电脑的 CPU（服主 11-16）
+        fontRenderer.drawString(fontRenderer.trimStringToWidth(com.mrcrayfish.furniture.blocks.BlockComputer.cpuLine(computer.getBoard(), true), xSize - 16),
+                8, ContainerComputer.CPU_Y, 0xFF404040);
+    }
+
+    /** 指着 CPU 那一行：完整的一句（被最大频率封顶时写明标准频率） */
+    private boolean drawCpuHint(int mouseX, int mouseY)
+    {
+        int y = guiTop + ContainerComputer.CPU_Y - 1;
+        if(mouseX < guiLeft + 8 || mouseX >= guiLeft + xSize - 8 || mouseY < y || mouseY >= y + 10)
+            return false;
+        drawHoveringText(java.util.Collections.singletonList(com.mrcrayfish.furniture.blocks.BlockComputer.cpuLine(computer.getBoard())), mouseX, mouseY);
+        return true;
+    }
+
+    /** 外设槽里插着用不上的外设（家具电脑只用得上定位模块）：提示里说一句 */
+    @Override
+    public List<String> getItemToolTip(ItemStack stack)
+    {
+        List<String> lines = super.getItemToolTip(stack);
+        if(getSlotUnderMouse() == container.getPeripheralSlot() && !moe.qingu.youran.api.peripheral.Peripherals.hasCapability(
+                java.util.Collections.singletonList(stack), moe.qingu.youran.api.peripheral.Peripherals.CAP_LOCATION))
+            lines.add(net.minecraft.util.text.TextFormatting.GRAY + I18n.format("cfm.browser.panel.peripheral.unused"));
+        return lines;
     }
 
     /** 指着空的外设槽：说明放什么、谁能放 */

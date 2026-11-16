@@ -3,6 +3,7 @@ package com.mrcrayfish.furniture.tileentity;
 import com.mrcrayfish.furniture.compat.RegionUse;
 import com.mrcrayfish.furniture.computer.BrowserHistory;
 import com.mrcrayfish.furniture.computer.ComputerCookies;
+import com.mrcrayfish.furniture.computer.ComputerCpu;
 import com.mrcrayfish.furniture.computer.ComputerNetwork;
 import com.mrcrayfish.furniture.computer.ComputerPeripherals;
 import com.mrcrayfish.furniture.computer.ComputerSync;
@@ -50,6 +51,10 @@ import java.util.UUID;
  * <li>旁观：别的玩家打开界面时看操作者当前的页面：操作者上传页面，服务端存在这里（只在内存）、转给旁观者，旁观者本地自己渲染。</li>
  * </ul>
  * 原来的 MineBay 改成了游戏内网站（{@code minebay.yr}），这里不再有交易的槽位；旧存档槽里剩的东西会掉出来。
+ * <p>
+ * 主板（服主 11-16）：合成时从家具电脑主板带进来的芯片数据（{@value ComputerCpu#TAG_BOARD}），一片 YR-2000 决定浏览器的处理速度
+ * （{@link ComputerCpu}）。进存档、随方块更新发给客户端（浏览器在操作者的客户端上），拆下时随掉落物走。没有的（以前放下的、创造模式拿的）
+ * 按标准 2.0 GHz。
  */
 public class TileEntityComputer extends TileEntityFurniture implements ITickable, IAppliance, moe.qingu.youran.api.peripheral.PeripheralHost
 {
@@ -63,6 +68,9 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
     /** 这台电脑的 Cookie 在 {@link ComputerCookies} 里的编号（第一次存 Cookie 时生成；进存档，不发给客户端） */
     @Nullable
     private UUID cookieJarId;
+    /** 主板的数据（芯片品质；服主 11-16）；没有为 null（按标准频率） */
+    @Nullable
+    private NBTTagCompound board;
     /** 这台电脑的主页（玩家“设为这台电脑的主页”；没设为 null，用服务器默认；服主 11-15）。进存档，只发给操作者 */
     @Nullable
     private String homePage;
@@ -71,6 +79,9 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
     @Nullable
     private UUID operator;
     private String operatorName = "";
+    /** 排版的基准（服务端配置，随方块更新发给客户端；客户端收到前用默认值） */
+    private int layoutBaseMs = ComputerCpu.DEFAULT_LAYOUT_BASE_MS;
+    private int layoutPerKbMs = ComputerCpu.DEFAULT_LAYOUT_PER_KB_MS;
     @Nullable
     private DeviceHandle device;
     /** 当前页面（压缩的 {@code PageSnapshot}）；没有为 null */
@@ -151,11 +162,38 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         return peripherals.installed();
     }
 
-    /** 家具电脑只收定位模块 */
+    /** 家具电脑什么外设都能插（服主 11-16），只有定位模块起作用（见 {@link ComputerPeripherals}） */
     @Override
     public boolean acceptsPeripheral(String kind)
     {
-        return moe.qingu.youran.api.peripheral.Peripherals.KIND_LOCATOR.equals(kind);
+        return kind != null && !kind.isEmpty();
+    }
+
+    /** 主板的数据（没有为 null） */
+    @Nullable
+    public NBTTagCompound getBoard()
+    {
+        return board;
+    }
+
+    /** CPU 实际跑的频率（kHz；坏了为 0） */
+    public int cpuClockKHz()
+    {
+        return ComputerCpu.clockKHz(board);
+    }
+
+    /** 这一页（多少字节）在这台电脑上比标准频率多等多久排版（毫秒；客户端用服务端发来的基准） */
+    public long extraLayoutMillis(int pageBytes)
+    {
+        int base = world != null && !world.isRemote ? com.mrcrayfish.furniture.handler.ConfigurationHandler.computerLayoutBaseMs : layoutBaseMs;
+        int perKb = world != null && !world.isRemote ? com.mrcrayfish.furniture.handler.ConfigurationHandler.computerLayoutPerKbMs : layoutPerKbMs;
+        return ComputerCpu.extraLayoutMillis(pageBytes, cpuClockKHz(), base, perKb);
+    }
+
+    /** CPU 坏了：通了电也没有反应 */
+    public boolean isCpuDead()
+    {
+        return ComputerCpu.dead(board);
     }
 
     public ComputerPeripherals getPeripherals()
@@ -393,7 +431,8 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
             setOperator(null);
         }
         dropLegacySlot();
-        updateDevice(running);
+        // CPU 坏了：照样耗电，但电脑没有反应，网卡不上电
+        updateDevice(running && !isCpuDead());
         // 旁观者的放行：每秒查一次谁不看了，每分钟给还在看的续期
         if(++ticks % 20 == 0)
             ComputerSync.refreshSpectators(this, ticks % 1200 == 0);
@@ -479,6 +518,9 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         this.history = BrowserHistory.readFromNBT(tagCompound);
         this.cookieJarId = tagCompound.hasUniqueId("CookieJarId") ? tagCompound.getUniqueId("CookieJarId") : null;
         this.peripherals.readFromNBT(tagCompound);
+        this.board = ComputerCpu.board(tagCompound);
+        if(board != null)
+            board = board.copy();
         String home = tagCompound.getString("HomePage");
         // 被改过的存档：不合格的当作没设
         this.homePage = com.mrcrayfish.furniture.computer.HomePage.isValid(home) ? home : null;
@@ -494,6 +536,8 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         if(cookieJarId != null)
             tagCompound.setUniqueId("CookieJarId", cookieJarId);
         this.peripherals.writeToNBT(tagCompound);
+        if(board != null)
+            tagCompound.setTag(ComputerCpu.TAG_BOARD, board.copy());
         if(homePage != null)
             tagCompound.setString("HomePage", homePage);
         return tagCompound;
@@ -507,6 +551,8 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
             tag.setUniqueId("Operator", operator);
             tag.setString("OperatorName", operatorName);
         }
+        tag.setInteger("LayoutBaseMs", com.mrcrayfish.furniture.handler.ConfigurationHandler.computerLayoutBaseMs);
+        tag.setInteger("LayoutPerKbMs", com.mrcrayfish.furniture.handler.ConfigurationHandler.computerLayoutPerKbMs);
         return tag;
     }
 
@@ -530,6 +576,10 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         this.cookieJarId = null;
         this.operator = tag.hasUniqueId("Operator") ? tag.getUniqueId("Operator") : null;
         this.operatorName = tag.getString("OperatorName");
+        if(tag.hasKey("LayoutBaseMs"))
+            this.layoutBaseMs = tag.getInteger("LayoutBaseMs");
+        if(tag.hasKey("LayoutPerKbMs"))
+            this.layoutPerKbMs = tag.getInteger("LayoutPerKbMs");
     }
 
     @Override
