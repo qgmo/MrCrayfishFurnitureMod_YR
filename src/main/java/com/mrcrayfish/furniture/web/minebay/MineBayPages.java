@@ -94,11 +94,32 @@ public final class MineBayPages
     {
         public final boolean ok;
         public final String text;
+        /** 没通过验证时的“重新验证”：等 id.yr 的操作编号与按钮上的字、表单令牌；没有为 null */
+        @Nullable
+        public final String retryGate;
+        @Nullable
+        public final String retryLabel;
+        @Nullable
+        public final String retryToken;
 
         public Notice(boolean ok, String text)
         {
+            this(ok, text, null, null, null);
+        }
+
+        private Notice(boolean ok, String text, @Nullable String retryGate, @Nullable String retryLabel, @Nullable String retryToken)
+        {
             this.ok = ok;
             this.text = text;
+            this.retryGate = retryGate;
+            this.retryLabel = retryLabel;
+            this.retryToken = retryToken;
+        }
+
+        /** 没通过：一句原因加“重新验证”按钮（{@code POST /verified/again}） */
+        public static Notice retry(String text, String gate, String label, String token)
+        {
+            return new Notice(false, text, gate, label, token);
         }
 
         public static Notice ok(String text)
@@ -599,7 +620,8 @@ public final class MineBayPages
         sb.append("<div class=\"box\"><div class=\"boxh\">操作前必须验证身份</div><div class=\"boxb\"><ul>");
         sb.append("<li>默认关闭：坐在登录着的电脑前的人就能下单（扣登录的帐号的钱）。</li>");
         sb.append("<li>在“帐号设置”里打开后，下单前游戏会弹出 id.yr 的确认框“确认你是 X”，只有你本人同意才下单；别人同意了也不算，购物车不会丢。</li>");
-        sb.append("<li>打开、关闭这一项也要你本人确认。</li>");
+        sb.append("<li>打开时 id.yr 弹框问是否允许 MineBay 验证身份，同意就打开；关闭要你本人验证身份。重新登录以后第一次下单会先问一次是否允许。</li>");
+        sb.append("<li>没通过时点“重新验证”再弹一次框；框没弹出来时，点 id.yr 页面上的“点这里重新弹出”。</li>");
         sb.append("</ul></div></div>\n");
         end(sb);
         return sb.toString();
@@ -830,7 +852,14 @@ public final class MineBayPages
     private static void notice(StringBuilder sb, @Nullable Notice n)
     {
         if(n != null && !n.text.isEmpty())
-            sb.append("<div class=\"notice ").append(n.ok ? "ok" : "bad").append("\">").append(Html.escape(n.text)).append("</div>\n");
+        {
+            sb.append("<div class=\"notice ").append(n.ok ? "ok" : "bad").append("\">").append(Html.escape(n.text));
+            if(n.retryGate != null)
+                sb.append("<form method=\"post\" action=\"/verified/again\"><input type=\"hidden\" name=\"t\" value=\"").append(attr(n.retryToken))
+                        .append("\"/><input type=\"hidden\" name=\"g\" value=\"").append(attr(n.retryGate)).append("\"/><button type=\"submit\" class=\"btn\">")
+                        .append(Html.escape(n.retryLabel)).append("</button></form>");
+            sb.append("</div>\n");
+        }
     }
 
     /**
