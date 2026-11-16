@@ -9,22 +9,52 @@ import java.nio.ByteBuffer;
 import java.nio.ShortBuffer;
 
 /**
- * 一路解码（悠然服务器魔改）：打开本机转发的地址，画面转 RGBA（缩到不超过 {@value #MAX_WIDTH}×{@value #MAX_HEIGHT}），
+ * 一路解码（悠然服务器魔改）：打开本机转发的地址，画面转 RGBA（缩到不超过清晰度上限对应的尺寸，见 {@link #maxSize(int)}），
  * 声音转 48 kHz、16 位、双声道（世界里播放时再并成单声道）。
  * <p>
  * FFmpeg 只开 http、tcp 两种协议（{@code protocol_whitelist}），只认 MP4 的解复用器，解码器只开 H.264 / H.265 / AV1 与 AAC / MP3。
  */
 final class VideoDecoder implements AutoCloseable
 {
-    static final int MAX_WIDTH = 854;
-    static final int MAX_HEIGHT = 480;
     static final int SAMPLE_RATE = 48000;
 
     private final FFmpegFrameGrabber grabber;
     private final boolean video;
     private final boolean audio;
 
-    VideoDecoder(String url, boolean video, boolean audio, long startMs) throws Exception
+    /**
+     * 清晰度上限（bilibili 的 qn）对应的画面尺寸上限 {宽, 高}：360P 640×360、480P 854×480、720P 1280×720、1080P 1920×1080。
+     * 不是四档之一的按不超过它的最高一档算，比 360P 还低的按 360P。
+     */
+    static int[] maxSize(int qn)
+    {
+        if(qn >= BiliData.QN_1080P)
+            return new int[]{1920, 1080};
+        if(qn >= BiliData.QN_720P)
+            return new int[]{1280, 720};
+        if(qn >= BiliData.QN_480P)
+            return new int[]{854, 480};
+        return new int[]{640, 360};
+    }
+
+    /** 源画面 w×h 缩进 maxW×maxH：保持比例、宽高取偶数、不放大；不需要缩时返回 null */
+    @Nullable
+    static int[] fit(int w, int h, int maxW, int maxH)
+    {
+        if(w <= 0 || h <= 0 || (w <= maxW && h <= maxH))
+            return null;
+        double scale = Math.min(maxW / (double) w, maxH / (double) h);
+        return new int[]{Math.max(2, (int) (w * scale) & ~1), Math.max(2, (int) (h * scale) & ~1)};
+    }
+
+    /** 一帧 RGBA 的字节数上限（按清晰度上限算，渲染和队列内存都以此为准） */
+    static int maxFrameBytes(int qn)
+    {
+        int[] m = maxSize(qn);
+        return m[0] * m[1] * 4;
+    }
+
+    VideoDecoder(String url, boolean video, boolean audio, long startMs, int maxQn) throws Exception
     {
         this.video = video;
         this.audio = audio;
@@ -52,11 +82,12 @@ final class VideoDecoder implements AutoCloseable
         if(video)
         {
             int w = grabber.getImageWidth(), h = grabber.getImageHeight();
-            if(w > MAX_WIDTH || h > MAX_HEIGHT)
+            int[] max = maxSize(maxQn);
+            int[] fit = fit(w, h, max[0], max[1]);
+            if(fit != null)
             {
-                double scale = Math.min(MAX_WIDTH / (double) w, MAX_HEIGHT / (double) h);
-                grabber.setImageWidth(Math.max(2, (int) (w * scale) & ~1));
-                grabber.setImageHeight(Math.max(2, (int) (h * scale) & ~1));
+                grabber.setImageWidth(fit[0]);
+                grabber.setImageHeight(fit[1]);
             }
         }
         if(startMs > 0)

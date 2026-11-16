@@ -42,7 +42,11 @@ public final class VideoSession
         ERROR
     }
 
-    private static final int VIDEO_QUEUE = 12;
+    /** 画面队列最多这么多帧（480P 及以下）；更高清晰度时按 {@link #VIDEO_QUEUE_BYTES} 减少，见 {@link #queueFrames(int)} */
+    private static final int VIDEO_QUEUE_MAX = 12;
+    private static final int VIDEO_QUEUE_MIN = 4;
+    /** 画面队列（含解码线程手里与正在显示的两帧）的内存预算，480P 以下的帧数不受它限制，1080P 时队列 6 帧、共约 66 MB */
+    private static final long VIDEO_QUEUE_BYTES = 64L * 1024 * 1024;
     private static final int AUDIO_QUEUE = 160;
     private static final long SEEK_COOLDOWN_MS = 3_000L;
     private static final AtomicInteger THREADS = new AtomicInteger();
@@ -105,8 +109,9 @@ public final class VideoSession
     private volatile long seekToMs = -1;
     private volatile int generation;
 
-    final BlockingQueue<VideoFrame> videoQueue = new ArrayBlockingQueue<>(VIDEO_QUEUE);
-    private final BlockingQueue<VideoFrame> freeFrames = new ArrayBlockingQueue<>(VIDEO_QUEUE + 4);
+    private final int videoQueueSize;
+    final BlockingQueue<VideoFrame> videoQueue;
+    private final BlockingQueue<VideoFrame> freeFrames;
     private final AtomicInteger allocated = new AtomicInteger();
     final BlockingQueue<AudioChunk> audioQueue = new ArrayBlockingQueue<>(AUDIO_QUEUE);
     private volatile boolean videoEof;
@@ -138,12 +143,23 @@ public final class VideoSession
         this.pos = pos;
         this.channel = channel;
         this.maxQuality = maxQuality;
+        this.videoQueueSize = queueFrames(maxQuality);
+        this.videoQueue = new ArrayBlockingQueue<>(videoQueueSize);
+        this.freeFrames = new ArrayBlockingQueue<>(videoQueueSize + 4);
         this.targetMs = startTargetMs;
         Thread t = new Thread(this::run, "cfm-tv-decode-" + THREADS.incrementAndGet());
         t.setDaemon(true);
         t.setPriority(Thread.NORM_PRIORITY - 1);
         threads.add(t);
         t.start();
+    }
+
+    /** 清晰度上限下画面队列的帧数：预算内装得下就是 12，否则减到预算能装的数量，但不少于 4 */
+    static int queueFrames(int maxQn)
+    {
+        long perFrame = VideoDecoder.maxFrameBytes(maxQn);
+        long n = VIDEO_QUEUE_BYTES / perFrame - 2;
+        return (int) Math.max(VIDEO_QUEUE_MIN, Math.min(VIDEO_QUEUE_MAX, n));
     }
 
     public BlockPos getPos()
@@ -353,7 +369,7 @@ public final class VideoSession
         long start = seekToMs >= 0 ? seekToMs : targetMs;
         seekToMs = -1;
         videoEof = false;
-        try(VideoDecoder video = new VideoDecoder(videoUrl, true, !s.dash, start))
+        try(VideoDecoder video = new VideoDecoder(videoUrl, true, !s.dash, start, maxQuality))
         {
             if(durationMs <= 0)
                 durationMs = video.lengthMs();
@@ -388,7 +404,7 @@ public final class VideoSession
         int gen = startGen;
         while(!closed && !Thread.currentThread().isInterrupted())
         {
-            try(VideoDecoder decoder = new VideoDecoder(url, false, true, from))
+            try(VideoDecoder decoder = new VideoDecoder(url, false, true, from, maxQuality))
             {
                 failures = 0;
                 decodeLoop(decoder, gen, false);
@@ -483,7 +499,7 @@ public final class VideoSession
         while(!closed)
         {
             VideoFrame f = freeFrames.poll();
-            if(f == null && allocated.get() < VIDEO_QUEUE + 2)
+            if(f == null && allocated.get() < videoQueueSize + 2)
             {
                 allocated.incrementAndGet();
                 f = new VideoFrame(capacity);

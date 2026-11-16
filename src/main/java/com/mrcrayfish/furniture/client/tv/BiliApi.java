@@ -6,6 +6,7 @@ import com.google.gson.JsonParser;
 import com.mrcrayfish.furniture.MrCrayfishFurnitureMod;
 import com.mrcrayfish.furniture.tv.TvChannel;
 
+import javax.annotation.Nullable;
 import javax.imageio.ImageIO;
 import javax.imageio.ImageReader;
 import javax.imageio.stream.ImageInputStream;
@@ -72,53 +73,82 @@ public final class BiliApi
         return info;
     }
 
+    /** 取一次 playurl：html5 = 单文件 MP4（platform=html5），否则 DASH */
+    interface PlayurlFetcher
+    {
+        @Nullable
+        BiliData.Stream fetch(boolean html5) throws BiliData.BiliException;
+    }
+
     /**
      * 取流：先试 html5 的单文件 MP4，不行再取 DASH。清晰度不超过 maxQn（取不到时接口会给更低的）。
+     * 有 cookie 且 html5 给的清晰度低于 maxQn 时（html5 常把 720P 以上锁在 480P）也试 DASH，两者取清晰度高的。
      */
     public static BiliData.Stream playurl(BiliData.VideoInfo info, int maxQn) throws BiliData.BiliException
     {
         ensureBuvid();
         boolean cookie = TvClientConfig.get().hasCookie();
+        return selectStream(html5 -> BiliData.parsePlayurl(json(playurlUri(playurlParams(info, maxQn, html5, cookie))), maxQn), maxQn, cookie);
+    }
+
+    /** 选流的逻辑（和网络分开，便于测试）；异常信息里不带 cookie */
+    static BiliData.Stream selectStream(PlayurlFetcher fetcher, int maxQn, boolean cookie) throws BiliData.BiliException
+    {
         BiliData.BiliException last = null;
-        for(int attempt = 0; attempt < 2; attempt++)
+        BiliData.Stream html5 = null;
+        try
         {
-            boolean html5 = attempt == 0;
-            Map<String, String> params = new LinkedHashMap<>();
-            if(!info.bvid.isEmpty())
-                params.put("bvid", info.bvid);
-            else
-                params.put("avid", Long.toString(info.aid));
-            params.put("cid", Long.toString(info.cid));
-            params.put("qn", Integer.toString(maxQn));
-            params.put("fnver", "0");
-            params.put("fourk", "0");
-            if(html5)
-            {
-                params.put("fnval", "1");
-                params.put("platform", "html5");
-                if(maxQn >= BiliData.QN_720P)
-                    params.put("high_quality", "1");
-            }
-            else
-            {
-                params.put("fnval", "16");
-            }
-            if(!cookie)
-                params.put("gaia_source", "view-card");
-            try
-            {
-                BiliData.Stream stream = BiliData.parsePlayurl(json(playurlUri(params)), maxQn);
-                if(stream != null)
-                    return stream;
-            }
-            catch(BiliData.BiliException e)
-            {
-                last = e;
-            }
+            html5 = fetcher.fetch(true);
         }
+        catch(BiliData.BiliException e)
+        {
+            last = e;
+        }
+        if(html5 != null && (!cookie || html5.quality >= maxQn))
+            return html5;
+        BiliData.Stream dash = null;
+        try
+        {
+            dash = fetcher.fetch(false);
+        }
+        catch(BiliData.BiliException e)
+        {
+            last = e;
+        }
+        if(dash != null && (html5 == null || dash.quality > html5.quality))
+            return dash;
+        if(html5 != null)
+            return html5;
         if(last != null)
             throw last;
         throw new BiliData.BiliException("cfm.tv.bili.no_stream", "no durl or dash");
+    }
+
+    private static Map<String, String> playurlParams(BiliData.VideoInfo info, int maxQn, boolean html5, boolean cookie)
+    {
+        Map<String, String> params = new LinkedHashMap<>();
+        if(!info.bvid.isEmpty())
+            params.put("bvid", info.bvid);
+        else
+            params.put("avid", Long.toString(info.aid));
+        params.put("cid", Long.toString(info.cid));
+        params.put("qn", Integer.toString(maxQn));
+        params.put("fnver", "0");
+        params.put("fourk", "0");
+        if(html5)
+        {
+            params.put("fnval", "1");
+            params.put("platform", "html5");
+            if(maxQn >= BiliData.QN_720P)
+                params.put("high_quality", "1");
+        }
+        else
+        {
+            params.put("fnval", "16");
+        }
+        if(!cookie)
+            params.put("gaia_source", "view-card");
+        return params;
     }
 
     private static URI playurlUri(Map<String, String> params)

@@ -105,7 +105,7 @@ public final class TvClientConfig
         v.proxyPort = config.getInt("proxy-port", CATEGORY, 0, 0, 65535, "Proxy port.");
         v.proxyUsername = cleanCredential(config.getString("proxy-username", CATEGORY, "", "Proxy user name (optional; leave empty if the proxy needs no login). Only sent to the proxy."));
         v.proxyPassword = cleanCredential(config.getString("proxy-password", CATEGORY, "", "Proxy password (optional). Stored in plain text in this file on your computer; only sent to the proxy."));
-        v.cookie = config.getString("bilibili-cookie", CATEGORY, "", "Your own bilibili cookie (optional, e.g. SESSDATA=...). Only sent to api.bilibili.com from this computer, never to the game server. Allows higher qualities.");
+        v.cookie = config.getString("bilibili-cookie", CATEGORY, "", "Your own bilibili cookie (optional). Format: SESSDATA=value, with the value copied as-is from the browser (URL-encoded, e.g. containing %2C; do not decode it). Only sent to api.bilibili.com from this computer, never to the game server. Allows higher qualities.");
         values = v;
         if(config.hasChanged())
             config.save();
