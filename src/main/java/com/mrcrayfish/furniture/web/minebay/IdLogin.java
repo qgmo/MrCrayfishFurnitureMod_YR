@@ -12,15 +12,15 @@ import java.util.concurrent.CompletionException;
 
 /**
  * MineBay 当 {@code id.yr}（游戏角色一键登录，YouranAuth 提供）的普通 OAuth 网站（服主 11-15）：授权码 + PKCE（S256），不预先注册，
- * {@code client_id} 就是 {@code http(s)://minebay.yr/}；要 {@code position} 范围，结算时凭访问令牌现查玩家在线状态与精确坐标；要 {@code verify} 范围，
- * 帐号开了“操作前必须验证身份”时请 id.yr 验证身份。用 YouranMod 的 {@link IdYrClient}，兑换、查信息、验证都走游戏内网络（MineBay 这台主机的协议栈），
+ * {@code client_id} 就是 {@code http(s)://minebay.yr/}；要 {@code position} 范围，结算时凭访问令牌现查玩家在线状态与精确坐标。{@code verify} 登录时不要
+ * （服主 11-16）：玩家打开“操作前必须验证身份”时才追加授权，打开以后下单前请 id.yr 验证身份。用 YouranMod 的 {@link IdYrClient}，兑换、查信息、验证都走游戏内网络（MineBay 这台主机的协议栈），
  * 不在代码上依赖 YouranAuth。网络线程上用。
  */
 final class IdLogin
 {
     static final String DOMAIN = IdYrClient.DEFAULT_DOMAIN;
-    /** 要 position（结算时现查位置）与 verify（帐号设置“操作前必须验证身份”用） */
-    static final String SCOPE = "position verify";
+    /** 登录时要 position（结算时现查位置）；verify 在打开“操作前必须验证身份”时追加 */
+    static final String SCOPE = "position";
     static final long TIMEOUT_MS = IdYrClient.TIMEOUT_MS;
 
     /** 兑换出来的：角色与访问令牌 */
@@ -31,13 +31,15 @@ final class IdLogin
         final String accessToken;
         /** 令牌什么时候过期（毫秒） */
         final long expiresAt;
+        final java.util.Set<String> scopes;
 
-        Token(UUID uuid, String name, String accessToken, long expiresAt)
+        Token(UUID uuid, String name, String accessToken, long expiresAt, java.util.Set<String> scopes)
         {
             this.uuid = uuid;
             this.name = name;
             this.accessToken = accessToken;
             this.expiresAt = expiresAt;
+            this.scopes = scopes;
         }
     }
 
@@ -104,7 +106,7 @@ final class IdLogin
     /** 后台兑换授权码 */
     static CompletableFuture<Token> exchange(NetStack stack, boolean tls, String scheme, String code, String verifier)
     {
-        return client(stack, tls).exchange(scheme, code, verifier).thenApply(t -> new Token(t.uuid, t.name, t.accessToken, t.expiresAt));
+        return client(stack, tls).exchange(scheme, code, verifier).thenApply(t -> new Token(t.uuid, t.name, t.accessToken, t.expiresAt, t.scopes));
     }
 
     /** 凭访问令牌现查玩家的在线状态与精确坐标；令牌失效时以 {@link TokenExpired} 结束 */

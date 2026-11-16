@@ -208,6 +208,13 @@ class MineBayPagesTest
         String on = MineBayPages.account(VIEWER, true, MineBayPages.Notice.ok("已打开"));
         check(on);
         assertTrue(on.contains("已打开</b>") && on.contains("name=\"verify\" value=\"0\""));
+        // 没通过：原因旁边有“重新验证”（带表单令牌与操作编号）
+        PageDocument again = check(MineBayPages.account(VIEWER, true, MineBayPages.Notice.retry("身份验证没有通过。设置没有改。", "g_x", "重新验证", "abc")));
+        PageDocument.FormInfo rf = again.forms.stream().filter(x -> x.action.equals("https://minebay.yr/verified/again")).findFirst().orElse(null);
+        assertNotNull(rf, "有重新验证");
+        assertTrue(rf.post);
+        assertTrue(again.controls.stream().anyMatch(c -> c.kind == PageDocument.Kind.HIDDEN && c.name.equals("g") && c.value.equals("g_x")));
+        assertTrue(MineBayPages.account(VIEWER, true, MineBayPages.Notice.retry("没通过", "g_x", "重新验证", "abc")).contains(">重新验证</button>"));
         String w = MineBayPages.waitVerify(VIEWER, "g_abc");
         check(w);
         assertTrue(w.contains("http-equiv=\"refresh\" content=\"2\""));

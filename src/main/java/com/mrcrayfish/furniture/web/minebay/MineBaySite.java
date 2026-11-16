@@ -85,38 +85,56 @@ public final class MineBaySite implements WebHandler
     private final Map<UUID, Pending> pending = lru(1024);
     /** 主线程：玩家 → 最近一次已经开单的确认码（重复提交时认出来） */
     private final Map<UUID, Done> done = lru(1024);
-    /** 网络线程：编号 → 等 id.yr 验证身份的操作（帐号开了“操作前必须验证身份”时） */
+    /** 网络线程：编号 → 等 id.yr 的操作（下单前验证身份、改“操作前必须验证身份”） */
     private final Map<String, Gate> gates = new ConcurrentHashMap<>();
     static final int MAX_GATES = 512;
-    /** id.yr 的请求 2 分钟内要打开、确认框 1 分钟 */
-    static final long GATE_TTL_MS = 5 * 60 * 1000L;
+    /** 多久没动静就忘掉（id.yr 的请求 2 分钟内要打开，框作废了还可以重新弹出，最多约 6 分钟；没通过的留着给“重新验证”） */
+    static final long GATE_TTL_MS = 10 * 60 * 1000L;
     /** 主线程上要先验证身份时，主线程那一步回这个，网络线程接着去 id.yr 建请求 */
     static final WebResponse NEED_VERIFY = WebResponse.error(500, "verify");
 
-    /** 一个等验证身份的操作：结算（带着提交的表单与位置证明）或改“操作前必须验证身份” */
+    /**
+     * 一个等 id.yr 的操作：结算（带着提交的表单与位置证明，要本人验证身份）或改“操作前必须验证身份”（打开：追加授权 verify，坐在电脑前的人同意就行；
+     * 关闭：本人验证身份）。这次登录还没有 verify 时，验证身份前先追加授权。没通过的留着，给“重新验证”用同样的内容重来。
+     */
     static final class Gate
     {
         final String id;
         final String sessionId;
-        final long created;
-        /** 结算：提交的表单；改设置：null */
+        /** 结算：提交的表单（确认页重新出过以后换成新确认码）；改设置：null */
         @Nullable
-        final Map<String, String> params;
+        volatile Map<String, String> params;
         @Nullable
         final LocationProof proof;
         /** 改设置：要改成开还是关 */
         final boolean on;
+        final String title;
+        final List<String> items;
+        volatile long touched;
         volatile String confirmId;
+        /** 现在这个 id.yr 请求是追加授权 */
+        volatile boolean scopeStep;
+        /** 没通过的原因（留着给“重新验证”）；还在进行为 null */
+        @Nullable
+        volatile String failed;
         final java.util.concurrent.atomic.AtomicBoolean checking = new java.util.concurrent.atomic.AtomicBoolean();
 
-        Gate(String id, String sessionId, long created, @Nullable Map<String, String> params, @Nullable LocationProof proof, boolean on)
+        Gate(String id, String sessionId, long now, @Nullable Map<String, String> params, @Nullable LocationProof proof, boolean on, String title, List<String> items)
         {
             this.id = id;
             this.sessionId = sessionId;
-            this.created = created;
+            this.touched = now;
             this.params = params;
             this.proof = proof;
             this.on = on;
+            this.title = title;
+            this.items = items;
+        }
+
+        /** 要本人验证身份（结算、关闭设置）；打开设置只要追加授权 */
+        boolean verify()
+        {
+            return params != null || !on;
         }
     }
 
@@ -138,7 +156,9 @@ public final class MineBaySite implements WebHandler
         final String id;
         final UUID uuid;
         final String name;
-        final String accessToken;
+        /** id.yr 的访问令牌与它的授权范围（追加授权后换成新的） */
+        volatile String accessToken;
+        volatile java.util.Set<String> scopes;
         final long tokenExpires;
         /** 登录用的协议（client_id 的协议；验证身份跳回来的网址要和它一样） */
         final String scheme;
@@ -150,9 +170,20 @@ public final class MineBaySite implements WebHandler
             this.uuid = t.uuid;
             this.name = t.name;
             this.accessToken = t.accessToken;
+            this.scopes = t.scopes;
             this.tokenExpires = t.expiresAt;
             this.scheme = scheme;
             this.lastSeen = now;
+        }
+
+        /** 追加授权换到的新令牌（角色不变时才换） */
+        void swap(@Nullable IdYrClient.Token t)
+        {
+            if(t != null && t.uuid.equals(uuid))
+            {
+                scopes = t.scopes;
+                accessToken = t.accessToken;
+            }
         }
 
         boolean alive(long now)
@@ -224,7 +255,7 @@ public final class MineBaySite implements WebHandler
         CHECKOUT("/checkout", false), CHECKOUT_POST("/checkout", true), ORDERS("/orders", false), ORDER("/order", false), HELP("/help", false),
         LOGIN("/login", false), CALLBACK("/login/callback", false), LOGOUT("/logout", true), PAID("/paid", false), UNPAID("/unpaid", false),
         SUPPORT("/support", false), SUPPORT_POST("/support", true), ACCOUNT("/account", false), SECURITY("/account/security", true),
-        VERIFIED("/verified", false);
+        VERIFIED("/verified", false), RETRY("/verified/again", true);
 
         final String path;
         final boolean post;
@@ -312,6 +343,8 @@ public final class MineBaySite implements WebHandler
             return security(request, params, context, login, token, scheme);
         if(route == Route.VERIFIED)
             return verified(request, params, context, login, token, scheme);
+        if(route == Route.RETRY && tokenOk && login != null)
+            return retry(request, params, context, login, token, scheme);
         return context.onMainThread(() -> main(request, route, s -> handleMain(route, params, s, tokenOk), login, token, scheme));
     }
 
@@ -406,7 +439,7 @@ public final class MineBaySite implements WebHandler
             return;
         sessions.values().removeIf(l -> !l.alive(now));
         logins.values().removeIf(l -> now - l.created > LOGIN_TTL_MS);
-        gates.values().removeIf(g -> now - g.created > GATE_TTL_MS);
+        gates.values().removeIf(g -> now - g.touched > GATE_TTL_MS);
     }
 
     /** 只许跳回 MineBay 自己的路径 */
@@ -529,63 +562,98 @@ public final class MineBaySite implements WebHandler
                 return NEED_VERIFY;
             return checkoutPostMain(params, s, System.currentTimeMillis());
         }, login, token, scheme))).thenCompose(resp -> resp != NEED_VERIFY ? done(resp)
-                : askVerify(r, context, login, token, scheme, new Gate(randomText(18), login.id, System.currentTimeMillis(), new HashMap<>(params), p, false),
-                "在 MineBay 下单", Collections.singletonList("收货人：" + login.name + "（登录的帐号）")));
+                : start(r, context, login, token, scheme, new Gate(randomText(18), login.id, System.currentTimeMillis(), new HashMap<>(params), p, false,
+                "在 MineBay 下单", Collections.singletonList("收货人：" + login.name + "（登录的帐号）"))));
     }
 
     // ---------------------------------------------------------------- 操作前必须验证身份（网络线程）
 
-    /** 打开、关闭“操作前必须验证身份”：两个方向都要验证身份（只有帐号本人能改） */
+    /** 打开“操作前必须验证身份”：在 id.yr 的同意框里给这次登录加上“验证身份”（坐在电脑前的人同意就行）；关闭：要本人验证身份 */
     private CompletableFuture<WebResponse> security(WebRequest r, Map<String, String> params, WebContext context, Login login, String token, String scheme)
     {
         boolean on = "1".equals(params.get("verify"));
-        return askVerify(r, context, login, token, scheme, new Gate(randomText(18), login.id, System.currentTimeMillis(), null, null, on),
-                (on ? "打开" : "关闭") + "操作前验证身份", java.util.Arrays.asList("MineBay 帐号：" + login.name,
-                        on ? "打开后下单前都要 " + login.name + " 本人确认" : "关闭后，坐在这台电脑前的人就能下单"));
+        return start(r, context, login, token, scheme, new Gate(randomText(18), login.id, System.currentTimeMillis(), null, null, on,
+                "关闭操作前验证身份", java.util.Arrays.asList("MineBay 帐号：" + login.name, "关闭后，坐在这台电脑前的人就能下单")));
     }
 
-    /** 请 id.yr 验证身份（只有登录的角色本人同意才通过），把浏览器 303 过去；建不了时回原来的页面说明 */
-    private CompletableFuture<WebResponse> askVerify(WebRequest r, WebContext context, Login login, String token, String scheme, Gate g, String title, List<String> items)
+    /** 记下这个操作，向 id.yr 建请求，把浏览器 303 过去；建不了时回原来的页面说明（可以重新验证） */
+    private CompletableFuture<WebResponse> start(WebRequest r, WebContext context, Login login, String token, String scheme, Gate g)
+    {
+        if(context.stack() == null || gates.size() >= MAX_GATES)
+            return refused(r, context, login, token, scheme, g, context.stack() == null ? "现在验证不了身份，请稍后再试。" : "现在太忙，请稍后再试。", false);
+        gates.put(g.id, g);
+        return ask(r, context, login, token, scheme, g);
+    }
+
+    /** 建这一步的 id.yr 请求：打开设置、或要验证身份而这次登录还没有 verify 时是追加授权；否则验证身份 */
+    private CompletableFuture<WebResponse> ask(WebRequest r, WebContext context, Login login, String token, String scheme, Gate g)
     {
         NetStack stack = context.stack();
-        if(stack == null || gates.size() >= MAX_GATES)
-            return refused(r, context, login, token, scheme, g, stack == null ? "现在验证不了身份，请稍后再试。" : "现在太忙，请稍后再试。");
-        gates.put(g.id, g);
         String back = login.scheme + "://" + DOMAIN + "/verified?g=" + g.id;
-        IdYrClient.Ask ask = IdYrClient.Ask.verify(title, items, moe.qingu.youran.api.network.ConfirmRequest.Purpose.ACTION, r.remoteAddress, back, g.id);
+        boolean scope = !g.verify() || !login.scopes.contains(IdYrClient.VERIFY);
+        IdYrClient.Ask ask = scope ? IdYrClient.Ask.scope(IdYrClient.VERIFY, r.remoteAddress, back, g.id)
+                : IdYrClient.Ask.verify(g.title, g.items, moe.qingu.youran.api.network.ConfirmRequest.Purpose.ACTION, r.remoteAddress, back, g.id);
+        g.scopeStep = scope;
+        g.confirmId = null;
+        g.touched = System.currentTimeMillis();
         return IdLogin.client(stack, context.hasTls()).ask(login.accessToken, ask).handle((t, e) ->
         {
             if(t == null)
+            {
+                MrCrayfishFurnitureMod.logger().warn("MineBay: id.yr confirm request for {} failed: {}", login.name, cause(e));
                 return null;
+            }
             g.confirmId = t.id;
             return WebResponse.seeOther(t.url);
-        }).thenCompose(resp ->
-        {
-            if(resp != null)
-                return done(resp);
-            gates.remove(g.id);
-            return refused(r, context, login, token, scheme, g, "建不了验证请求（登录可能过期了），请稍后再试或重新登录。");
-        });
+        }).thenCompose(resp -> resp != null ? done(resp)
+                : refused(r, context, login, token, scheme, g, "建不了验证请求（登录可能过期了），请稍后再试或重新登录。", true));
     }
 
-    /** 没通过：结算回新的确认页（购物车原样），改设置回帐号设置页 */
-    private CompletableFuture<WebResponse> refused(WebRequest r, WebContext context, Login login, String token, String scheme, Gate g, String why)
+    /**
+     * 没通过：结算回新的确认页（购物车原样），改设置回帐号设置页；都带“重新验证”（{@code keep}：留着这个操作）。
+     * 确认页重新出过，确认码换了新的：记进这个操作，重新验证通过后照新的确认码下单。
+     */
+    private CompletableFuture<WebResponse> refused(WebRequest r, WebContext context, Login login, String token, String scheme, Gate g, String why, boolean keep)
     {
-        return context.onMainThread(() -> main(r, Route.VERIFIED, s -> g.params != null ? checkoutRefused(g.params, s, why + "没有下单。", 403)
-                : accountPage(403, "Forbidden", s, MineBayPages.Notice.bad(why + "设置没有改。")), login, token, scheme));
+        g.failed = why;
+        g.touched = System.currentTimeMillis();
+        String label = g.verify() ? "重新验证" : "重新确认";
+        return context.onMainThread(() -> main(r, Route.VERIFIED, s ->
+        {
+            Map<String, String> params = g.params;
+            if(params == null)
+                return accountPage(403, "Forbidden", s, keep ? MineBayPages.Notice.retry(why + "设置没有改。", g.id, label, s.token)
+                        : MineBayPages.Notice.bad(why + "设置没有改。"));
+            WebResponse page = checkoutRefused(params, s, why + "没有下单。", 403, keep ? g.id : null, label);
+            Pending fresh = s.ok() ? pending.get(s.login.uuid) : null;
+            if(fresh != null)
+            {
+                Map<String, String> next = new HashMap<>(params);
+                next.put("k", fresh.nonce);
+                g.params = next;
+            }
+            return page;
+        }, login, token, scheme));
     }
 
-    /** id.yr 验证完跳回来（{@code /verified?g=编号}）：向 id.yr 核对（网址里带的结果不算数），通过了接着做 */
+    /**
+     * id.yr 跳回来（{@code /verified?g=编号}；或刷新、换人坐下重新打开这一页）：向 id.yr 核对（网址里带的结果不算数）。追加授权通过了换上新令牌，
+     * 要验证身份的接着去验证；验证通过了接着做；没通过回原来的页面并给“重新验证”。
+     */
     private CompletableFuture<WebResponse> verified(WebRequest r, Map<String, String> params, WebContext context, @Nullable Login login, String token, String scheme)
     {
         String gid = params.get("g");
         Gate g = gid == null ? null : gates.get(gid);
         NetStack stack = context.stack();
-        if(g == null || login == null || !g.sessionId.equals(login.id) || g.confirmId == null || stack == null)
+        if(g == null || login == null || !g.sessionId.equals(login.id) || stack == null)
             return context.onMainThread(() -> main(r, Route.VERIFIED, s -> page(404, "Not Found", MineBayPages.problem(s.viewer(), "验证已经结束",
                     "这次验证已经结束或过期了，请回去重新操作。")), login, token, scheme));
-        if(!g.checking.compareAndSet(false, true))
+        String failed = g.failed;
+        if(failed != null)
+            return refused(r, context, login, token, scheme, g, failed, true);
+        if(g.confirmId == null || !g.checking.compareAndSet(false, true))
             return context.onMainThread(() -> main(r, Route.VERIFIED, s -> page(200, "OK", MineBayPages.waitVerify(s.viewer(), g.id)), login, token, scheme));
+        boolean scopeStep = g.scopeStep;
         return IdLogin.client(stack, context.hasTls()).result(login.accessToken, g.confirmId).handle((out, e) ->
         {
             if(out == null)
@@ -595,17 +663,26 @@ public final class MineBaySite implements WebHandler
             }
             if(out.status == IdYrClient.Outcome.Status.PENDING)
                 return "";
-            return out.approved() ? null : out.text(true);
+            if(!out.approved())
+                return scopeStep ? ("denied".equals(out.reason) ? "在 id.yr 的确认框里没有同意。" : out.text(false)) : out.text(true);
+            if(scopeStep)
+            {
+                login.swap(out.token);
+                if(!login.scopes.contains(IdYrClient.VERIFY))
+                    return "id.yr 没有给“验证身份”的授权。";
+            }
+            return null;
         }).thenCompose(why ->
         {
+            g.checking.set(false);
             if("".equals(why))
-            {
-                g.checking.set(false);
                 return context.onMainThread(() -> main(r, Route.VERIFIED, s -> page(200, "OK", MineBayPages.waitVerify(s.viewer(), g.id)), login, token, scheme));
-            }
-            gates.remove(g.id);
             if(why != null)
-                return refused(r, context, login, token, scheme, g, why);
+                return refused(r, context, login, token, scheme, g, why, true);
+            if(scopeStep && g.verify())
+                // 授权有了，接着请本人验证身份（新的请求、新的框）
+                return ask(r, context, login, token, scheme, g);
+            gates.remove(g.id);
             if(g.params == null)
                 return context.onMainThread(() -> main(r, Route.VERIFIED, s ->
                 {
@@ -616,17 +693,33 @@ public final class MineBaySite implements WebHandler
                 }, login, token, scheme));
             // 结算：验证完再现查一次位置（中间可能走开了），再开单
             LocationProof p = g.proof;
+            Map<String, String> form = g.params;
             return IdLogin.position(stack, context.hasTls(), login.accessToken).handle((pos, e2) -> pos).thenCompose(pos -> context.onMainThread(() ->
                     main(r, Route.VERIFIED, s ->
                     {
                         if(pos == null)
-                            return checkoutRefused(g.params, s, "查不到 " + login.name + " 的位置（id.yr），暂时不能下单。", 403);
+                            return checkoutRefused(form, s, "查不到 " + login.name + " 的位置（id.yr），暂时不能下单。", 403);
                         String far = Reach.check(login.name, pos, p.dimension, p.x, p.y, p.z);
                         if(far != null)
-                            return checkoutRefused(g.params, s, far, 403);
-                        return checkoutPostMain(g.params, s, System.currentTimeMillis());
+                            return checkoutRefused(form, s, far, 403);
+                        return checkoutPostMain(form, s, System.currentTimeMillis());
                     }, login, token, scheme)));
         });
+    }
+
+    /** 没通过时的“重新验证”（{@code POST /verified/again}，带 {@code g}）：同一个操作、同样的内容，重新向 id.yr 建请求（新的框） */
+    private CompletableFuture<WebResponse> retry(WebRequest r, Map<String, String> params, WebContext context, Login login, String token, String scheme)
+    {
+        String gid = params.get("g");
+        Gate g = gid == null ? null : gates.get(gid);
+        if(g == null || !g.sessionId.equals(login.id) || context.stack() == null)
+            return context.onMainThread(() -> main(r, Route.VERIFIED, s -> page(404, "Not Found", MineBayPages.problem(s.viewer(), "验证已经结束",
+                    "这次验证已经结束或过期了，请回去重新操作。")), login, token, scheme));
+        if(g.failed == null || !g.checking.compareAndSet(false, true))
+            return done(WebResponse.seeOther("/verified?g=" + g.id));
+        g.failed = null;
+        g.checking.set(false);
+        return ask(r, context, login, token, scheme, g);
     }
 
     static String locationError(String code)
@@ -1064,6 +1157,12 @@ public final class MineBaySite implements WebHandler
     /** 提交被拒（位置、距离、登录）：回一张新的确认页说明原因，购物车原样 */
     private WebResponse checkoutRefused(Map<String, String> params, Session s, String why, int status)
     {
+        return checkoutRefused(params, s, why, status, null, null);
+    }
+
+    /** {@code retryGate} 不为 null 时原因旁边有“重新验证”按钮 */
+    private WebResponse checkoutRefused(Map<String, String> params, Session s, String why, int status, @Nullable String retryGate, @Nullable String label)
+    {
         if(!s.ok())
             return loginNeeded(s, "/checkout");
         Pending p = pending.get(s.login.uuid);
@@ -1072,7 +1171,8 @@ public final class MineBaySite implements WebHandler
             return w.error;
         if(w.plan.isEmpty())
             return page(status, "Forbidden", MineBayPages.problem(s.viewer(), "没有下单", why));
-        return checkoutPage(status, status == 403 ? "Forbidden" : "Conflict", s, w.plan, w.buy, w.qty, MineBayPages.Notice.bad(why), s.now);
+        return checkoutPage(status, status == 403 ? "Forbidden" : "Conflict", s, w.plan, w.buy, w.qty,
+                retryGate == null ? MineBayPages.Notice.bad(why) : MineBayPages.Notice.retry(why, retryGate, label, s.token), s.now);
     }
 
     private WebResponse checkoutPostMain(Map<String, String> params, Session s, long now)
