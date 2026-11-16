@@ -621,6 +621,7 @@ public final class Browser
     public void tick()
     {
         finishLayout(System.currentTimeMillis());
+        flushScroll(System.currentTimeMillis());
         syncTyping();
         syncCanvases();
         reportHistory();
@@ -1234,6 +1235,48 @@ public final class Browser
                 return;
             }
         }
+    }
+
+    /**
+     * 停下来时最后的滚动位置也要报上去（{@link #reportScroll} 只在滚的时候报，250 毫秒内的最后一下会漏掉）；
+     * 只报已经传给服务端的那一页的。
+     */
+    private void flushScroll(long now)
+    {
+        Entry e = current();
+        if(e != null && e == uploadedEntry && rendered() != null && e.scroll != lastSentScroll && now - lastScrollSent >= 250)
+        {
+            lastSentScroll = e.scroll;
+            lastScrollSent = now;
+            PacketHandler.INSTANCE.sendToServer(new MessageComputerScroll(pos, e.scroll));
+        }
+    }
+
+    /**
+     * 服务端把页面清掉了（关机、没电后又开机，界面一直开着）：当前这一页重新传上去，旁观者和世界里的屏幕才看得到。
+     * 只重传，不重新加载、不动地址栏和表单。
+     */
+    public void resync()
+    {
+        uploadedEntry = null;
+        Entry e = current();
+        // 还没画好的，画好显示时（show）会传
+        if(e != null && rendered() != null)
+            upload(e);
+    }
+
+    /** 当前显示的这一页在服务端的上传编号（屏幕缩略图用）；还没传上去、太大没传时为 -1 */
+    public int syncedPageId()
+    {
+        Entry e = current();
+        return e != null && e == uploadedEntry && rendered() != null ? typingUpload : -1;
+    }
+
+    /** 服务端知道的滚动位置（和本地一样时）；还没报上去时为 -1 */
+    public int syncedScroll()
+    {
+        Entry e = current();
+        return e != null && e == uploadedEntry && e.scroll == lastSentScroll ? e.scroll : -1;
     }
 
     /** 滚动位置（最多每 250 毫秒报一次） */

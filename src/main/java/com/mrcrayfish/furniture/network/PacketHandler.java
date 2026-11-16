@@ -46,6 +46,9 @@ public class PacketHandler
         registerMessage(MessageComputerCookies.class, MessageComputerCookies.class, Side.SERVER);
         registerMessage(MessageComputerCanvas.class, MessageComputerCanvas.class, Side.SERVER);
         registerMessage(MessageComputerHome.class, MessageComputerHome.class, Side.SERVER);
+        // 电脑在世界里的屏幕显示缩略图（服主 11-16）
+        registerMessage(MessageComputerThumb.class, MessageComputerThumb.class, Side.SERVER);
+        registerMessage(MessageComputerScreen.class, MessageComputerScreen.class, Side.CLIENT);
     }
     
     private static <REQ extends IMessage, REPLY extends IMessage> void registerMessage(Class<? extends IMessageHandler<REQ, REPLY>> messageHandler, Class<REQ> requestMessageType, Side side)
