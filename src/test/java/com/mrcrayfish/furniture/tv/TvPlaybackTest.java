@@ -98,4 +98,23 @@ class TvPlaybackTest
         p.rewind(1_000_000, TvPlayback.SEEK_STEP_MS * 100, 90_000);
         assertEquals(0, p.positionAt(1_000_000));
     }
+
+    /** 播完停在片尾时按“播放”从头播；没播完照常暂停；不知道时长照常（服主 11-16） */
+    @Test
+    void playAtEndRestarts()
+    {
+        TvPlayback p = new TvPlayback(false, 60_000L, 0L);
+        assertTrue(p.playOrRestart(100L, 60_000L));
+        assertTrue(p.isPlaying());
+        assertEquals(0L, p.positionAt(100L));
+
+        TvPlayback q = new TvPlayback(true, 10_000L, 0L);
+        assertFalse(q.playOrRestart(0L, 60_000L));
+        assertFalse(q.isPlaying());
+        assertEquals(10_000L, q.positionAt(0L));
+
+        TvPlayback r = new TvPlayback(false, 60_000L, 0L);
+        assertFalse(r.playOrRestart(0L, 0L));
+        assertTrue(r.isPlaying());
+    }
 }

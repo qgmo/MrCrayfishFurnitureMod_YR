@@ -61,6 +61,24 @@ public final class TvPlayback
         baseTimeMs = nowMs;
     }
 
+    /** 播完时按“播放”从头播的容差：进度离片尾不到这么多也算播完 */
+    public static final long END_SLACK_MS = 1_000L;
+
+    /**
+     * 遥控器的“播放 / 暂停”（服主 11-16）：已经播到片尾（endMs &gt; 0 且进度到了片尾前 {@value #END_SLACK_MS} ms 以内）就从头播，
+     * 否则照常播放 / 暂停。返回是不是从头播了。
+     */
+    public boolean playOrRestart(long nowMs, long endMs)
+    {
+        if(endMs > 0 && positionAt(nowMs) >= endMs - END_SLACK_MS)
+        {
+            restart(nowMs);
+            return true;
+        }
+        togglePlay(nowMs);
+        return false;
+    }
+
     /** 播放 / 暂停 */
     public void togglePlay(long nowMs)
     {

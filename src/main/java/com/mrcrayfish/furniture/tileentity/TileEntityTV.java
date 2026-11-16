@@ -425,9 +425,13 @@ public class TileEntityTV extends TileEntitySyncClient implements ITickable, IAp
             switch(action)
             {
                 case TOGGLE_PLAY:
-                    playback.togglePlay(now);
+                {
+                    // 播完停在片尾时按“播放”从头播（服主 11-16）；片尾按服务端采信的时长，没采信时按按的人的客户端知道的时长
+                    long end = durations.trusted();
+                    playback.playOrRestart(now, end > 0 ? end : (TvDurations.valid(clientDurationMs) ? clientDurationMs : 0));
                     playback.showOsd(now);
                     break;
+                }
                 case TOGGLE_OSD:
                     playback.toggleOsd(now);
                     break;
