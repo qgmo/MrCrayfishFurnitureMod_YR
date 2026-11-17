@@ -3,6 +3,7 @@ package com.mrcrayfish.furniture.web;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import moe.qingu.youran.api.network.Ipv6Address;
+import moe.qingu.youran.api.network.ca.HttpChallenges;
 import moe.qingu.youran.api.network.stack.EventLoop;
 import moe.qingu.youran.api.network.stack.NetStack;
 import moe.qingu.youran.api.network.stack.NetworkException;
@@ -22,7 +23,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 
 /**
- * 在一个服务端协议栈上提供网站：80 口 HTTP，有 TLS 时 443 口再开 HTTPS。每条连接处理一个请求，回完就关
+ * 在一个服务端协议栈上提供网站：80 口 HTTP，有 TLS 时 443 口再开 HTTPS（证书由网站自己向 YouranMod 的证书签发服务申请，
+ * 见 {@code api.network.ca.CertificateClient}；80 口自动回证书服务的 HTTP 认证）。每条连接处理一个请求，回完就关
  * （{@code Connection: close}）；{@value #IDLE_TIMEOUT_MS} 毫秒内没收齐请求就断开，网站 {@value #HANDLER_TIMEOUT_MS} 毫秒内没回就回 503。
  * 跑在协议栈的事件循环（网络线程）上。
  */
@@ -214,6 +216,14 @@ public final class WebServer
                 return;
             }
             boolean head = r.method.equals("HEAD");
+            // 证书服务的 HTTP 认证（只在不加密的 80 口）：这台主机正在等的令牌由这里回
+            String challenge = secure || !(head || r.method.equals("GET")) ? null : HttpChallenges.answer(stack, pathOf(r.target));
+            if(challenge != null)
+            {
+                send(new WebResponse(200, "OK", "text/plain; charset=utf-8", challenge.getBytes(StandardCharsets.UTF_8),
+                        java.util.Collections.<String, String>emptyMap()), head);
+                return;
+            }
             WebRequest request = new WebRequest(head ? "GET" : r.method, r.target, r.headers, r.body, remote, remotePort, secure);
             CompletableFuture<WebResponse> f;
             try
@@ -268,6 +278,13 @@ public final class WebServer
             out.write(build(resp, headOnly, ZonedDateTime.now(ZoneOffset.UTC)));
             out.close();
         }
+    }
+
+    /** 请求目标里 {@code ?} 之前的部分 */
+    static String pathOf(String target)
+    {
+        int q = target.indexOf('?');
+        return q < 0 ? target : target.substring(0, q);
     }
 
     static byte[] build(WebResponse r, boolean headOnly, ZonedDateTime now)

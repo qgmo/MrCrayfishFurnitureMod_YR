@@ -8,8 +8,11 @@ import moe.qingu.youran.api.network.stack.NetStack;
 import moe.qingu.youran.api.network.tls.TlsTrust;
 import moe.qingu.youran.server.net.tls.CertificateBuilder;
 import moe.qingu.youran.server.net.tls.IntermediateCa;
-import moe.qingu.youran.server.net.tls.IssuingTlsContext;
-import moe.qingu.youran.server.net.tls.LeafCache;
+import moe.qingu.youran.api.network.ca.CertificateAuthority;
+import moe.qingu.youran.api.network.ca.CertificateClient;
+import moe.qingu.youran.api.network.ca.CertificateOrder;
+import moe.qingu.youran.api.network.ca.Challenge;
+import moe.qingu.youran.api.network.tls.CertificateTlsContext;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
@@ -160,8 +163,12 @@ class WebServerTest
         KeyPair caKey = ec.generateKeyPair();
         X509Certificate ca = new CertificateBuilder().subject("测试中间 CA").publicKey(caKey.getPublic()).issuer(root, rootKey.getPrivate())
                 .validity(new Date(now - day), new Date(now + 365 * day)).ca(0).permitDns("yr").excludeAllIp().build();
-        LeafCache cache = new LeafCache(new IntermediateCa(Arrays.asList(ca), caKey.getPrivate()), System::currentTimeMillis);
-        WebServer s = WebServer.serve(server, ECHO, CONTEXT, new IssuingTlsContext(cache, () -> Collections.singletonList("minebay.yr")));
+        // 证书由测试中间 CA 签给 minebay.yr（正式运行时由网站向证书签发服务申请）
+        KeyPair leafKey = ec.generateKeyPair();
+        CertificateTlsContext tls = new CertificateTlsContext();
+        tls.set(leafKey.getPrivate(), new IntermediateCa(Arrays.asList(ca), caKey.getPrivate())
+                .issue(Collections.singletonList("minebay.yr"), leafKey.getPublic(), new Date(now)));
+        WebServer s = WebServer.serve(server, ECHO, CONTEXT, tls);
         assertTrue(s.hasTls());
         // 用 IP 直连但按域名握手：自己拼一个“解析器”不方便，直接走 TLS 连接 + 手写请求
         DnsResolver dns = new DnsResolver(client, Ipv6Address.parse("fd00::53"));
@@ -189,6 +196,62 @@ class WebServerTest
     }
 
     final CompletableFuture<String> received = new CompletableFuture<>();
+
+    @Test
+    void answersCertificateChallengesOnPort80() throws Exception
+    {
+        WebServer.serve(server, ECHO, CONTEXT, null);
+        // 假的证书服务：像真的一样经网络 GET 认证网址（用 IP 直连，省掉 DNS），内容对就算通过（不签证书，只看认证）
+        String[] seen = new String[2];
+        CertificateAuthority fake = new CertificateAuthority()
+        {
+            CertificateOrder order;
+
+            @Override
+            public String unavailableReason()
+            {
+                return null;
+            }
+
+            @Override
+            public CompletableFuture<CertificateOrder> newOrder(Ipv6Address requester, java.util.Collection<String> names, java.security.PublicKey key)
+            {
+                Challenge c = new Challenge("minebay.yr", "tok123", "tok123.content", "dnsvalue");
+                order = new CertificateOrder("o1", CertificateOrder.Status.PENDING, Collections.singletonList("minebay.yr"),
+                        Collections.singletonList(c), null, null, null, 0);
+                return CompletableFuture.completedFuture(order);
+            }
+
+            @Override
+            public CompletableFuture<CertificateOrder> order(String id)
+            {
+                return CompletableFuture.completedFuture(order);
+            }
+
+            @Override
+            public CompletableFuture<CertificateOrder> ready(String id, Challenge.Method method)
+            {
+                seen[0] = method.id;
+                DnsResolver dns = new DnsResolver(client, Ipv6Address.parse("fd00::53"));
+                return HttpClient.send(client, dns, HttpClient.Url.parse("http://[" + SERVER + "]" + Challenge.HTTP_PATH + "tok123"), "GET", null, null, 10_000, null)
+                        .thenApply(r ->
+                        {
+                            seen[1] = r.status + " " + r.bodyText();
+                            return new CertificateOrder("o1", CertificateOrder.Status.INVALID, order.names, order.challenges, method, "只看认证", null, 0);
+                        });
+            }
+        };
+        CertificateClient.start(server, Collections.singletonList("minebay.yr"), null, fake, System::currentTimeMillis);
+        loop.advance(5000);
+        assertEquals("http", seen[0], "80 口开着网站：HTTP 认证");
+        assertEquals("200 tok123.content", seen[1]);
+        // 认证完以后交回网站自己处理
+        DnsResolver dns = new DnsResolver(client, Ipv6Address.parse("fd00::53"));
+        CompletableFuture<HttpClient.Response> after = HttpClient.send(client, dns, HttpClient.Url.parse("http://[" + SERVER + "]" + Challenge.HTTP_PATH + "tok123"),
+                "GET", null, null, 10_000, null);
+        loop.advance(5000);
+        assertTrue(done(after).bodyText().contains("GET " + Challenge.HTTP_PATH + "tok123"));
+    }
 
     /** 不阻塞：没完成就算失败 */
     static <T> T done(CompletableFuture<T> f) throws Exception
