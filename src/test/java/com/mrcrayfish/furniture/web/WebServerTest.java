@@ -214,7 +214,7 @@ class WebServerTest
             }
 
             @Override
-            public CompletableFuture<CertificateOrder> newOrder(Ipv6Address requester, java.util.Collection<String> names, java.security.PublicKey key)
+            public CompletableFuture<CertificateOrder> newOrder(Ipv6Address requester, java.util.Collection<String> names, byte[] csr)
             {
                 Challenge c = new Challenge("minebay.yr", "tok123", "tok123.content", "dnsvalue");
                 order = new CertificateOrder("o1", CertificateOrder.Status.PENDING, Collections.singletonList("minebay.yr"),
