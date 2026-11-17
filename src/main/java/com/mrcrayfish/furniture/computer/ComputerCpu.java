@@ -1,5 +1,8 @@
 package com.mrcrayfish.furniture.computer;
 
+import moe.qingu.youran.api.chip.ChipNumbers;
+import moe.qingu.youran.api.chip.CpuChip;
+import moe.qingu.youran.api.chip.CpuClock;
 import moe.qingu.youran.api.pcb.BoardNbt;
 import moe.qingu.youran.logic.litho.ChipModel;
 import net.minecraft.nbt.NBTTagCompound;
@@ -9,8 +12,9 @@ import javax.annotation.Nullable;
 /**
  * 家具电脑的 CPU（悠然服务器魔改，服主 11-16）：主板上的一片 YR-2000（YouranMod 的 {@code api.pcb.BoardNbt}，合成时从主板带进电脑）。
  * <ul>
- * <li>实际频率：先取 YR-2000 的标准频率 2.0 GHz，被这片芯片的最大频率封顶（最大频率低于 2.0 GHz 就按最大频率）。可调的 1.6–2.6 GHz
- * 这一版不做设置界面。没有主板数据的电脑（以前放下的、创造模式拿的）按标准 2.0 GHz。芯片报废了（没有最大频率）为 0：电脑没有反应。</li>
+ * <li>实际频率：电脑界面电源开关旁边的调频旋钮（服主 11-17）在 1.6–2.6 GHz 里设定（没设过 = 标准 2.0 GHz），被这片芯片的最大频率封顶。
+ * 没有主板数据的电脑（以前放下的、创造模式拿的）当作一片标称芯片（YouranMod {@code api.chip.CpuChip#nominal}：最大频率 = 标准 2.0 GHz）。
+ * 芯片报废了、寿命用完了为 0：电脑没有反应。</li>
  * <li>浏览器的处理速度 = 实际频率 ÷ 2.0 GHz（服主定），只体现在排版等待上（服主 11-16）：页面数据到了以后，排版要的时间按
  * “标准频率 ÷ 实际频率”拉长——标准频率时不加任何等待（和现在一样快），慢了多等 {@link #extraLayoutMillis}，等的时候地址栏旁写“正在排版……”。
  * 网速、滚动、打字、鼠标、画面刷新都不受影响。基准（标准频率下排一页的时间）按现在实际的排版耗时定，做成服务端配置。</li>
@@ -41,18 +45,32 @@ public final class ComputerCpu
      */
     public static int clockKHz(@Nullable NBTTagCompound board)
     {
-        if(board == null)
-            return STANDARD_KHZ;
-        if(!BoardNbt.hasCpu(board))
-            return 0;
-        int std = BoardNbt.cpuStandardKHz(board);
-        return BoardNbt.cpuClockKHz(board, std > 0 ? std : STANDARD_KHZ);
+        return clockKHz(board, 0);
     }
 
-    /** CPU 坏了（报废、没装）：电脑通了电也没有反应 */
+    /** 实际频率（kHz）：旋钮设定 {@code settingKHz}（0 = 标准频率；落到最近的一档），被最大频率封顶；坏了为 0 */
+    public static int clockKHz(@Nullable NBTTagCompound board, int settingKHz)
+    {
+        CpuChip c = chip(board);
+        return CpuClock.actualKHz(c, setting(c, settingKHz, ChipNumbers.current()));
+    }
+
+    /** 主板上的 CPU（YouranMod 的品质快照；没有主板数据为标称芯片） */
+    public static CpuChip chip(@Nullable NBTTagCompound board)
+    {
+        return CpuChip.of(board, ChipModel.YR2000, ChipNumbers.current());
+    }
+
+    /** 旋钮设定落到这片 CPU 的某一档（kHz） */
+    public static int setting(CpuChip chip, int settingKHz, ChipNumbers n)
+    {
+        return CpuClock.clamp(settingKHz, CpuClock.settings(chip, n), chip.stdKHz);
+    }
+
+    /** CPU 坏了（报废、寿命用完、没装）：电脑通了电也没有反应 */
     public static boolean dead(@Nullable NBTTagCompound board)
     {
-        return clockKHz(board) <= 0;
+        return chip(board).dead;
     }
 
     /** 处理速度：实际频率 ÷ 2.0 GHz */

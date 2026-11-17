@@ -85,14 +85,19 @@ public class BlockComputer extends BlockFurnitureTile
     {
         super.getDrops(drops, world, pos, state, fortune);
         TileEntity te = world.getTileEntity(pos);
-        if(te instanceof TileEntityComputer && ((TileEntityComputer) te).getBoard() != null)
+        // CPU 的运行数据（旋钮设定、温度、出事记录；服主 11-17）也跟着走
+        if(te instanceof TileEntityComputer && (((TileEntityComputer) te).getBoard() != null || !((TileEntityComputer) te).getCpu().isEmpty()))
         {
+            TileEntityComputer c = (TileEntityComputer) te;
             for(ItemStack drop : drops)
             {
                 if(drop.getItem() == Item.getItemFromBlock(this))
                 {
                     NBTTagCompound bet = new NBTTagCompound();
-                    bet.setTag(ComputerCpu.TAG_BOARD, ((TileEntityComputer) te).getBoard().copy());
+                    if(c.getBoard() != null)
+                        bet.setTag(ComputerCpu.TAG_BOARD, c.getBoard().copy());
+                    if(!c.getCpu().isEmpty())
+                        bet.setTag(com.mrcrayfish.furniture.computer.CpuRuntime.TAG, c.getCpu().write());
                     drop.setTagInfo("BlockEntityTag", bet);
                 }
             }
@@ -134,10 +139,17 @@ public class BlockComputer extends BlockFurnitureTile
     @SideOnly(Side.CLIENT)
     public static String cpuLine(@Nullable NBTTagCompound board, boolean brief)
     {
+        return cpuLine(board, brief, 0);
+    }
+
+    /** {@code setting}：调频旋钮的设定（kHz；0 = 标准） */
+    @SideOnly(Side.CLIENT)
+    public static String cpuLine(@Nullable NBTTagCompound board, boolean brief, int setting)
+    {
         String model = net.minecraft.client.resources.I18n.format("youranmod.chip.model." + ComputerCpu.modelId(board));
         if(ComputerCpu.dead(board))
             return net.minecraft.client.resources.I18n.format("cfm.computer.cpu.dead", model);
-        String freq = ComputerCpu.formatFreq(ComputerCpu.clockKHz(board));
+        String freq = ComputerCpu.formatFreq(ComputerCpu.clockKHz(board, setting));
         if(ComputerCpu.capped(board) && !brief)
             return net.minecraft.client.resources.I18n.format("cfm.computer.cpu.capped", model, freq,
                     ComputerCpu.formatFreq(moe.qingu.youran.api.pcb.BoardNbt.cpuStandardKHz(board)));
