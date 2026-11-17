@@ -7,7 +7,7 @@ import net.minecraft.inventory.Slot;
 import net.minecraft.item.ItemStack;
 
 /**
- * 合成时读合成格里的电池（悠然服务器魔改）。电栅栏、电视遥控器的配方在整合包的 CraftTweaker 脚本里（要一节电池），
+ * 合成时读合成格里的电池（悠然服务器魔改）。电栅栏的配方要一节电池（{@link ElectricFenceRecipe}），
  * 合成出来的东西要带上那节电池的电量（电栅栏还有容量），模组在物品的 {@code onCreated} 里调这里取电池。
  * <p>
  * 为什么放在 {@code onCreated}：点取、Shift 点取（含连续合成多个）都会在合成格被扣掉之前、产物进背包之前对产物本身调用它，
