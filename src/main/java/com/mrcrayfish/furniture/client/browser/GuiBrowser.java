@@ -9,6 +9,7 @@ import com.mrcrayfish.furniture.gui.ApplianceGui;
 import com.mrcrayfish.furniture.gui.containers.ContainerComputer;
 import com.mrcrayfish.furniture.network.PacketHandler;
 import com.mrcrayfish.furniture.network.message.MessageComputerAction;
+import com.mrcrayfish.furniture.network.message.MessageComputerCpu;
 import com.mrcrayfish.furniture.tileentity.TileEntityComputer;
 import moe.qingu.youran.api.network.tls.CertificateInfo;
 import moe.qingu.youran.api.network.ClientNic;
@@ -157,7 +158,7 @@ public class GuiBrowser extends GuiContainer
 
     private boolean screenOn()
     {
-        return computer.isSwitchedOn() && computer.getAppliance().isRunning() && !computer.isCpuDead();
+        return computer.isSwitchedOn() && computer.getAppliance().isRunning() && !computer.isCpuDead() && !computer.isCrashed();
     }
 
     @Nullable
@@ -224,9 +225,15 @@ public class GuiBrowser extends GuiContainer
         power.x = items.x - 2 - powerW;
         power.y = toolbarY;
         power.h = tbH;
+        // 调频旋钮（服主 11-17）：电源开关旁边，写实际频率与 CPU 温度
+        ToolButton clock = new ToolButton("clock", "");
+        clock.w = fontRenderer.getStringWidth("2.60 GHz 100.0 °C") + 18;
+        clock.x = power.x - 2 - clock.w;
+        clock.y = toolbarY;
+        clock.h = tbH;
         ToolButton cookies = new ToolButton("cookies", cookiesLabel);
         cookies.w = fontRenderer.getStringWidth(cookiesLabel) + 8;
-        cookies.x = power.x - 2 - cookies.w;
+        cookies.x = clock.x - 2 - cookies.w;
         cookies.y = toolbarY;
         cookies.h = tbH;
         ToolButton menu = new ToolButton("menu", menuLabel);
@@ -236,6 +243,7 @@ public class GuiBrowser extends GuiContainer
         menu.h = tbH;
         tools.add(menu);
         tools.add(cookies);
+        tools.add(clock);
         tools.add(power);
         tools.add(items);
         lockX = x + 2;
@@ -246,6 +254,103 @@ public class GuiBrowser extends GuiContainer
         // 物品面板放在右下角（盖在页面上）
         guiLeft = Math.max(0, Math.min(width - xSize, sx + sw - xSize - 6));
         guiTop = Math.max(0, Math.min(height - ySize, statusY - ySize - 2));
+    }
+
+    /** 这一秒里浏览器忙的 tick 数、过了几个 tick（报负载用） */
+    private int busyTicks;
+    private int loadTicks;
+
+    // ---- 调频旋钮（服主 11-17） ----
+
+    @Nullable
+    private ToolButton clockButton()
+    {
+        for(ToolButton t : tools)
+        {
+            if(t.id.equals("clock"))
+                return t;
+        }
+        return null;
+    }
+
+    private void turnClock(int delta)
+    {
+        PacketHandler.INSTANCE.sendToServer(new MessageComputerCpu(computer.getPos(), delta > 0 ? MessageComputerCpu.UP : MessageComputerCpu.DOWN, 0));
+        mc.getSoundHandler().playSound(net.minecraft.client.audio.PositionedSoundRecord.getMasterRecord(net.minecraft.init.SoundEvents.BLOCK_LEVER_CLICK, 1.6f));
+    }
+
+    /** 旋钮按钮：左头一个小旋钮（指针按第几档转），右边实际频率、CPU 温度 */
+    private void drawClock(ToolButton t)
+    {
+        net.minecraft.nbt.NBTTagCompound st = computer.getCpuStatus();
+        int cx = t.x + 7, cy = t.y + t.h / 2;
+        int r = 5;
+        for(int dy = -r; dy <= r; dy++)
+        {
+            int w = (int) Math.round(Math.sqrt(r * r - dy * dy));
+            Gui.drawRect(cx - w, cy + dy, cx + w + 1, cy + dy + 1, 0xFF3C4043);
+        }
+        if(st == null)
+            return;
+        int n = Math.max(1, st.getInteger("Cnt"));
+        double f = n <= 1 ? 0.5 : st.getInteger("Idx") / (double) (n - 1);
+        double a = Math.toRadians(-135 + 270 * f);
+        for(int i = 1; i <= r - 1; i++)
+        {
+            int px = cx + (int) Math.round(Math.sin(a) * i), py = cy - (int) Math.round(Math.cos(a) * i);
+            Gui.drawRect(px, py, px + 1, py + 1, 0xFFFFFFFF);
+        }
+        String text;
+        int color;
+        if(st.getBoolean("Dead"))
+        {
+            text = I18n.format("cfm.browser.cpu.dead");
+            color = 0xFFB3261E;
+        }
+        else
+        {
+            text = com.mrcrayfish.furniture.computer.ComputerCpu.formatFreq(st.getInteger("Act")) + " "
+                    + String.format(java.util.Locale.ROOT, "%.1f °C", st.getDouble("Temp"));
+            double heat = st.getDouble("Heat");
+            color = heat >= 0.9 ? 0xFFB3261E : heat >= 0.75 || st.getBoolean("Capped") ? 0xFFB06000 : TEXT;
+        }
+        fontRenderer.drawString(text, t.x + 15, t.y + (t.h - 8) / 2, t.enabled ? color : 0xFF9AA0A6);
+        // 底下一道：最近 1 分钟的热量
+        double heat = Math.max(0, Math.min(1, st.getDouble("Heat")));
+        int bw = t.w - 16;
+        Gui.drawRect(t.x + 14, t.y + t.h - 2, t.x + 14 + (int) (bw * heat), t.y + t.h - 1, heat >= 0.9 ? 0xFFD93025 : heat >= 0.75 ? 0xFFF29900 : 0xFF34A853);
+    }
+
+    private List<String> clockTooltip()
+    {
+        List<String> l = new ArrayList<>();
+        net.minecraft.nbt.NBTTagCompound st = computer.getCpuStatus();
+        l.add(I18n.format("cfm.browser.cpu.title"));
+        if(st == null)
+            return l;
+        java.util.function.IntFunction<String> f = com.mrcrayfish.furniture.computer.ComputerCpu::formatFreq;
+        l.add(I18n.format("cfm.browser.cpu.setting", f.apply(st.getInteger("Set")), f.apply(st.getInteger("Std")), f.apply(st.getInteger("Min")), f.apply(st.getInteger("Max"))));
+        if(st.getBoolean("Dead"))
+            l.add("\u00a7c" + I18n.format("cfm.browser.cpu.dead.tip"));
+        else
+        {
+            l.add(I18n.format("cfm.browser.cpu.actual", f.apply(st.getInteger("Act"))));
+            if(st.getBoolean("Capped"))
+                l.add("\u00a76" + I18n.format(st.getBoolean("Nominal") ? "cfm.browser.cpu.nominal" : "cfm.browser.cpu.capped", f.apply(st.getInteger("Act"))));
+        }
+        l.add(I18n.format("cfm.browser.cpu.temp", String.format(java.util.Locale.ROOT, "%.1f", st.getDouble("Temp"))));
+        l.add(I18n.format("cfm.browser.cpu.heat", Math.round(st.getDouble("Heat") * 100)));
+        if(st.getLong("Life") >= 0 && !st.getBoolean("Dead"))
+            l.add(I18n.format("cfm.browser.cpu.life", st.getLong("Life")));
+        if(st.getDouble("Rate") > 0)
+            l.add("\u00a76" + I18n.format("cfm.browser.cpu.faults"));
+        if(st.getBoolean("Crashed"))
+            l.add("\u00a7c" + I18n.format("cfm.browser.cpu.crashed"));
+        byte trip = st.getByte("Trip");
+        if(trip != 0)
+            l.add("\u00a7c" + I18n.format("cfm.browser.cpu.trip." + trip));
+        l.add("\u00a77" + I18n.format(isOperator() ? "cfm.browser.cpu.howto" : "cfm.browser.cpu.not_operator"));
+        return l;
     }
 
     /** 上一帧是不是操作者（判断“被换下来”） */
@@ -318,6 +423,23 @@ public class GuiBrowser extends GuiContainer
             b.setScale(deviceScale);
             b.ensureStarted();
             b.tick();
+        }
+        // 负载（服主 11-17）：浏览器这一秒里有几成时间在忙（取页面、渲染、排版），每秒报给服务端算发热
+        if(b != null && on)
+        {
+            if(b.status() != Browser.Status.IDLE || b.isRenderPending() || b.layoutProgress() >= 0)
+                busyTicks++;
+            if(++loadTicks >= 20)
+            {
+                PacketHandler.INSTANCE.sendToServer(new MessageComputerCpu(computer.getPos(), MessageComputerCpu.LOAD, busyTicks * 1000 / loadTicks));
+                busyTicks = 0;
+                loadTicks = 0;
+            }
+        }
+        else
+        {
+            busyTicks = 0;
+            loadTicks = 0;
         }
         boolean operator = isOperator();
         if(!operator && wasOperator)
@@ -509,10 +631,20 @@ public class GuiBrowser extends GuiContainer
         {
             Gui.drawRect(sx + 2, sy + 2, sx + sw - 2, sy + sh - 2, 0xFF000000);
             // CPU 报废了：有电也没有反应（服主 11-16 的家具电脑主板）
-            String msg = I18n.format(!computer.isSwitchedOn() ? "cfm.browser.off" : !computer.getAppliance().isRunning() ? "cfm.browser.no_power" : "cfm.browser.no_response");
-            drawCenteredString(fontRenderer, msg, sx + sw / 2, sy + sh / 2 - 4, 0xFF8A8A8A);
+            // 过热断电、烧坏、寿命用完、死机（服主 11-17）各说一句
+            byte trip = computer.getCpuTrip();
+            String msg = I18n.format(!computer.isSwitchedOn() ? (trip == com.mrcrayfish.furniture.computer.CpuRuntime.TRIP_OVERHEAT ? "cfm.browser.overheat" : "cfm.browser.off")
+                    : !computer.getAppliance().isRunning() ? "cfm.browser.no_power"
+                    : computer.isCpuDead() ? (trip == com.mrcrayfish.furniture.computer.CpuRuntime.TRIP_BURNT ? "cfm.browser.cpu_burnt"
+                    : trip == com.mrcrayfish.furniture.computer.CpuRuntime.TRIP_WORN_OUT ? "cfm.browser.cpu_worn_out" : "cfm.browser.no_response")
+                    : computer.isCrashed() ? "cfm.browser.crashed" : "cfm.browser.no_response");
+            drawCenteredString(fontRenderer, msg, sx + sw / 2, sy + sh / 2 - 4, computer.isCrashed() && computer.isSwitchedOn() ? 0xFF6EA8FF : 0xFF8A8A8A);
             for(ToolButton t : tools)
-                t.visible = t.id.equals("power") || t.id.equals("items");
+            {
+                t.visible = t.id.equals("power") || t.id.equals("items") || t.id.equals("clock");
+                if(t.id.equals("clock"))
+                    t.enabled = isOperator() && computer.getCpuStatus() != null;
+            }
             drawButtons(mouseX, mouseY);
             drawRole(mouseX, mouseY);
         }
@@ -526,6 +658,9 @@ public class GuiBrowser extends GuiContainer
             else if(!drawCpuHint(mouseX, mouseY))
                 drawPeripheralHint(mouseX, mouseY);
         }
+        ToolButton clockTip = clockButton();
+        if(clockTip != null && clockTip.visible && clockTip.over(mouseX, mouseY) && !panel && !homeMenu && cookieMenu == 0 && !info)
+            drawHoveringText(clockTooltip(), mouseX, mouseY);
         if(homeMenu && on && browser() != null)
         {
             drawHomeMenu(mouseX, mouseY);
@@ -558,6 +693,7 @@ public class GuiBrowser extends GuiContainer
                 case "reload": t.enabled = op && b.current() != null; t.label = op && b.status() == Browser.Status.LOADING ? "×" : "↻"; break;
                 case "home": t.enabled = op; break;
                 case "power": t.enabled = op; break;
+                case "clock": t.enabled = op && computer.getCpuStatus() != null; break;
                 case "cookies": t.visible = op; t.enabled = op; break;
                 case "menu": t.visible = op; t.enabled = op; break;
                 default: t.enabled = true;
@@ -618,6 +754,11 @@ public class GuiBrowser extends GuiContainer
                 bg = 0xFFAECBFA;
             Gui.drawRect(t.x, t.y, t.x + t.w, t.y + t.h, 0xFF80868B);
             Gui.drawRect(t.x + 1, t.y + 1, t.x + t.w - 1, t.y + t.h - 1, bg);
+            if(t.id.equals("clock"))
+            {
+                drawClock(t);
+                continue;
+            }
             int color = t.enabled ? (t.id.equals("power") ? 0xFFFFFFFF : TEXT) : 0xFF9AA0A6;
             drawCenteredString0(t.label, t.x + t.w / 2, t.y + (t.h - 8) / 2, color);
         }
@@ -1226,6 +1367,14 @@ public class GuiBrowser extends GuiContainer
     protected void mouseClicked(int mouseX, int mouseY, int button) throws IOException
     {
         caretStart = System.currentTimeMillis();
+        ToolButton clock = clockButton();
+        if(clock != null && clock.visible && clock.over(mouseX, mouseY) && (button == 0 || button == 1) && !(panel && mouseX >= guiLeft
+                && mouseX < guiLeft + xSize && mouseY >= guiTop && mouseY < guiTop + ySize))
+        {
+            if(clock.enabled)
+                turnClock(button == 0 ? 1 : -1);
+            return;
+        }
         if(editor != null && editorValid() && inViewport(mouseX, mouseY))
         {
             editor.mouseClicked(mouseX, mouseY, button);
@@ -1450,8 +1599,19 @@ public class GuiBrowser extends GuiContainer
     @Override
     public void handleMouseInput() throws IOException
     {
-        super.handleMouseInput();
         int wheel = Mouse.getEventDWheel();
+        ToolButton clock = clockButton();
+        if(wheel != 0 && clock != null && clock.visible && clock.enabled)
+        {
+            int mx = Mouse.getEventX() * width / mc.displayWidth;
+            int my = height - Mouse.getEventY() * height / mc.displayHeight - 1;
+            if(clock.over(mx, my))
+            {
+                turnClock(wheel > 0 ? 1 : -1);
+                return;
+            }
+        }
+        super.handleMouseInput();
         if(wheel != 0)
         {
             if(editor != null && editorValid())
@@ -1690,7 +1850,7 @@ public class GuiBrowser extends GuiContainer
         fontRenderer.drawString(I18n.format("cfm.browser.panel.card"), ContainerComputer.CARD_X + 30, ContainerComputer.CARD_Y + 5, 0xFF404040);
         fontRenderer.drawString(I18n.format("cfm.browser.panel.peripheral"), ContainerComputer.PERIPHERAL_X + 20, ContainerComputer.PERIPHERAL_Y + 5, 0xFF404040);
         // 这台电脑的 CPU（服主 11-16）
-        fontRenderer.drawString(fontRenderer.trimStringToWidth(com.mrcrayfish.furniture.blocks.BlockComputer.cpuLine(computer.getBoard(), true), xSize - 16),
+        fontRenderer.drawString(fontRenderer.trimStringToWidth(com.mrcrayfish.furniture.blocks.BlockComputer.cpuLine(computer.getBoard(), true, computer.getCpu().clockKHz), xSize - 16),
                 8, ContainerComputer.CPU_Y, 0xFF404040);
     }
 
@@ -1700,7 +1860,7 @@ public class GuiBrowser extends GuiContainer
         int y = guiTop + ContainerComputer.CPU_Y - 1;
         if(mouseX < guiLeft + 8 || mouseX >= guiLeft + xSize - 8 || mouseY < y || mouseY >= y + 10)
             return false;
-        drawHoveringText(java.util.Collections.singletonList(com.mrcrayfish.furniture.blocks.BlockComputer.cpuLine(computer.getBoard())), mouseX, mouseY);
+        drawHoveringText(java.util.Collections.singletonList(com.mrcrayfish.furniture.blocks.BlockComputer.cpuLine(computer.getBoard(), false, computer.getCpu().clockKHz)), mouseX, mouseY);
         return true;
     }
 

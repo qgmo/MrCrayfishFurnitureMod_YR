@@ -1061,6 +1061,20 @@ public final class Browser
                 {
                     e.layoutExtra = ComputerViews.extraLayoutMillis(pos, e.html.length);
                     e.layoutReadyAt = now + e.layoutExtra;
+                    // 运行错误（服主 11-17）：排版出错——这一页换成“排版出错”的错误页（刷新重来）；死机——服务端记下，界面黑屏写“死机了”，
+                    // 地址栏、别的页面里填的东西都留着，关机再开接着用。错误页、内置页不掷
+                    int fault = e.builtin ? 0 : ComputerViews.layoutFault(pos, e.html.length);
+                    if(fault == 1)
+                    {
+                        int at = history.indexOf(e);
+                        if(at >= 0)
+                        {
+                            history.set(at, new Entry(e.url, BuiltinPages.error(ComputerViews.TR, BuiltinPages.Error.LAYOUT_FAULT, e.url, null), PageParser.Mode.XHTML, null,
+                                    Collections.<String, byte[]>emptyMap(), true));
+                            requestRender();
+                            return;
+                        }
+                    }
                 }
                 if(now < e.layoutReadyAt)
                 {

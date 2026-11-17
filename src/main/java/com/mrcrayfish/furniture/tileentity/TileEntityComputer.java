@@ -7,6 +7,9 @@ import com.mrcrayfish.furniture.computer.ComputerCpu;
 import com.mrcrayfish.furniture.computer.ComputerNetwork;
 import com.mrcrayfish.furniture.computer.ComputerPeripherals;
 import com.mrcrayfish.furniture.computer.ComputerSync;
+import com.mrcrayfish.furniture.computer.CpuRuntime;
+import moe.qingu.youran.api.chip.ChipNumbers;
+import moe.qingu.youran.api.chip.CpuChip;
 import com.mrcrayfish.furniture.computer.PageFacts;
 import com.mrcrayfish.furniture.computer.ComputerScreen;
 import com.mrcrayfish.furniture.computer.ScreenThumb;
@@ -58,6 +61,10 @@ import java.util.UUID;
  * （{@link ComputerCpu}）。进存档、随方块更新发给客户端（浏览器在操作者的客户端上），拆下时随掉落物走。没有的（以前放下的、创造模式拿的）
  * 按标准 2.0 GHz。
  * <p>
+ * CPU 品质接进电脑（服主 11-17，{@link CpuRuntime}）：电源开关旁边的调频旋钮（1.6–2.6 GHz，开着也能调），CPU 温度（升温看浏览器忙不忙与频率，
+ * 降温看所在生物群系），最近 1 分钟温度积分超过耐热性就过热断电（有概率烧坏芯片，没烧坏少一截寿命），寿命按开机时长用，排版时按芯片品质
+ * 掷运行错误（排版出错、死机）。现状每秒发给开着界面的人（{@code MessageComputerCpuState}）。
+ * <p>
  * 世界里的屏幕（服主 11-16）：开着界面的人上传当前页面的缩略图，服务端按 {@link ComputerScreen} 定下一帧，发给看得到这个区块的人，
  * 客户端画在模型的屏幕上（{@code ComputerScreenRenderer}）。只在内存，不进存档；后来走近的人随区块数据（{@link #getUpdateTag}）拿到。
  */
@@ -79,6 +86,11 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
     /** 这台电脑的主页（玩家“设为这台电脑的主页”；没设为 null，用服务器默认；服主 11-15）。进存档，只发给操作者 */
     @Nullable
     private String homePage;
+    /** CPU 的运行数据（旋钮设定、温度、出事记录、死机；进存档、随方块更新发给客户端） */
+    private final CpuRuntime cpu = new CpuRuntime();
+    /** 客户端：服务端发来的 CPU 现状（{@link CpuRuntime#status}）；没收到为 null */
+    @Nullable
+    private NBTTagCompound cpuStatus;
 
     // ---- 只在内存（服务端），操作者同步给客户端 ----
     @Nullable
@@ -189,6 +201,12 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         return kind != null && !kind.isEmpty();
     }
 
+    /** CPU 的运行数据（拆下时随掉落物走） */
+    public CpuRuntime getCpu()
+    {
+        return cpu;
+    }
+
     /** 主板的数据（没有为 null） */
     @Nullable
     public NBTTagCompound getBoard()
@@ -196,10 +214,127 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         return board;
     }
 
-    /** CPU 实际跑的频率（kHz；坏了为 0） */
+    /** CPU 实际跑的频率（kHz；坏了为 0）：旋钮设定被最大频率封顶 */
     public int cpuClockKHz()
     {
-        return ComputerCpu.clockKHz(board);
+        if(world != null && world.isRemote && cpuStatus != null)
+            return cpuStatus.getInteger("Act");
+        return ComputerCpu.clockKHz(board, cpu.clockKHz);
+    }
+
+    /** 客户端：服务端发来的 CPU 现状；没收到为 null */
+    @Nullable
+    public NBTTagCompound getCpuStatus()
+    {
+        return cpuStatus;
+    }
+
+    public void setCpuStatus(NBTTagCompound status)
+    {
+        this.cpuStatus = status;
+    }
+
+    /** 死机了（排版时出了死机那种运行错误）：关机再开才好 */
+    public boolean isCrashed()
+    {
+        return cpu.crashed;
+    }
+
+    /** 上一次出事（{@link CpuRuntime} 的 TRIP_*） */
+    public byte getCpuTrip()
+    {
+        return cpu.trip;
+    }
+
+    /** 服务端：调频旋钮拧一格（操作者，开着也能调，马上生效） */
+    public void turnKnob(EntityPlayerMP player, int delta)
+    {
+        CpuChip chip = ComputerCpu.chip(board);
+        if(cpu.turn(ChipNumbers.current(), chip, delta))
+        {
+            markDirty();
+            TileEntityUtil.markBlockForUpdate(world, pos);
+            com.mrcrayfish.furniture.MrCrayfishFurnitureMod.logger().info("{} 把家具电脑 {} 的 CPU 频率调到 {}", player.getName(), pos,
+                    ComputerCpu.formatFreq(cpu.clockKHz));
+        }
+        sendCpuStatus();
+    }
+
+    /** 服务端：操作者报的这一秒浏览器忙的比例（千分比） */
+    public void reportLoad(int permille)
+    {
+        cpu.loadPermille = permille;
+        cpu.loadAt = world.getTotalWorldTime();
+    }
+
+    /** 服务端：操作者说排版时死机了；这片 CPU 现在确实会出错才收 */
+    public boolean reportCrash(EntityPlayerMP player)
+    {
+        CpuChip chip = ComputerCpu.chip(board);
+        if(moe.qingu.youran.api.chip.CpuClock.faultRate(chip, ComputerCpu.setting(chip, cpu.clockKHz, ChipNumbers.current()), ChipNumbers.current()) <= 0)
+            return false;
+        if(!cpu.crashed)
+        {
+            cpu.crashed = true;
+            markDirty();
+            TileEntityUtil.markBlockForUpdate(world, pos);
+            com.mrcrayfish.furniture.MrCrayfishFurnitureMod.logger().info("家具电脑 {} 排版时死机了（操作者 {}）", pos, player.getName());
+        }
+        sendCpuStatus();
+        return true;
+    }
+
+    /** 服务端：把 CPU 现状发给开着界面的人 */
+    private void sendCpuStatus()
+    {
+        List<EntityPlayerMP> viewers = getViewers();
+        if(viewers.isEmpty())
+            return;
+        ChipNumbers n = ChipNumbers.current();
+        NBTTagCompound st = cpu.status(n, ComputerCpu.chip(board), n.ambientK(world.getBiome(pos).getTemperature(pos)));
+        for(EntityPlayerMP p : viewers)
+            com.mrcrayfish.furniture.network.PacketHandler.INSTANCE.sendTo(new com.mrcrayfish.furniture.network.message.MessageComputerCpuState(pos, st), p);
+    }
+
+    /** 服务端：每秒走一步 CPU（温度、寿命、过热断电） */
+    private void tickCpu(boolean energyRunning)
+    {
+        long time = world.getTotalWorldTime();
+        ChipNumbers n = ChipNumbers.current();
+        double ambient = n.ambientK(world.getBiome(pos).getTemperature(pos));
+        if(cpu.time < 0 || time < cpu.time || cpu.thermal.unset())
+        {
+            if(cpu.thermal.unset())
+                cpu.thermal.reset(ambient);
+            cpu.time = time;
+            return;
+        }
+        long gap = time - cpu.time;
+        if(gap < 20)
+            return;
+        if(gap >= 40)
+            cpu.thermal.coolFor(n, ambient, gap / 20 - 1); // 区块卸载着的那段按关着机补
+        cpu.time = time;
+        CpuChip chip = ComputerCpu.chip(board);
+        boolean running = switchedOn && energyRunning && !chip.dead;
+        int actual = moe.qingu.youran.api.chip.CpuClock.actualKHz(chip, ComputerCpu.setting(chip, cpu.clockKHz, n));
+        CpuRuntime.Event ev = cpu.second(n, chip, board, ambient, running, actual, cpu.load(time), world.rand);
+        if(ev != CpuRuntime.Event.NONE)
+        {
+            if(ev != CpuRuntime.Event.WORN_OUT || cpu.thermal.overheated(chip.heatToleranceKs))
+            {
+                // 过热断电：开关跳到关（同关机，服务端这边的页面清掉；操作者界面里地址栏、表单里打的字都还在，开机后接着用）
+                this.switchedOn = false;
+                setPage(null, PageFacts.NONE, -1);
+            }
+            markDirty();
+            TileEntityUtil.markBlockForUpdate(world, pos);
+            com.mrcrayfish.furniture.MrCrayfishFurnitureMod.logger().info("家具电脑 {}：{}（{} °C，最近 60 秒 {} K·s，耐热性 {} K·s）", pos, ev,
+                    String.format(java.util.Locale.ROOT, "%.1f", cpu.thermal.tempC()), Math.round(cpu.thermal.integralKs()), chip.heatToleranceKs);
+        }
+        if(ticks % 100 == 0)
+            markDirty();
+        sendCpuStatus();
     }
 
     /** 这一页（多少字节）在这台电脑上比标准频率多等多久排版（毫秒；客户端用服务端发来的基准） */
@@ -208,6 +343,14 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         int base = world != null && !world.isRemote ? com.mrcrayfish.furniture.handler.ConfigurationHandler.computerLayoutBaseMs : layoutBaseMs;
         int perKb = world != null && !world.isRemote ? com.mrcrayfish.furniture.handler.ConfigurationHandler.computerLayoutPerKbMs : layoutPerKbMs;
         return ComputerCpu.extraLayoutMillis(pageBytes, cpuClockKHz(), base, perKb);
+    }
+
+    /** 标准频率下排这一页要多久（毫秒；客户端用服务端发来的基准）：运行错误按这段时间掷 */
+    public long standardLayoutMillis(int pageBytes)
+    {
+        int base = world != null && !world.isRemote ? com.mrcrayfish.furniture.handler.ConfigurationHandler.computerLayoutBaseMs : layoutBaseMs;
+        int perKb = world != null && !world.isRemote ? com.mrcrayfish.furniture.handler.ConfigurationHandler.computerLayoutPerKbMs : layoutPerKbMs;
+        return ComputerCpu.layoutMillis(pageBytes, base, perKb);
     }
 
     /** CPU 坏了：通了电也没有反应 */
@@ -365,6 +508,7 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
             setOperator(player);
         }
         ComputerSync.sendView(player, this);
+        sendCpuStatus();
     }
 
     /** 关掉了界面：操作者走了就放开 */
@@ -394,7 +538,7 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
     /** 开着界面、有电、CPU 没坏：屏幕亮着（两端都能用；客户端按同步来的状态） */
     public boolean isScreenOn()
     {
-        return switchedOn && energy.isRunning() && !isCpuDead();
+        return switchedOn && energy.isRunning() && !isCpuDead() && !cpu.crashed;
     }
 
     /** 缩略图规格：服务端按配置，客户端按服务端发来的 */
@@ -453,10 +597,21 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         ComputerSync.broadcastScreen(this, screenFrame == null ? new byte[0] : screenFrame);
     }
 
+    /** 还没凉下来：最近 60 秒温度积分超着耐热性（过热断电后马上开机会一开就又过热，这时开不了机） */
+    public boolean isTooHotToStart()
+    {
+        CpuChip chip = ComputerCpu.chip(board);
+        return !switchedOn && !chip.dead && cpu.thermal.overheated(chip.heatToleranceKs);
+    }
+
     /** 电源开关（操作者） */
     public void togglePower()
     {
         this.switchedOn = !this.switchedOn;
+        // 关机再开：死机好了；过热断电的提示清掉（烧坏、用完的留着，芯片还是坏的）
+        cpu.crashed = false;
+        if(cpu.trip == CpuRuntime.TRIP_OVERHEAT)
+            cpu.trip = CpuRuntime.TRIP_NONE;
         if(!switchedOn)
         {
             // 关机清屏
@@ -527,10 +682,11 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
             setOperator(null);
         }
         dropLegacySlot();
-        // CPU 坏了：照样耗电，但电脑没有反应，网卡不上电
-        updateDevice(running && !isCpuDead());
-        // 屏幕缩略图：关机、没电、CPU 坏了清掉；有票时每 5 tick 定一次（等别人的票、丢掉过时的）
-        if(!(switchedOn && running && !isCpuDead()))
+        tickCpu(running);
+        // CPU 坏了、死机了：照样耗电，但电脑没有反应，网卡不上电
+        updateDevice(running && !isCpuDead() && !cpu.crashed);
+        // 屏幕缩略图：关机、没电、CPU 坏了、死机了清掉；有票时每 5 tick 定一次（等别人的票、丢掉过时的）
+        if(!(switchedOn && running && !isCpuDead() && !cpu.crashed))
         {
             if(screen.clear())
                 publishScreen();
@@ -632,6 +788,7 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         this.board = ComputerCpu.board(tagCompound);
         if(board != null)
             board = board.copy();
+        this.cpu.read(tagCompound.getCompoundTag(CpuRuntime.TAG));
         String home = tagCompound.getString("HomePage");
         // 被改过的存档：不合格的当作没设
         this.homePage = com.mrcrayfish.furniture.computer.HomePage.isValid(home) ? home : null;
@@ -651,6 +808,8 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
             tagCompound.setTag(ComputerCpu.TAG_BOARD, board.copy());
         if(homePage != null)
             tagCompound.setString("HomePage", homePage);
+        if(!cpu.isEmpty())
+            tagCompound.setTag(CpuRuntime.TAG, cpu.write());
         return tagCompound;
     }
 

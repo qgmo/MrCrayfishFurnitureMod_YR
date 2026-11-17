@@ -69,6 +69,12 @@ public class MessageComputerAction implements IMessage, IMessageHandler<MessageC
                 RejectLog.log(player, "computer power switch without permission at " + message.pos);
                 return;
             }
+            if(computer.isTooHotToStart())
+            {
+                // 过热断电后还没凉下来：开不了机（服主 11-17 的过热规则）
+                player.sendStatusMessage(new net.minecraft.util.text.TextComponentTranslation("cfm.browser.cpu.too_hot"), true);
+                return;
+            }
             computer.togglePower();
         }
         else if(message.action == CLAIM)

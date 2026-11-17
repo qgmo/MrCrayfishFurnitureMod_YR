@@ -135,6 +135,29 @@ public final class ComputerViews
         return te instanceof com.mrcrayfish.furniture.tileentity.TileEntityComputer ? ((com.mrcrayfish.furniture.tileentity.TileEntityComputer) te).extraLayoutMillis(pageBytes) : 0;
     }
 
+    private static final java.util.Random FAULTS = new java.util.Random();
+
+    /**
+     * 排这一页时出不出运行错误（服主 11-17：最大频率比标准频率低得多、又设得比最大频率高时）：按服务端发来的出错率、死机比例，
+     * 这一页在标准频率下排版要的时间里掷一次。0 不出错、1 排版出错、2 死机（{@code computer.CpuRuntime#layoutFault}）。
+     */
+    static int layoutFault(BlockPos pos, int pageBytes)
+    {
+        net.minecraft.world.World w = Minecraft.getMinecraft().world;
+        net.minecraft.tileentity.TileEntity te = w == null ? null : w.getTileEntity(pos);
+        if(!(te instanceof com.mrcrayfish.furniture.tileentity.TileEntityComputer))
+            return 0;
+        com.mrcrayfish.furniture.tileentity.TileEntityComputer c = (com.mrcrayfish.furniture.tileentity.TileEntityComputer) te;
+        net.minecraft.nbt.NBTTagCompound st = c.getCpuStatus();
+        if(st == null || st.getDouble("Rate") <= 0)
+            return 0;
+        int fault = com.mrcrayfish.furniture.computer.CpuRuntime.layoutFault(st.getDouble("Rate"), st.getDouble("CrashShare"), c.standardLayoutMillis(pageBytes), FAULTS);
+        if(fault == 2)
+            com.mrcrayfish.furniture.network.PacketHandler.INSTANCE.sendToServer(new com.mrcrayfish.furniture.network.message.MessageComputerCpu(pos,
+                    com.mrcrayfish.furniture.network.message.MessageComputerCpu.CRASH, 0));
+        return fault;
+    }
+
     private static String key(BlockPos pos)
     {
         Minecraft mc = Minecraft.getMinecraft();
