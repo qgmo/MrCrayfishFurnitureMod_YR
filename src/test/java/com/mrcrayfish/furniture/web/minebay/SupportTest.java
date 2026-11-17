@@ -9,7 +9,6 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.net.BindException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -17,8 +16,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -70,7 +67,8 @@ class SupportTest
     {
         savedLimit = SupportConfig.messagesPerHour;
         transport = new FakeTransport();
-        llm = new SupportLlm(() -> ep("primary", true, "sk-primary"), () -> ep("backup", false, "sk-backup"), () -> 1, transport);
+        // 回答当场在调用的线程上问完、记进对话（不起后台线程）
+        llm = new SupportLlm(() -> ep("primary", true, "sk-primary"), () -> ep("backup", false, "sk-backup"), () -> 1, transport, Runnable::run);
         Support.use(llm);
     }
 
@@ -81,11 +79,9 @@ class SupportTest
         Support.use(null);
     }
 
-    /** 等后台的回答记进对话 */
-    static void awaitReply(SupportData d, UUID p, int messages) throws InterruptedException
+    /** 回答已记进对话（问是当场执行的，send 返回时已经记好） */
+    static void assertReplied(SupportData d, UUID p, int messages)
     {
-        for(int i = 0; i < 200 && d.chat(p).messages().size() < messages; i++)
-            Thread.sleep(10);
         assertEquals(messages, d.chat(p).messages().size());
     }
 
@@ -96,7 +92,7 @@ class SupportTest
     {
         SupportData d = new SupportData(SupportData.NAME);
         assertEquals(Support.Outcome.SENT, Support.send(null, () -> "SYS", d, ALICE, "Alice", "  钻石  多少钱？ ", T0));
-        awaitReply(d, ALICE, 2);
+        assertReplied(d, ALICE, 2);
         List<SupportChat.Message> m = d.chat(ALICE).messages();
         assertEquals(SupportChat.Role.PLAYER, m.get(0).role);
         assertEquals("钻石 多少钱？", m.get(0).text);
@@ -120,7 +116,7 @@ class SupportTest
         for(int i = 0; i < 3; i++)
         {
             assertEquals(Support.Outcome.SENT, Support.send(null, () -> "S", d, ALICE, "Alice", "问题 " + i, T0 + i * 60_000L));
-            awaitReply(d, ALICE, 2 * (i + 1));
+            assertReplied(d, ALICE, 2 * (i + 1));
         }
         assertEquals(Support.Outcome.LIMIT, Support.send(null, () -> "S", d, ALICE, "Alice", "第四条", T0 + 3 * 60_000L));
         assertEquals(6, d.chat(ALICE).messages().size(), "超了的不记");
@@ -137,11 +133,11 @@ class SupportTest
         SupportLlm down = new SupportLlm(() -> ep("primary", true, "k"), () -> ep("backup", false, ""), () -> 1, (e, b, t) ->
         {
             throw new IOException("timed out after 1 s");
-        });
+        }, Runnable::run);
         Support.use(down);
         SupportData d = new SupportData(SupportData.NAME);
         assertEquals(Support.Outcome.SENT, Support.send(null, () -> "S", d, ALICE, "Alice", "在吗", T0));
-        awaitReply(d, ALICE, 2);
+        assertReplied(d, ALICE, 2);
         assertEquals(SupportChat.Role.NOTE, d.chat(ALICE).messages().get(1).role);
         assertEquals(Support.CANNOT_REPLY, d.chat(ALICE).messages().get(1).text);
         assertEquals(0, d.chat(ALICE).sentWithin(T0, Support.HOUR), "没回复的不算次数");
@@ -160,7 +156,7 @@ class SupportTest
         Arrays.fill(big, '字');
         assertEquals(Support.Outcome.TOO_LONG, Support.send(null, () -> "S", d, ALICE, "Alice", new String(big), T0));
         assertTrue(d.chat(ALICE).messages().isEmpty());
-        Support.use(new SupportLlm(() -> ep("primary", true, ""), () -> ep("backup", false, ""), () -> 1, transport));
+        Support.use(new SupportLlm(() -> ep("primary", true, ""), () -> ep("backup", false, ""), () -> 1, transport, Runnable::run));
         assertFalse(Support.available(), "apiKey 留空 = 不开客服");
         assertEquals(Support.Outcome.UNAVAILABLE, Support.send(null, () -> "S", d, ALICE, "Alice", "在吗", T0));
     }
@@ -168,25 +164,16 @@ class SupportTest
     @Test
     void oneQuestionAtATime() throws Exception
     {
-        CountDownLatch release = new CountDownLatch(1);
-        Support.use(new SupportLlm(() -> ep("primary", true, "k"), () -> ep("backup", false, ""), () -> 1, (e, b, t) ->
-        {
-            try
-            {
-                release.await(5, TimeUnit.SECONDS);
-            }
-            catch(InterruptedException ex)
-            {
-                throw new IOException(ex);
-            }
-            return answer("好的");
-        }));
+        // 问的任务先排着，测试自己决定什么时候执行
+        List<Runnable> queued = new ArrayList<>();
+        Support.use(new SupportLlm(() -> ep("primary", true, "k"), () -> ep("backup", false, ""), () -> 1, (e, b, t) -> answer("好的"), queued::add));
         SupportData d = new SupportData(SupportData.NAME);
         assertEquals(Support.Outcome.SENT, Support.send(null, () -> "S", d, ALICE, "Alice", "一", T0));
         assertTrue(Support.waiting(ALICE, T0 + 100));
         assertEquals(Support.Outcome.BUSY, Support.send(null, () -> "S", d, ALICE, "Alice", "二", T0 + 100));
-        release.countDown();
-        awaitReply(d, ALICE, 2);
+        assertEquals(1, queued.size());
+        queued.remove(0).run();
+        assertReplied(d, ALICE, 2);
         assertFalse(Support.waiting(ALICE, T0 + 200));
     }
 
@@ -237,25 +224,12 @@ class SupportTest
         assertFalse(onlyBackup.describe().contains("k\""));
     }
 
-    /** 真的 HTTP：本地起一个返回固定回答的 OpenAI 兼容假服务（端口 26395–26399） */
+    /** 真的 HTTP：本地起一个返回固定回答的 OpenAI 兼容假服务（本机回环，系统分的空闲端口） */
     @Test
     void realHttpAgainstFakeServer() throws Exception
     {
-        HttpServer server = null;
-        int port = 0;
-        for(int p = 26395; p <= 26399 && server == null; p++)
-        {
-            try
-            {
-                server = HttpServer.create(new InetSocketAddress("127.0.0.1", p), 0);
-                port = p;
-            }
-            catch(BindException e)
-            {
-                // 下一个
-            }
-        }
-        assertNotNull(server, "26395–26399 都被占了");
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        int port = server.getAddress().getPort();
         AtomicReference<String> auth = new AtomicReference<>();
         AtomicReference<String> got = new AtomicReference<>();
         AtomicInteger hits = new AtomicInteger();
@@ -413,7 +387,7 @@ class SupportTest
         transport.reply = "亲，已帮您转给管理员～\n【留言】Alice 想退款（订单 MB00000007）";
         SupportData d = new SupportData(SupportData.NAME);
         assertEquals(Support.Outcome.SENT, Support.send(null, () -> "S", d, ALICE, "Alice", "我要退款", T0));
-        awaitReply(d, ALICE, 3);
+        assertReplied(d, ALICE, 3);
         assertEquals(1, d.tickets().size());
         SupportData.Ticket t = d.tickets().get(0);
         assertEquals(1, t.id);

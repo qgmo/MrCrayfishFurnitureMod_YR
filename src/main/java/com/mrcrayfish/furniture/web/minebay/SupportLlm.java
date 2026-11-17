@@ -16,6 +16,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
@@ -168,20 +169,33 @@ final class SupportLlm
     private final Transport transport;
     private final Supplier<Integer> timeoutSeconds;
     final Failover failover = new Failover(FAILS_TO_SWITCH, PREFER_BACKUP_MINUTES * 60_000L);
-    private final ThreadPoolExecutor workers = new ThreadPoolExecutor(2, 2, 60, TimeUnit.SECONDS, new ArrayBlockingQueue<>(32), r ->
-    {
-        Thread t = new Thread(r, "MineBay-support");
-        t.setDaemon(true);
-        return t;
-    });
+    /** 后台问的线程（测试里换成当场执行或手动执行的） */
+    private final Executor workers;
 
     SupportLlm(Supplier<Endpoint> primary, Supplier<Endpoint> backup, Supplier<Integer> timeoutSeconds, Transport transport)
+    {
+        this(primary, backup, timeoutSeconds, transport, defaultWorkers());
+    }
+
+    SupportLlm(Supplier<Endpoint> primary, Supplier<Endpoint> backup, Supplier<Integer> timeoutSeconds, Transport transport, Executor workers)
     {
         this.primary = primary;
         this.backup = backup;
         this.timeoutSeconds = timeoutSeconds;
         this.transport = transport;
+        this.workers = workers;
+    }
+
+    private static Executor defaultWorkers()
+    {
+        ThreadPoolExecutor workers = new ThreadPoolExecutor(2, 2, 60, TimeUnit.SECONDS, new ArrayBlockingQueue<>(32), r ->
+        {
+            Thread t = new Thread(r, "MineBay-support");
+            t.setDaemon(true);
+            return t;
+        });
         workers.allowCoreThreadTimeOut(true);
+        return workers;
     }
 
     /** 用配置文件里的接口、真的 HTTP */
