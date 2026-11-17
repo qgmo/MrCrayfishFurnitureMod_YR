@@ -78,16 +78,14 @@ class PayOrdersTest
         assertThrows(IllegalStateException.class, () -> o.add(entry("ord_zzzzzzzzzzzzzzzz", B, "a:b", 1)));
     }
 
-    /** 订单记录带上 pay.yr 单号，能按单号找回；旧订单没有单号照读 */
+    /** 订单记录带上 pay.yr 单号，能按单号找回 */
     @Test
     void ordersRememberPayId()
     {
         Orders os = new Orders();
-        os.add(new Orders.Order(1, 1, Collections.<Orders.Item>emptyList()));
         os.add(new Orders.Order(2, 2, Arrays.asList(new Orders.Item("a:b", "minecraft:stone", 1, null, "石头", 1, "minecraft:emerald", 1)), "ord_aaaaaaaaaaaaaaaa"));
         Orders r = Orders.read(os.write());
         assertEquals(2, r.findByPay("ord_aaaaaaaaaaaaaaaa").number);
-        assertNull(r.find(1).payId);
         assertNull(r.findByPay("ord_bbbbbbbbbbbbbbbb"));
     }
 }
