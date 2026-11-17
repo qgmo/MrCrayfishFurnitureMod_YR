@@ -783,13 +783,7 @@ public class GuiBrowser extends GuiContainer
     {
         String text = masked ? mask(t.getText()) : t.getText();
         int cursor = t.getCursor();
-        // 保证光标看得见
-        if(t.viewStart > cursor)
-            t.viewStart = cursor;
-        if(t.viewStart > text.length())
-            t.viewStart = text.length();
-        while(t.viewStart < cursor && fontRenderer.getStringWidth(text.substring(t.viewStart, cursor)) > w - 2)
-            t.viewStart++;
+        t.viewStart = TextScroll.viewStart(text, cursor, t.viewStart, w - 2, fontRenderer::getStringWidth);
         String visible = fontRenderer.trimStringToWidth(text.substring(t.viewStart), w);
         int end = t.viewStart + visible.length();
         if(focused && t.hasSelection())
