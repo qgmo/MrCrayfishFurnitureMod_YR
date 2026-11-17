@@ -25,7 +25,8 @@ import java.util.function.Supplier;
  * <li>{@link #register}：在 YouranMod 的机房里登记一台主机（一个 /128）。同一台主机上跑这个域名的 DNS（YouranMod 的默认 DNS 服务），
  * 以家具模组的身份（{@value Reference#MOD_ID}）向顶级域的注册局注册域名所在的二级域名；注册不成（名字被别人占了、注册局要等）只记日志。
  * 开服时 80 口开 HTTP；YouranMod 的证书签发服务开着（服务器配了中间 CA）时 443 口再开 HTTPS，证书由这台主机自己申请
- * （DNS 认证，用自己的 DNS 加 TXT；剩 30 天时自动续）。模组加载阶段（预初始化到初始化）调用。</li>
+ * （DNS 认证，用自己的 DNS 加 TXT；剩 30 天时自动续），存在世界存档的 {@code cfm/certs/<主机>/}（见 {@link WebCertificates}），
+ * 开服时还能用就直接用。模组加载阶段（预初始化到初始化）调用。</li>
  * <li>{@link WebServer#serve}：在任意一个服务端协议栈上提供网站。以后挂在设备地址上的网站（玩家把电脑当网页服务器）用它：
  * 设备用 {@code DeviceHandle.attachEndpoint} 接一个服务端协议栈，证书用 {@code CertificateClient.start(协议栈, 名字, null)} 自己申请
  * （HTTP 认证，{@link WebServer} 的 80 口自动回）。</li>
@@ -52,8 +53,10 @@ public final class Websites
         }
         YouranNetworkApi.registerHost(hostKey, YouranNetworkApi.YOURANMOD_DATACENTER, ctx -> {
             DnsServer dns = startDns(ctx, name);
-            // 证书自己向证书签发服务申请：自己跑着这个区的 DNS，用 DNS 认证（加删 _acme-challenge 的 TXT），到期前自动续
-            TlsServerContext tls = CertificateClient.start(ctx.stack(), Collections.singletonList(name), TxtRecords.of(dns)).tls();
+            // 证书自己向证书签发服务申请：自己跑着这个区的 DNS，用 DNS 认证（加删 _acme-challenge 的 TXT），到期前自动续；
+            // 证书与私钥存在世界存档的 cfm/certs/<主机>/，开服时还能用就直接用
+            TlsServerContext tls = CertificateClient.start(ctx.stack(), Collections.singletonList(name), TxtRecords.of(dns),
+                    WebCertificates.store(hostKey)).tls();
             WebContext context = contextOf(ctx, tls != null);
             WebServer.serve(ctx.stack(), handler, context, tls);
             // 服务端要查名字时（如旁观者看的页面里图片在哪）用网站主机的协议栈经递归解析器查
