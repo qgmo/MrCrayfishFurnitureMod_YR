@@ -10,7 +10,6 @@ import java.util.Locale;
 /**
  * 电视视频的客户端配置（悠然服务器魔改），存在 {@code cfm-tv/settings.cfg}，只在本机用，不发给服务端。
  * 不放在 {@code config/} 下：整合包会整个分发 {@code config/}，玩家自己填的 cookie、代理不能被更新覆盖（服主 11-17）。
- * 以前版本存在 {@code config/cfm_tv_client.cfg}：新文件还没有时，把旧文件搬过来（内容原样保留）。
  * 从遥控器（没对着电视时潜行 + 左键）打开的本地配置界面改（{@link com.mrcrayfish.furniture.gui.GuiTVClientConfig}）。
  * <p>
  * bilibili cookie 只用于发往 api.bilibili.com 的请求，不发给服务端，不写进日志、崩溃报告，界面上也不显示原文。
@@ -87,34 +86,11 @@ public final class TvClientConfig
         return values;
     }
 
-    /**
-     * 配置文件的位置：{@code cfm-tv/settings.cfg}。新文件还没有、旧位置 {@code config/cfm_tv_client.cfg} 有时，先把旧文件复制过来再删掉旧的；
-     * 复制失败就这次照旧读旧文件（不能让玩家填过的 cookie、代理变回默认值），下次启动再试。
-     */
-    private static File configFile()
-    {
-        File file = new File(TvFiles.root(), "settings.cfg");
-        File old = new File(new File(Minecraft.getMinecraft().gameDir, "config"), "cfm_tv_client.cfg");
-        if(file.exists() || !old.isFile())
-            return file;
-        try
-        {
-            java.nio.file.Files.copy(old.toPath(), file.toPath());
-        }
-        catch(java.io.IOException | SecurityException e)
-        {
-            return old;
-        }
-        if(!old.delete())
-            old.deleteOnExit();
-        return file;
-    }
-
     public static synchronized void load()
     {
         if(config == null)
         {
-            config = new Configuration(configFile());
+            config = new Configuration(new File(TvFiles.root(), "settings.cfg"));
         }
         config.load();
         Values v = new Values();
