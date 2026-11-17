@@ -641,6 +641,19 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         ComputerSync.broadcastPage(this);
     }
 
+    /**
+     * 主线程：页面里图片主机的域名查到了（{@link PageFacts#imageNames}）：还是那一页时加进放行的主机，给正在看的人重新放行。
+     * 页面已经换了、电脑已经拿掉时什么都不做
+     */
+    public void addImageHosts(PageFacts expected, java.util.Set<moe.qingu.youran.api.network.Ipv6Address> hosts)
+    {
+        if(isInvalid() || pageFacts != expected || hosts.isEmpty())
+            return;
+        this.pageFacts = expected.withImageHosts(hosts);
+        if(world != null && !world.isRemote)
+            ComputerSync.refreshSpectators(this, true);
+    }
+
     public void setScroll(int scroll)
     {
         this.scroll = Math.max(0, scroll);

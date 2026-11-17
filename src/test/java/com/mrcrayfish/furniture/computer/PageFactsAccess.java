@@ -13,9 +13,9 @@ final class PageFactsAccess
     {
         try
         {
-            Constructor<PageFacts> c = PageFacts.class.getDeclaredConstructor(java.util.Set.class, Map.class, Map.class);
+            Constructor<PageFacts> c = PageFacts.class.getDeclaredConstructor(java.util.Set.class, java.util.Set.class, Map.class, Map.class);
             c.setAccessible(true);
-            return c.newInstance(Collections.emptySet(), Collections.emptyMap(), canvases);
+            return c.newInstance(Collections.emptySet(), Collections.emptySet(), Collections.emptyMap(), canvases);
         }
         catch(ReflectiveOperationException e)
         {

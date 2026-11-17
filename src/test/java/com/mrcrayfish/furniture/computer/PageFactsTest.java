@@ -20,26 +20,29 @@ class PageFactsTest
 
     static PageFacts facts(String url, String html) throws Exception
     {
-        Map<String, Ipv6Address> names = new HashMap<>();
-        names.put("minebay.yr", MINEBAY);
-        names.put("test.yr", TEST);
-        return PageFacts.of(new PageSnapshot(url, html.getBytes(StandardCharsets.UTF_8), PageParser.Mode.HTML, null), names::get);
+        return PageFacts.of(new PageSnapshot(url, html.getBytes(StandardCharsets.UTF_8), PageParser.Mode.HTML, null));
     }
 
     @Test
     void hostsComeFromImagesOnThePage() throws Exception
     {
-        // 同主机的图（相对、绝对、https）；别的主机的图、file: 不算
-        PageFacts f = facts("http://minebay.yr/shop", "<p><img src=a.png><img src=https://minebay.yr/b.png><img src=http://test.yr/c.png><img src=file:///x>");
-        assertEquals(Collections.singleton(MINEBAY), f.imageHosts);
+        // 同主机的图（相对、绝对、https，去重）；别的主机的图、file: 不算。域名先不查，记在 imageNames 里
+        PageFacts f = facts("http://MineBay.yr/shop", "<p><img src=a.png><img src=https://minebay.yr/b.png><img src=http://test.yr/c.png><img src=file:///x>");
+        assertEquals(Collections.singleton("minebay.yr"), f.imageNames);
+        assertTrue(f.imageHosts.isEmpty(), "没查到之前不放行");
+        // 查到了加进来
+        PageFacts g = f.withImageHosts(Collections.singleton(MINEBAY));
+        assertEquals(Collections.singleton(MINEBAY), g.imageHosts);
+        assertTrue(g.withImageHosts(Collections.<Ipv6Address>emptySet()) == g);
         // 没有图：不放行任何主机（页面所在的网站也不放）
-        assertTrue(facts("http://minebay.yr/", "<p>没有图</p>").imageHosts.isEmpty());
-        // 查不到的名字不放行
-        assertTrue(facts("http://nowhere.yr/", "<img src=/a.png>").imageHosts.isEmpty());
-        // IPv6 字面量
-        assertEquals(new HashSet<>(Arrays.asList(Ipv6Address.parse("fd00::99"))), facts("http://[fd00::99]/", "<img src=/a.png>").imageHosts);
+        PageFacts none = facts("http://minebay.yr/", "<p>没有图</p>");
+        assertTrue(none.imageHosts.isEmpty() && none.imageNames.isEmpty());
+        // IPv6 字面量：不用查
+        PageFacts lit = facts("http://[fd00::99]/", "<img src=/a.png>");
+        assertEquals(new HashSet<>(Arrays.asList(Ipv6Address.parse("fd00::99"))), lit.imageHosts);
+        assertTrue(lit.imageNames.isEmpty());
         // 内置页
-        assertTrue(facts("about:home", "<img src=/a.png>").imageHosts.isEmpty());
+        assertTrue(facts("about:home", "<img src=/a.png>").imageNames.isEmpty());
     }
 
     @Test

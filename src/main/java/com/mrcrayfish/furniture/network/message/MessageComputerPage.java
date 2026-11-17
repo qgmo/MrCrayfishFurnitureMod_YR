@@ -11,7 +11,6 @@ import com.mrcrayfish.furniture.network.ServerThread;
 import com.mrcrayfish.furniture.tileentity.TileEntityComputer;
 import com.mrcrayfish.furniture.util.RejectLog;
 import io.netty.buffer.ByteBuf;
-import moe.qingu.youran.api.network.YouranNetworkApi;
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.util.math.BlockPos;
 import net.minecraftforge.fml.common.network.simpleimpl.IMessage;
@@ -123,7 +122,7 @@ public class MessageComputerPage implements IMessage, IMessageHandler<MessageCom
         PageFacts facts;
         try
         {
-            facts = PageFacts.of(snapshot, YouranNetworkApi::addressOfName);
+            facts = PageFacts.of(snapshot);
         }
         catch(PageDocument.Invalid | RuntimeException e)
         {
@@ -131,5 +130,15 @@ public class MessageComputerPage implements IMessage, IMessageHandler<MessageCom
             return;
         }
         computer.setPage(compressed, facts, message.id);
+        // 图片主机的域名经递归解析器查（异步，有时限）；回答来了、页面还是这一页时再放行
+        PageFacts page = facts;
+        if(!page.imageNames.isEmpty())
+        {
+            net.minecraft.server.MinecraftServer server = player.getServer();
+            com.mrcrayfish.furniture.web.NameLookup.resolveAll(page.imageNames).thenAccept(hosts -> {
+                if(server != null && !hosts.isEmpty())
+                    server.addScheduledTask(() -> computer.addImageHosts(page, hosts));
+            });
+        }
     }
 }

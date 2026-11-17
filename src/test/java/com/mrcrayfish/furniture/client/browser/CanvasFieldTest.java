@@ -119,7 +119,7 @@ class CanvasFieldTest
     {
         String html = page("<input type=\"x-yr-canvas\" name=\"pic\" width=\"88\" height=\"31\"/>");
         PageSnapshot s = new PageSnapshot("http://platform.180.yr/buy", html.getBytes(StandardCharsets.UTF_8), PageParser.Mode.XHTML, null);
-        PageFacts facts = PageFacts.of(s, n -> null);
+        PageFacts facts = PageFacts.of(s);
         assertEquals(1, facts.canvases.size());
         int[] wh = facts.canvases.values().iterator().next();
         assertArrayEquals(new int[]{88, 31}, wh);

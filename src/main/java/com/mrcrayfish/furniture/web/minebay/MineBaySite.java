@@ -300,6 +300,13 @@ public final class MineBaySite implements WebHandler
     }
 
     @Override
+    public void started(WebContext context)
+    {
+        // 开始查 id.yr 开没开（经递归解析器，按 TTL 缓存）
+        IdLogin.attach(context.stack());
+    }
+
+    @Override
     public CompletableFuture<WebResponse> handle(WebRequest request, WebContext context)
     {
         long now = System.currentTimeMillis();

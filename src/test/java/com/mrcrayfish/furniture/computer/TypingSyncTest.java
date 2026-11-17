@@ -66,7 +66,7 @@ class TypingSyncTest
     static PageFacts facts() throws Exception
     {
         String html = "<form><input name=a><input type=password name=p><textarea name=t></textarea><input type=checkbox name=c></form>";
-        return PageFacts.of(new PageSnapshot("http://test.yr/", html.getBytes(StandardCharsets.UTF_8), PageParser.Mode.HTML, null), n -> (Ipv6Address) null);
+        return PageFacts.of(new PageSnapshot("http://test.yr/", html.getBytes(StandardCharsets.UTF_8), PageParser.Mode.HTML, null));
     }
 
     @Test

@@ -48,13 +48,17 @@ public final class Websites
         }
         YouranNetworkApi.registerHost(hostKey, YouranNetworkApi.YOURANMOD_DATACENTER, ctx -> {
             TlsServerContext tls = ctx.tls(Collections.singletonList(name));
-            WebServer.serve(ctx.stack(), handler, contextOf(ctx, tls != null), tls);
+            WebContext context = contextOf(ctx, tls != null);
+            WebServer.serve(ctx.stack(), handler, context, tls);
             startDns(ctx, name);
+            // 服务端要查名字时（如旁观者看的页面里图片在哪）用网站主机的协议栈经递归解析器查
+            NameLookup.attach(ctx.stack());
+            handler.started(context);
         });
     }
 
-    /** 网络线程：在这台主机上跑域名的 DNS，注册二级域名。注册不成只记日志 */
-    static void startDns(HostContext ctx, String name)
+    /** 网络线程：在这台主机上跑域名的 DNS，注册二级域名。注册不成只记日志。返回开起来的 DNS 服务 */
+    static DnsServer startDns(HostContext ctx, String name)
     {
         String zone = secondLevel(name);
         String tld = zone.substring(zone.indexOf('.') + 1);
@@ -65,9 +69,10 @@ public final class Websites
         if (registrar == null)
         {
             LOG.warn("游戏内网站 {}：顶级域 .{} 没有注册局，注册不了", name, tld);
-            return;
+            return dns;
         }
         report(name, zone, registrar.register(zone, Reference.MOD_ID, Collections.singletonList(dns.address())));
+        return dns;
     }
 
     /** 注册的结果写日志：失败、等待都不抛 */

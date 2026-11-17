@@ -8,6 +8,7 @@ import moe.qingu.youran.api.network.dns.DnsServer;
 import moe.qingu.youran.api.network.dns.Registrar;
 import moe.qingu.youran.api.network.dns.Registration;
 import moe.qingu.youran.api.network.dns.Whois;
+import moe.qingu.youran.api.network.packet.DnsMessage;
 import moe.qingu.youran.api.network.stack.NetStack;
 import moe.qingu.youran.network.DnsState;
 import org.junit.jupiter.api.BeforeEach;
@@ -86,13 +87,14 @@ class WebsitesDnsTest
     @Test
     void registersSecondLevelAndAnswersItself()
     {
-        Websites.startDns(host(stack(loop, SITE)), "minebay.yr");
+        DnsServer dns = Websites.startDns(host(stack(loop, SITE)), "minebay.yr");
         loop.advance(0);
         Whois w = DnsRegistry.whois("minebay.yr");
         assertEquals("cfm", w.owner);
         assertEquals(Collections.singletonList(SITE), w.servers);
-        // 根 → .yr → 网站自己的 DNS（内部解析）
-        assertEquals(Collections.singletonList(SITE), DnsState.lookup("minebay.yr"));
+        // 网站自己的 DNS 回答 minebay.yr
+        DnsMessage m = dns.answer(DnsMessage.query(1, "minebay.yr", DnsMessage.TYPE_AAAA, false));
+        assertEquals(SITE, m.answers.get(0).address);
         assertEquals("minebay.yr", Websites.secondLevel("shop.minebay.yr"));
     }
 

@@ -3,6 +3,8 @@ package com.mrcrayfish.furniture.web.minebay;
 import com.google.gson.JsonObject;
 import moe.qingu.youran.api.network.idyr.IdYrClient;
 import moe.qingu.youran.api.network.idyr.IdYrException;
+import moe.qingu.youran.api.network.stack.DnsResolver;
+import moe.qingu.youran.api.network.stack.NameCache;
 import moe.qingu.youran.api.network.stack.NetStack;
 
 import javax.annotation.Nullable;
@@ -74,10 +76,25 @@ final class IdLogin
 
     private IdLogin() {}
 
-    /** 这个服务器开着 id.yr（装了 YouranAuth 并开了 ingame-id） */
+    /** id.yr 解析得到没有（MineBay 主机的协议栈经递归解析器查，按 TTL 缓存）；主机起来以前为 null */
+    private static volatile NameCache names;
+
+    /** MineBay 主机起来了（网络线程）：开始查 id.yr */
+    static void attach(@Nullable NetStack stack)
+    {
+        moe.qingu.youran.api.network.Ipv6Address resolver = moe.qingu.youran.api.network.YouranNetworkApi.resolverAddress();
+        if(stack == null || resolver == null)
+            return;
+        NameCache n = new NameCache(new DnsResolver(stack, resolver), stack.loop());
+        n.refresh(DOMAIN);
+        names = n;
+    }
+
+    /** 这个服务器开着 id.yr（装了 YouranAuth 并开了 ingame-id）：id.yr 经递归解析器解析得到地址（上一次的回答，到期在后台再问） */
     static boolean available()
     {
-        return IdYrClient.available(DOMAIN);
+        NameCache n = names;
+        return n != null && n.resolves(DOMAIN);
     }
 
     /** MineBay 这台主机的 id.yr 客户端（{@code tls}：后台请求走 https） */

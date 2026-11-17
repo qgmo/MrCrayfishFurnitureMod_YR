@@ -10,4 +10,7 @@ import java.util.concurrent.CompletableFuture;
 public interface WebHandler
 {
     CompletableFuture<WebResponse> handle(WebRequest request, WebContext context);
+
+    /** 网站那台主机起来了（网络线程，每次开服一次）；默认什么都不做 */
+    default void started(WebContext context) {}
 }
