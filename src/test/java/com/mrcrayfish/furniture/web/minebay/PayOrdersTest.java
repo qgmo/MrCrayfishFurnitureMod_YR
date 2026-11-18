@@ -44,6 +44,48 @@ class PayOrdersTest
         assertEquals(0, o.reserved("youranscp:basic"), "过期、取消后放回");
     }
 
+    /**
+     * pay.yr 补发同一笔付款的回调（服主 11-18：至少一次、可能重复）：第一次照付了处理；之后不管是付了还没发货、发完货拿掉了、
+     * 还是重开（读存档）以后，都认得是处理过的，不再处理，也不当成不认识的单去退款
+     */
+    @Test
+    void resentPaymentIsHandledOnce()
+    {
+        PayOrders o = new PayOrders();
+        o.add(entry("ord_aaaaaaaaaaaaaaaa", A, "youranscp:basic", 2));
+        assertEquals(PayOrders.Seen.OPEN, o.seen("ord_aaaaaaaaaaaaaaaa"));
+        assertTrue(o.markPaid("ord_aaaaaaaaaaaaaaaa"));
+        assertEquals(PayOrders.Seen.HANDLED, o.seen("ord_aaaaaaaaaaaaaaaa"), "付了还没发货");
+        assertFalse(o.markPaid("ord_aaaaaaaaaaaaaaaa"));
+        // 重开（付了还没发货时）
+        PayOrders r = PayOrders.read(o.write());
+        r.readHandled(o.writeHandled());
+        assertEquals(PayOrders.Seen.HANDLED, r.seen("ord_aaaaaaaaaaaaaaaa"));
+        // 发完货拿掉，再重开
+        assertNotNull(r.remove("ord_aaaaaaaaaaaaaaaa"));
+        assertEquals(PayOrders.Seen.HANDLED, r.seen("ord_aaaaaaaaaaaaaaaa"), "发完货以后还认得");
+        PayOrders r2 = PayOrders.read(r.write());
+        r2.readHandled(r.writeHandled());
+        assertEquals(PayOrders.Seen.HANDLED, r2.seen("ord_aaaaaaaaaaaaaaaa"), "重开以后还认得");
+        assertNull(r2.get("ord_aaaaaaaaaaaaaaaa"));
+        // 没付过的、不认识的
+        assertEquals(PayOrders.Seen.UNKNOWN, r2.seen("ord_cccccccccccccccc"));
+        o.add(entry("ord_bbbbbbbbbbbbbbbb", B, "youranscp:basic", 1));
+        assertNotNull(o.remove("ord_bbbbbbbbbbbbbbbb"));
+        assertEquals(PayOrders.Seen.UNKNOWN, o.seen("ord_bbbbbbbbbbbbbbbb"), "过期、取消拿掉的没付过，不算处理过");
+        // 只记最近的
+        PayOrders big = new PayOrders();
+        for(int i = 0; i <= PayOrders.MAX_HANDLED; i++)
+        {
+            String id = String.format("ord_%016d", i);
+            big.add(entry(id, A, "a:b", 1));
+            big.markPaid(id);
+            big.remove(id);
+        }
+        assertEquals(PayOrders.Seen.UNKNOWN, big.seen(String.format("ord_%016d", 0)));
+        assertEquals(PayOrders.Seen.HANDLED, big.seen(String.format("ord_%016d", PayOrders.MAX_HANDLED)));
+    }
+
     /** 存档：状态、要发的物品、订单的样子都在 */
     @Test
     void saveAndLoad()

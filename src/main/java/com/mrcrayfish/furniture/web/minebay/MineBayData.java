@@ -229,6 +229,7 @@ public class MineBayData extends WorldSavedData
                 verify.add(t.getUniqueId("id"));
         }
         payOrders = PayOrders.read(nbt.getTagList("pay", Constants.NBT.TAG_COMPOUND));
+        payOrders.readHandled(nbt.getTagList("payDone", Constants.NBT.TAG_STRING));
         NBTTagCompound st = nbt.getCompoundTag("stock");
         for(String k : st.getKeySet())
         {
@@ -270,6 +271,7 @@ public class MineBayData extends WorldSavedData
             list.appendTag(t);
         nbt.setTag("players", list);
         nbt.setTag("pay", payOrders.write());
+        nbt.setTag("payDone", payOrders.writeHandled());
         NBTTagCompound st = new NBTTagCompound();
         for(Map.Entry<String, Stock.State> e : stock.entrySet())
             st.setTag(e.getKey(), e.getValue().write());

@@ -20,11 +20,27 @@ import java.util.UUID;
  * <li>{@link State#PAID}：付了（库存已经正式扣掉、订单已经记下），还没发货（买的人不在线时等他上线）。发完货就拿掉。</li>
  * </ul>
  * 每个玩家同一时间最多一张 OPEN（再结算时先取消上一张）。要发的东西开单时就准备好了（{@link Line#goods}，物品的 NBT）。
+ * <p>
+ * pay.yr 的收款回调至少一次、可能重复（服主 11-18）：付过的单号另记一份（{@link #seen}，发完货拿掉以后也认得，留最近 {@value #MAX_HANDLED} 张），
+ * 补发的回调认出来不再处理，也不当成“不认识的单”退款。
  */
 public final class PayOrders
 {
     /** 最多存多少张（防存档无限长大） */
     public static final int MAX = 4096;
+    /** 记住多少张付过的单号（防重复的回调） */
+    public static final int MAX_HANDLED = 4096;
+
+    /** 收到付款回调时，这张单是什么情况 */
+    public enum Seen
+    {
+        /** 还在等付款：照付了处理 */
+        OPEN,
+        /** 已经处理过（付了还没发货，或已经发完货拿掉了）：重复的回调，不再处理 */
+        HANDLED,
+        /** 不认识（不是 MineBay 开的，或 MineBay 的存档丢了） */
+        UNKNOWN
+    }
 
     public enum State
     {
@@ -97,6 +113,8 @@ public final class PayOrders
     }
 
     private final Map<String, Entry> byPay = new LinkedHashMap<>();
+    /** 付过的单号（按先后，最多 {@link #MAX_HANDLED} 张） */
+    private final java.util.LinkedHashSet<String> handled = new java.util.LinkedHashSet<>();
 
     public boolean isFull()
     {
@@ -158,7 +176,54 @@ public final class PayOrders
         if(e == null || e.state != State.OPEN)
             return false;
         e.state = State.PAID;
+        remember(payId);
         return true;
+    }
+
+    /** 收到这张单的付款回调时它是什么情况 */
+    public Seen seen(String payId)
+    {
+        Entry e = get(payId);
+        if(e != null)
+            return e.state == State.OPEN ? Seen.OPEN : Seen.HANDLED;
+        return payId != null && handled.contains(payId) ? Seen.HANDLED : Seen.UNKNOWN;
+    }
+
+    private void remember(String payId)
+    {
+        handled.remove(payId);
+        handled.add(payId);
+        java.util.Iterator<String> it = handled.iterator();
+        while(handled.size() > MAX_HANDLED && it.hasNext())
+        {
+            it.next();
+            it.remove();
+        }
+    }
+
+    /** 付过的单号（存档用） */
+    public NBTTagList writeHandled()
+    {
+        NBTTagList list = new NBTTagList();
+        for(String id : handled)
+            list.appendTag(new net.minecraft.nbt.NBTTagString(id));
+        return list;
+    }
+
+    public void readHandled(NBTTagList list)
+    {
+        handled.clear();
+        for(int i = 0; i < list.tagCount(); i++)
+        {
+            String id = list.getStringTagAt(i);
+            if(!id.isEmpty())
+                remember(id);
+        }
+        for(Entry e : byPay.values())
+        {
+            if(e.state == State.PAID)
+                remember(e.payId);
+        }
     }
 
     /** 这件商品被还没付的单预留了几份 */

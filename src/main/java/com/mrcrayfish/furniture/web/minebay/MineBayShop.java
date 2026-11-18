@@ -257,16 +257,27 @@ public final class MineBayShop
 
     // ---------------------------------------------------------------- 付了以后
 
-    /** pay.yr 的收款回调（主线程） */
+    /**
+     * pay.yr 的收款回调（主线程）。至少来一次、可能重复（服主 11-18）：处理过的单（付了没发货、发完货拿掉了）认出来不再处理，
+     * 也不当成不认识的单退款。MineBay 的存档还没读到时抛异常，pay.yr 过一阵再发（每秒的对账也会补上）
+     */
     static void paid(OrderInfo order, PaymentInfo payment)
     {
         MinecraftServer server = FMLCommonHandler.instance().getMinecraftServerInstance();
         MineBayData data = MineBayData.get(server);
         if(data == null)
+            throw new IllegalStateException("MineBay: data not loaded yet, payment " + payment.id + " not taken");
+        PayOrders.Seen seen = data.payOrders().seen(order.id);
+        if(seen == PayOrders.Seen.HANDLED)
+        {
+            MrCrayfishFurnitureMod.logger().info("MineBay: payment {} for order {} was already handled (notice sent again)", payment.id, order.id);
             return;
+        }
         PayOrders.Entry e = data.payOrders().get(order.id);
         if(e == null)
         {
+            if(payment.refundable().isZero())
+                return;
             // 不是 MineBay 开的单（或者 MineBay 的存档丢了）：原样退回，不让钱白付
             MrCrayfishFurnitureMod.logger().error("MineBay: got payment {} for unknown order {} from {}; refunding", payment.id, order.id, payment.payerName);
             try
