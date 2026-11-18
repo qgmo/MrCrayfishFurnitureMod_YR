@@ -10,25 +10,25 @@ final class LiveClock
     static final long DELAY_MS = 300L;
     static final long RESYNC_MS = 2_500L;
 
-    private long basePts = -1;
+    private boolean started;
+    private long basePts;
     private long baseWall;
 
-    /** 本地时刻 now 时应当放到哪个时间戳；还没收到帧时为 -1 */
+    /**
+     * 本地时刻 now 时应当放到哪个时间戳（还没收到帧时没有意义，先看 {@link #started()}）。
+     * 直播流的时间戳可能从 0 附近开始，所以算出来可以是负数。
+     */
     long target(long now)
     {
-        if(basePts < 0)
-            return -1;
         return basePts + Math.max(0, now - baseWall) - DELAY_MS;
     }
 
     /** 看到队列最前面的一帧（时间戳 headPts）：第一次、或者差太多时重新对上 */
     void observe(long headPts, long now)
     {
-        if(headPts < 0)
-            return;
-        long t = target(now);
-        if(t < 0 || Math.abs(headPts - t) > RESYNC_MS)
+        if(!started || Math.abs(headPts - target(now)) > RESYNC_MS)
         {
+            started = true;
             basePts = headPts;
             baseWall = now;
         }
@@ -37,11 +37,11 @@ final class LiveClock
     /** 重新连流时：从头对 */
     void reset()
     {
-        basePts = -1;
+        started = false;
     }
 
     boolean started()
     {
-        return basePts >= 0;
+        return started;
     }
 }

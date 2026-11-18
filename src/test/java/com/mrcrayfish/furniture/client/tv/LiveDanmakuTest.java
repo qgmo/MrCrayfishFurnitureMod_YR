@@ -212,7 +212,7 @@ class LiveDanmakuTest
         List<Long> sleeps = new ArrayList<>();
         List<String> errors = new ArrayList<>();
         int[] attempts = {0};
-        // 连不上 3 次，第 4 次连上撑了 2 分钟后断，第 5 次连不上，然后关掉
+        // 连不上 3 次，第 4 次连上撑了 2 分钟后断，第 5 次连接被关掉
         Reconnect.Attempt attempt = () ->
         {
             attempts[0]++;
@@ -231,7 +231,8 @@ class LiveDanmakuTest
         }, e -> errors.add(e.getMessage()));
         assertEquals(5, attempts[0]);
         assertEquals(Arrays.asList(1_000L, 2_000L, 4_000L, 1_000L), sleeps);
-        assertEquals(Arrays.asList("refused 1", "refused 2", "refused 3", "refused 5"), errors);
+        // 第 5 次出错时已经要停了（关掉电视时自己断开的连接），不记
+        assertEquals(Arrays.asList("refused 1", "refused 2", "refused 3"), errors);
     }
 
     @Test
@@ -249,8 +250,9 @@ class LiveDanmakuTest
     void liveClockFollowsTheNewestFrames()
     {
         LiveClock c = new LiveClock();
-        assertEquals(-1, c.target(1000));
+        assertFalse(c.started());
         c.observe(50_000, 1000);
+        assertTrue(c.started());
         // 收到第一帧后晚一点点放
         assertEquals(50_000 - LiveClock.DELAY_MS, c.target(1000));
         assertEquals(50_000 - LiveClock.DELAY_MS + 500, c.target(1500));
@@ -263,7 +265,21 @@ class LiveDanmakuTest
         c.observe(900_000, 6100);
         assertEquals(900_000 - LiveClock.DELAY_MS, c.target(6100));
         c.reset();
-        assertEquals(-1, c.target(7000));
+        assertFalse(c.started());
+    }
+
+    @Test
+    void liveClockWorksWhenTheStreamStartsNearZero()
+    {
+        // 实测 B 站的 FLV 时间戳从 0 附近开始：时钟算出来先是负数，照样往前走，不能每帧都重新对上
+        LiveClock c = new LiveClock();
+        c.observe(4, 1000);
+        assertEquals(4 - LiveClock.DELAY_MS, c.target(1000));
+        c.observe(4, 1100);
+        c.observe(4, 1200);
+        assertEquals(4 - LiveClock.DELAY_MS + 200, c.target(1200));
+        c.observe(4, 1400);
+        assertTrue(c.target(1400) >= 4, "the first frame is due after the delay");
     }
 
     @Test

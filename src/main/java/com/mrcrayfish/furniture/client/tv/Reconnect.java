@@ -39,7 +39,7 @@ final class Reconnect
     }
 
     /**
-     * 一直连到 stopped 为真（或等待时被中断）。每次出错交给 onError（只记日志用）。
+     * 一直连到 stopped 为真（或等待时被中断）。每次出错交给 onError（只记日志用；已经要停了的不算）。
      */
     static void loop(Attempt attempt, BooleanSupplier stopped, LongSupplier clock, Sleeper sleeper, Consumer<Exception> onError)
     {
@@ -57,6 +57,9 @@ final class Reconnect
             }
             catch(Exception e)
             {
+                // 关掉时连接被我们自己断开，不算出错
+                if(stopped.getAsBoolean())
+                    return;
                 onError.accept(e);
             }
             if(stopped.getAsBoolean())

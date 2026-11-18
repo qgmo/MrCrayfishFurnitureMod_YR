@@ -182,8 +182,11 @@ public final class VideoSession
     private final BlockingQueue<Danmaku.Comment> livePending = new ArrayBlockingQueue<>(LIVE_PENDING);
     /** 只在渲染线程用 */
     private final LiveClock liveClock = new LiveClock();
-    @Nullable
-    private Danmaku.Incremental liveLayout;
+    /** 每种画布宽一份排版（世界里的电视和大屏同时在画，宽度不同）；最多留几份 */
+    private final java.util.LinkedHashMap<Integer, Danmaku.Incremental> liveLayouts = new java.util.LinkedHashMap<>();
+    /** 最近的直播弹幕（时间已经换成放到的位置）：新建一份排版时补进去 */
+    private final List<Danmaku.Comment> liveRecent = new ArrayList<>();
+    private static final int MAX_LIVE_LAYOUTS = 3;
     private final ToneOut tone = new ToneOut();
 
     /**
@@ -1414,9 +1417,11 @@ public final class VideoSession
         int gen = generation;
         if(gen != seenGeneration)
         {
-            // 换了一路流（重连、换清晰度）：时钟重新对
+            // 换了一路流（重连、换清晰度）：时钟重新对，弹幕的排版按新的时钟重来
             seenGeneration = gen;
             liveClock.reset();
+            liveRecent.clear();
+            liveLayouts.clear();
             syncPts = -1;
             audio.flush();
         }
@@ -1436,9 +1441,9 @@ public final class VideoSession
             if(a != null && a.generation == gen)
                 liveClock.observe(a.ptsMs, nowMs);
         }
-        long target = liveClock.target(nowMs);
-        if(target < 0)
+        if(!liveClock.started())
             return;
+        long target = liveClock.target(nowMs);
         this.targetMs = target;
         VideoFrame pending = null;
         VideoFrame f;
@@ -1465,28 +1470,47 @@ public final class VideoSession
     }
 
     /**
-     * 直播弹幕（渲染线程）：把新到的排进去（时间记成现在放到的位置），返回此刻要画的。canvasWidth 变了（进出大屏）就重新排。
+     * 直播弹幕（渲染线程）：把新到的排进去（时间记成现在放到的位置），返回此刻要画的。
+     * 世界里的电视和大屏在同一帧里都会画（画布宽不同），每种宽各排一份，新到的弹幕同时排进每一份；新出现的宽度把最近的弹幕补排进去。
      */
     public List<Danmaku.Visible> liveDanmaku(int canvasWidth, int canvasHeight, int lanes, int lineHeight, java.util.function.ToIntFunction<String> width, long nowMs)
     {
         long t = liveClock.target(nowMs);
-        if(t < 0 || status != Status.PLAYING)
+        if(!liveClock.started() || status != Status.PLAYING)
         {
             livePending.clear();
             return Collections.emptyList();
         }
-        if(liveLayout == null || liveLayout.canvasWidth() != Math.max(1, canvasWidth))
-            liveLayout = new Danmaku.Incremental(canvasWidth, lanes);
+        int cw = Math.max(1, canvasWidth);
         Danmaku.Comment c;
         while((c = livePending.poll()) != null)
         {
             // 积压太久的（弹幕关着时攒下的）不画
             if(nowMs - c.timeMs > LIVE_STALE_MS)
                 continue;
-            liveLayout.add(new Danmaku.Comment(t, c.mode, c.color, c.text), width.applyAsInt(c.text));
+            Danmaku.Comment timed = new Danmaku.Comment(t, c.mode, c.color, c.text);
+            liveRecent.add(timed);
+            for(Danmaku.Incremental layout : liveLayouts.values())
+                layout.add(timed, width.applyAsInt(timed.text));
         }
-        liveLayout.trimBefore(t - Danmaku.SCROLL_MS - 1000);
-        return Danmaku.visibleAt(liveLayout.placed(), t, canvasWidth, canvasHeight, lineHeight);
+        long oldest = t - Danmaku.SCROLL_MS - 1000;
+        int drop = 0;
+        while(drop < liveRecent.size() && liveRecent.get(drop).timeMs < oldest)
+            drop++;
+        if(drop > 0)
+            liveRecent.subList(0, drop).clear();
+        Danmaku.Incremental layout = liveLayouts.get(cw);
+        if(layout == null)
+        {
+            if(liveLayouts.size() >= MAX_LIVE_LAYOUTS)
+                liveLayouts.remove(liveLayouts.keySet().iterator().next());
+            layout = new Danmaku.Incremental(cw, lanes);
+            for(Danmaku.Comment r : liveRecent)
+                layout.add(r, width.applyAsInt(r.text));
+            liveLayouts.put(cw, layout);
+        }
+        layout.trimBefore(oldest);
+        return Danmaku.visibleAt(layout.placed(), t, canvasWidth, canvasHeight, lineHeight);
     }
 
     private void requestSeek(long toMs, long nowMs)
