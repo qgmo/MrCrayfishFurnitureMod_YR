@@ -31,7 +31,7 @@ public class GuiTVClientConfig extends GuiScreen
     private TvClientConfig.Values values;
     private GuiTextField startRange, hearRange, volume, proxyHost, proxyPort;
     private MaskedField proxyUsername, proxyPassword;
-    private GuiButton quality, decoders, danmaku, proxyType, pasteCookie, clearCookie, save, discard;
+    private GuiButton quality, decoders, danmaku, tone, proxyType, pasteCookie, clearCookie, save, discard;
     private long discardArmedAt;
     private String status = "";
 
@@ -57,6 +57,8 @@ public class GuiTVClientConfig extends GuiScreen
         decoders = new GuiButton(1, right, top + ROW_BUTTONS, 146, 20, "");
         danmaku = new GuiButton(2, left, top + ROW_BUTTONS + 24, 146, 20, "");
         proxyType = new GuiButton(3, right, top + ROW_BUTTONS + 24, 146, 20, "");
+        // 左边第三行原来空着：直播没开播时的提示音开关
+        tone = new GuiButton(8, left, top + ROW_FIELDS + 43, 146, 20, "");
         startRange = field(10, left + 96, top + ROW_FIELDS, 50, Integer.toString(values.startRange), 3);
         hearRange = field(11, right + 96, top + ROW_FIELDS, 50, Integer.toString(values.hearRange), 2);
         volume = field(12, left + 96, top + ROW_FIELDS + 22, 50, Integer.toString(values.masterVolume), 3);
@@ -72,6 +74,7 @@ public class GuiTVClientConfig extends GuiScreen
         buttonList.add(decoders);
         buttonList.add(danmaku);
         buttonList.add(proxyType);
+        buttonList.add(tone);
         buttonList.add(pasteCookie);
         buttonList.add(clearCookie);
         buttonList.add(discard);
@@ -112,6 +115,7 @@ public class GuiTVClientConfig extends GuiScreen
         quality.displayString = I18n.format("cfm.tv.config.quality", qualityName(values.maxQuality)) + (values.hasCookie() || values.maxQuality <= BiliData.QN_480P ? "" : "*");
         decoders.displayString = I18n.format("cfm.tv.config.decoders", values.maxDecoders);
         danmaku.displayString = I18n.format(values.alwaysHideDanmaku ? "cfm.tv.config.danmaku_hidden" : "cfm.tv.config.danmaku_shown");
+        tone.displayString = I18n.format(values.offlineTone ? "cfm.tv.config.tone_on" : "cfm.tv.config.tone_off");
         proxyType.displayString = I18n.format("cfm.tv.config.proxy", I18n.format("cfm.tv.config.proxy." + values.proxyType.name().toLowerCase(java.util.Locale.ROOT)));
         clearCookie.enabled = values.hasCookie();
         boolean armed = System.currentTimeMillis() - discardArmedAt < 3000;
@@ -181,6 +185,10 @@ public class GuiTVClientConfig extends GuiScreen
         else if(button == danmaku)
         {
             values.alwaysHideDanmaku = !values.alwaysHideDanmaku;
+        }
+        else if(button == tone)
+        {
+            values.offlineTone = !values.offlineTone;
         }
         else if(button == proxyType)
         {

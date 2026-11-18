@@ -22,7 +22,8 @@ public class ContainerTVSettings extends Container
 {
     /** 卡槽在界面上的位置；玩家背包从 {@link #INVENTORY_Y} 开始 */
     public static final int CARD_X = 8, CARD_Y = 94;
-    public static final int INVENTORY_Y = 136;
+    /** 多了一行按钮（播完模式，服主 11-18），背包往下挪 */
+    public static final int INVENTORY_Y = 150;
 
     private final TileEntityTV tv;
     private final int end;

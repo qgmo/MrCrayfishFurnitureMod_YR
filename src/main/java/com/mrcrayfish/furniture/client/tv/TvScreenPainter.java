@@ -11,6 +11,7 @@ import net.minecraft.client.gui.FontRenderer;
 import net.minecraft.client.renderer.BufferBuilder;
 import net.minecraft.client.renderer.GlStateManager;
 import net.minecraft.client.renderer.Tessellator;
+import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.client.renderer.vertex.DefaultVertexFormats;
 import net.minecraft.client.resources.I18n;
 import net.minecraft.util.ResourceLocation;
@@ -23,7 +24,7 @@ import java.util.Random;
 
 /**
  * 画电视屏幕的内容（悠然服务器魔改）：世界里的电视和大屏共用。坐标系是“屏幕画布”：原点在观看者看到的左上角，
- * x 向右、y 向下，宽 w、高 h；往观看者方向是 −z。画面（视频、GIF、封面、噪点、提示文字）、弹幕、进度条都在这里画。
+ * x 向右、y 向下，宽 w、高 h；往观看者方向是 −z。画面（视频、GIF、封面、噪点、提示文字、直播没开播时的测试卡）、弹幕、进度条都在这里画。
  */
 public final class TvScreenPainter
 {
@@ -34,6 +35,8 @@ public final class TvScreenPainter
     private static final int DANMAKU_ROWS = 10;
     private static final int DANMAKU_LANES = 7;
     private static final int PINK = 0xFFFB7299;
+    /** 测试卡的纹理（第一次用时由 {@link TestCard} 算出来） */
+    private static DynamicTexture testCard;
 
     private TvScreenPainter() {}
 
@@ -64,6 +67,10 @@ public final class TvScreenPainter
                     rect(0, 0, w, h, 0, 0xFF000000);
                     picture(sc.texture, sc.width, sc.height, w, h, tv.isStretched(), -0.1F);
                     break;
+                case TEST_CARD:
+                    rect(0, 0, w, h, 0, 0xFF000000);
+                    testCard(tv, w, h);
+                    break;
                 case TEXT:
                     rect(0, 0, w, h, 0, 0xFF000000);
                     String text = sc.text.equals("cfm.tv.video.downloading") ? I18n.format(sc.text, Math.round(NativeLibs.progress() * 100)) : I18n.format(sc.text);
@@ -74,7 +81,10 @@ public final class TvScreenPainter
             }
             if(session != null && sc.kind == TvVideoManager.Screen.Kind.VIDEO && tv.isDanmakuOn() && !TvClientConfig.get().alwaysHideDanmaku)
             {
-                danmaku(session, tv.clientClock(TvVideoManager.latencyMs(Minecraft.getMinecraft())).targetAt(now), w, h);
+                if(session.isLive())
+                    liveDanmaku(session, now, w, h);
+                else
+                    danmaku(session, tv.clientClock(TvVideoManager.latencyMs(Minecraft.getMinecraft())).targetAt(now), w, h);
             }
         }
         else
@@ -83,7 +93,7 @@ public final class TvScreenPainter
         }
         if(tv.isClientOsdShown())
         {
-            osd(tv, tv.clientClock(TvVideoManager.latencyMs(Minecraft.getMinecraft())), now, duration, w, h, channel.isVideo());
+            osd(tv, tv.clientClock(TvVideoManager.latencyMs(Minecraft.getMinecraft())), now, duration, w, h, channel.isVideo(), channel.isLive());
         }
         GlStateManager.color(1F, 1F, 1F, 1F);
         GlStateManager.enableCull();
@@ -124,6 +134,41 @@ public final class TvScreenPainter
                     tv.loadUrl(current);
             }
         }
+    }
+
+    /**
+     * 直播没开播：圆形测试卡（程序算出来的纹理，见 {@link TestCard}），保持 4:3 居中；卡下方的黑带里用小字写这一台的频道号。
+     */
+    private static void testCard(TileEntityTV tv, float w, float h)
+    {
+        if(testCard == null)
+        {
+            testCard = new DynamicTexture(TestCard.WIDTH, TestCard.HEIGHT);
+            int[] px = TestCard.render(TestCard.WIDTH, TestCard.HEIGHT);
+            System.arraycopy(px, 0, testCard.getTextureData(), 0, px.length);
+            testCard.updateDynamicTexture();
+        }
+        GlStateManager.bindTexture(testCard.getGlTextureId());
+        GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MIN_FILTER, GL11.GL_LINEAR);
+        GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MAG_FILTER, GL11.GL_LINEAR);
+        float scale = Math.min(w / TestCard.WIDTH, h / TestCard.HEIGHT);
+        float pw = TestCard.WIDTH * scale, ph = TestCard.HEIGHT * scale;
+        float x0 = (w - pw) / 2, y0 = (h - ph) / 2;
+        fitted(TestCard.WIDTH, TestCard.HEIGHT, w, h, false, -0.1F);
+        TestCard.Geometry g = TestCard.geometry(TestCard.WIDTH, TestCard.HEIGHT);
+        FontRenderer font = Minecraft.getMinecraft().fontRenderer;
+        String label = I18n.format("cfm.tv.live.channel", tv.getCurrentChannelIndex() + 1);
+        float band = (g.labelBottom - g.labelTop) * scale;
+        float textScale = band * 0.55F / font.FONT_HEIGHT;
+        float maxWidth = g.r * 1.2F * scale;
+        if(font.getStringWidth(label) * textScale > maxWidth)
+            textScale = maxWidth / Math.max(1, font.getStringWidth(label));
+        GlStateManager.pushMatrix();
+        GlStateManager.translate(x0 + g.cx * scale, y0 + (g.labelTop + g.labelBottom) / 2F * scale, -0.3F);
+        GlStateManager.scale(textScale, textScale, 1F);
+        font.drawString(label, -font.getStringWidth(label) / 2, -font.FONT_HEIGHT / 2 + 1, 0xFFFFFF);
+        GlStateManager.popMatrix();
+        GlStateManager.color(1F, 1F, 1F, 1F);
     }
 
     /** 画一张纹理，保持比例居中（stretch 时铺满） */
@@ -232,6 +277,28 @@ public final class TvScreenPainter
         GlStateManager.color(1F, 1F, 1F, 1F);
     }
 
+    /** 直播弹幕：来一条排一条（{@link VideoSession#liveDanmaku}），画法同点播 */
+    private static void liveDanmaku(VideoSession session, long now, float w, float h)
+    {
+        FontRenderer font = Minecraft.getMinecraft().fontRenderer;
+        float lineHeight = h / DANMAKU_ROWS;
+        float scale = lineHeight / (font.FONT_HEIGHT + 1);
+        int canvasW = Math.max(1, (int) (w / scale));
+        int canvasH = Math.max(1, (int) (h / scale));
+        List<Danmaku.Visible> visible = session.liveDanmaku(canvasW, canvasH, DANMAKU_LANES, font.FONT_HEIGHT + 1, font::getStringWidth, now);
+        if(visible.isEmpty())
+            return;
+        clip(w, h, true);
+        GlStateManager.pushMatrix();
+        GlStateManager.translate(0, 0, -0.2F);
+        GlStateManager.scale(scale, scale, 1F);
+        for(Danmaku.Visible v : visible)
+            font.drawString(v.text, v.x, v.y, 0xFF000000 | v.color, true);
+        GlStateManager.popMatrix();
+        clip(w, h, false);
+        GlStateManager.color(1F, 1F, 1F, 1F);
+    }
+
     private static void clip(float w, float h, boolean on)
     {
         if(!on)
@@ -255,7 +322,7 @@ public final class TvScreenPainter
     }
 
     /** 进度条（像现代电视的菜单，只有进度条和一行状态），在场的人都看得到 */
-    private static void osd(TileEntityTV tv, TvClock clock, long now, long durationMs, float w, float h, boolean video)
+    private static void osd(TileEntityTV tv, TvClock clock, long now, long durationMs, float w, float h, boolean video, boolean live)
     {
         FontRenderer font = Minecraft.getMinecraft().fontRenderer;
         float band = Math.max(h * 0.2F, 1F);
@@ -277,6 +344,11 @@ public final class TvScreenPainter
             }
         }
         StringBuilder line = new StringBuilder();
+        if(live)
+        {
+            // 直播没有进度：只写“直播”
+            line.append(I18n.format("cfm.tv.osd.live")).append("   ");
+        }
         if(video)
         {
             line.append(clock.isPlaying() ? "▶ " : "❙❙ ");
@@ -286,7 +358,7 @@ public final class TvScreenPainter
             line.append("   ");
         }
         line.append(I18n.format("cfm.tv.osd.volume", tv.getVolume()));
-        if(video)
+        if(video || live)
             line.append("   ").append(I18n.format(tv.isDanmakuOn() ? "cfm.tv.osd.danmaku_on" : "cfm.tv.osd.danmaku_off"));
         String text = line.toString();
         float textScale = band * 0.4F / font.FONT_HEIGHT;

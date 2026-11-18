@@ -31,6 +31,8 @@ import java.util.regex.Pattern;
  * <li>每个响应都是 {@code Connection: close}，范围请求回上游给的精确 206（Content-Range、Content-Length），
  * 否则 FFmpeg 8.1.2 打开 DASH 文件时连接会被重置（原型实测）；</li>
  * <li>上游 403 / 404 / 410（地址过期）时调用 {@link Source#refresh()} 重新取流地址再试一次；</li>
+ * <li>直播（服主 11-18）：一路直播是一条没有长度的流（{@link LiveFeed}，FLV 长连接或 Java 里接起来的 HLS-TS 分片），
+ * 回 {@code 200}、不带 Content-Length、{@code Connection: close}，一直写到上游结束；不支持从中间开始（Range 起点不是 0 回 416）；</li>
  * <li>同时最多 {@value #MAX_CONNECTIONS} 个连接，请求头最多 8 KB，读写有超时，一路流最多转发 {@value #MAX_STREAM_BYTES} 字节。</li>
  * </ul>
  */
@@ -52,6 +54,15 @@ public final class LocalRelay
         void refresh() throws IOException;
     }
 
+    /** 一路直播：每次 FFmpeg 来取时打开一条新的上游流（读到结尾就是断流或下播） */
+    public interface LiveFeed
+    {
+        InputStream open() throws IOException;
+
+        String contentType();
+    }
+
+    private static final Map<String, LiveFeed> LIVE = new ConcurrentHashMap<>();
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final Map<String, Source> SOURCES = new ConcurrentHashMap<>();
     private static final Semaphore SLOTS = new Semaphore(MAX_CONNECTIONS);
@@ -70,13 +81,27 @@ public final class LocalRelay
         return "http://127.0.0.1:" + server.getLocalPort() + "/" + token + "/s";
     }
 
+    /** 登记一路直播，返回给 FFmpeg 用的本机地址 */
+    public static synchronized String registerLive(LiveFeed feed) throws IOException
+    {
+        ensureStarted();
+        byte[] b = new byte[16];
+        RANDOM.nextBytes(b);
+        String token = NativeLibs.hex(b);
+        LIVE.put(token, feed);
+        return "http://127.0.0.1:" + server.getLocalPort() + "/" + token + "/s";
+    }
+
     public static void unregister(@Nullable String url)
     {
         if(url == null)
             return;
         Matcher m = Pattern.compile("/([0-9a-f]{32})/s$").matcher(url);
         if(m.find())
+        {
             SOURCES.remove(m.group(1));
+            LIVE.remove(m.group(1));
+        }
     }
 
     private static void ensureStarted() throws IOException
@@ -142,8 +167,9 @@ public final class LocalRelay
                 return;
             }
             boolean headOnly = req.group(1).equals("HEAD");
+            LiveFeed live = LIVE.get(req.group(2));
             Source source = SOURCES.get(req.group(2));
-            if(source == null)
+            if(source == null && live == null)
             {
                 simple(out, 404, "Not Found");
                 return;
@@ -169,6 +195,16 @@ public final class LocalRelay
                         return;
                     }
                 }
+            }
+            if(live != null)
+            {
+                if(start > 0)
+                {
+                    simple(out, 416, "Range Not Satisfiable");
+                    return;
+                }
+                forwardLive(live, headOnly, out);
+                return;
             }
             forward(source, start, end, headOnly, out);
         }
@@ -263,6 +299,39 @@ public final class LocalRelay
         simple(out, 502, "Bad Gateway");
         if(last != null)
             MrCrayfishFurnitureMod.logger().info("TV video relay: upstream failed: {}", last.getMessage());
+    }
+
+    private static void forwardLive(LiveFeed feed, boolean headOnly, OutputStream out) throws IOException
+    {
+        String header = "HTTP/1.1 200 OK\r\nContent-Type: " + feed.contentType() + "\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n";
+        if(headOnly)
+        {
+            write(out, header);
+            out.flush();
+            return;
+        }
+        InputStream in;
+        try
+        {
+            in = feed.open();
+        }
+        catch(IOException e)
+        {
+            simple(out, 502, "Bad Gateway");
+            MrCrayfishFurnitureMod.logger().info("TV live relay: upstream failed: {}", e.getMessage());
+            return;
+        }
+        try(InputStream upstream = in)
+        {
+            write(out, header);
+            byte[] buf = new byte[64 * 1024];
+            int k;
+            while((k = upstream.read(buf)) > 0)
+            {
+                out.write(buf, 0, k);
+                out.flush();
+            }
+        }
     }
 
     /** Content-Range 的长度与 Content-Length 一致 */

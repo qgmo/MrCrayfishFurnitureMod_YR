@@ -169,6 +169,138 @@ public final class BiliApi
         return URI.create(TvDev.apiBase() + "/x/player/wbi/playurl?" + WbiSigner.sign(params, System.currentTimeMillis() / 1000, key));
     }
 
+    // ================= 直播（服主 11-18） =================
+
+    /** 直播间信息：短号换真实房间号、开播状态（room_init，不用签名；状态要新的，不缓存） */
+    public static LiveData.Room liveRoom(long id) throws BiliData.BiliException
+    {
+        ensureBuvid();
+        return LiveData.parseRoomInit(json(URI.create(TvDev.liveApiBase() + "/room/v1/Room/room_init?id=" + id)));
+    }
+
+    /** getRoomPlayInfo 的参数（同 PiliPlus：protocol 0,1 = FLV 与 HLS，format 0,1 = flv 与 ts，codec 0,1 = H.264 与 H.265） */
+    private static Map<String, String> livePlayParams(long roomId, int qn)
+    {
+        Map<String, String> params = new LinkedHashMap<>();
+        params.put("room_id", Long.toString(roomId));
+        params.put("protocol", "0,1");
+        params.put("format", "0,1");
+        params.put("codec", "0,1");
+        params.put("qn", Integer.toString(qn));
+        params.put("platform", "web");
+        params.put("ptype", "8");
+        params.put("dolby", "5");
+        params.put("panorama", "1");
+        params.put("web_location", "444.8");
+        return params;
+    }
+
+    /** 带 WBI 签名的地址；取不到口令时：allowPlain 为真就不签名（getRoomPlayInfo 不签名也能用，11-18 实测），否则报错 */
+    private static URI signed(String base, Map<String, String> params, boolean allowPlain) throws BiliData.BiliException
+    {
+        String key = mixinKey();
+        if(key != null)
+            return URI.create(base + "?" + WbiSigner.sign(params, System.currentTimeMillis() / 1000, key));
+        if(!allowPlain)
+            throw new BiliData.BiliException("cfm.tv.bili.network", "no WBI keys");
+        StringBuilder q = new StringBuilder();
+        for(Map.Entry<String, String> e : params.entrySet())
+        {
+            if(q.length() > 0)
+                q.append('&');
+            q.append(WbiSigner.encode(e.getKey())).append('=').append(WbiSigner.encode(e.getValue()));
+        }
+        return URI.create(base + "?" + q);
+    }
+
+    public static LiveData.PlayInfo livePlayInfo(long roomId, int qn) throws BiliData.BiliException
+    {
+        ensureBuvid();
+        return LiveData.parsePlayInfo(json(signed(TvDev.liveApiBase() + "/xlive/web-room/v2/index/getRoomPlayInfo", livePlayParams(roomId, qn), true)));
+    }
+
+    /** 直播取流的结果：选中的一路；没开播时 stream 为 null */
+    public static final class LiveSource
+    {
+        public final long roomId;
+        @Nullable
+        public final LiveData.Stream stream;
+
+        LiveSource(long roomId, @Nullable LiveData.Stream stream)
+        {
+            this.roomId = roomId;
+            this.stream = stream;
+        }
+    }
+
+    /**
+     * 取直播流：按清晰度上限对应的直播清晰度请求（{@link LiveData#wantedQn}），选 FLV 或 HLS-TS（{@link LiveData#select}）；
+     * 给的那一档和能给的里最合适的一档（{@link LiveData#pickQn}）不一样时按那一档再请求一次。没开播返回 stream 为 null 的结果。
+     */
+    public static LiveSource liveStream(long roomId, int vodCap) throws BiliData.BiliException
+    {
+        int wanted = LiveData.wantedQn(vodCap);
+        LiveData.PlayInfo info = livePlayInfo(roomId, wanted);
+        long room = info.roomId > 0 ? info.roomId : roomId;
+        if(!info.isLive())
+            return new LiveSource(room, null);
+        LiveData.Stream s = LiveData.select(info.streams);
+        if(s == null)
+            throw new BiliData.BiliException("cfm.tv.bili.no_stream", "no FLV or HLS-TS stream");
+        int pick = LiveData.pickQn(s.acceptQn, wanted);
+        if(pick != s.qn && s.acceptQn.contains(pick))
+        {
+            LiveData.PlayInfo again = livePlayInfo(room, pick);
+            LiveData.Stream s2 = again.isLive() ? LiveData.select(again.streams) : null;
+            if(s2 != null)
+                s = s2;
+        }
+        return new LiveSource(room, s);
+    }
+
+    /** 直播弹幕的令牌与服务器（getDanmuInfo，要 WBI 签名，不签名返回 -352） */
+    public static LiveData.DanmuInfo liveDanmuInfo(long roomId) throws BiliData.BiliException
+    {
+        ensureBuvid();
+        Map<String, String> params = new LinkedHashMap<>();
+        params.put("id", Long.toString(roomId));
+        params.put("type", "0");
+        params.put("web_location", "444.8");
+        return LiveData.parseDanmuInfo(json(signed(TvDev.liveApiBase() + "/xlive/web-room/v1/index/getDanmuInfo", params, false)));
+    }
+
+    // ================= 搜索（服主 11-18） =================
+
+    /**
+     * 分类搜索一页（视频或直播间）。参数同 PiliPlus：page_size 20、platform pc、web_location 1430654，WBI 签名
+     * （取不到口令时用不签名的旧接口）。没有 buvid3 时接口只回风控（v_voucher，11-18 实测），所以先取匿名 buvid；
+     * 风控了而玩家没配 cookie 时换一个匿名 buvid 再试一次，还不行就报“被风控”（已经搜出来的结果由界面留着）。
+     */
+    public static BiliSearch.Page search(BiliSearch.Type type, String keyword, int page) throws BiliData.BiliException
+    {
+        for(int attempt = 0; ; attempt++)
+        {
+            ensureBuvid();
+            Map<String, String> params = new LinkedHashMap<>();
+            params.put("search_type", type.apiName);
+            params.put("keyword", keyword);
+            params.put("page", Integer.toString(page));
+            params.put("page_size", Integer.toString(BiliSearch.PAGE_SIZE));
+            params.put("platform", "pc");
+            params.put("web_location", "1430654");
+            URI uri = mixinKey() != null ? signed(TvDev.apiBase() + "/x/web-interface/wbi/search/type", params, false) : signed(TvDev.apiBase() + "/x/web-interface/search/type", params, true);
+            JsonObject root = json(uri);
+            if(BiliSearch.isChallenge(root) && attempt == 0 && !TvClientConfig.get().hasCookie())
+            {
+                // 换一个匿名 buvid 再试一次
+                spiTried = false;
+                TvCookies.setBuvid("", "");
+                continue;
+            }
+            return BiliSearch.parse(root, type, page);
+        }
+    }
+
     /** 弹幕（取不到返回空表，不算错误） */
     public static List<Danmaku.Comment> danmaku(long cid)
     {

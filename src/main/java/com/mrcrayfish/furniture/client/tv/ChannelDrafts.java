@@ -21,7 +21,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * 频道设置界面的草稿（悠然服务器魔改）。填了一半的内容在关界面、断线、服务器拒绝时都留着，
+ * 频道设置界面的草稿（悠然服务器魔改）：三个频道、拉伸、播完模式。填了一半的内容在关界面、断线、服务器拒绝时都留着，
  * 只有保存成功、或玩家自己点“放弃修改”（再点一次确认）才清掉。存在内存里，同时写进 {@code cfm-tv/drafts.json}，
  * 游戏重启后也还在。按“服务器地址 + 维度 + 坐标”区分电视。
  */
@@ -35,12 +35,15 @@ public final class ChannelDrafts
     {
         public String[] channels = new String[3];
         public boolean stretch;
+        /** 播完模式（{@link com.mrcrayfish.furniture.tv.TvEndMode} 的编号；旧草稿里没有，读出来是 0 = 停住） */
+        public int endMode;
 
         public Draft copy()
         {
             Draft d = new Draft();
             d.channels = channels.clone();
             d.stretch = stretch;
+            d.endMode = endMode;
             return d;
         }
     }

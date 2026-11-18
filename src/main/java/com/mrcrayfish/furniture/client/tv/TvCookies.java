@@ -64,6 +64,19 @@ public final class TvCookies
         sb.append(pair);
     }
 
+    /** 直播弹幕认证用的 buvid3：玩家自己的 cookie 里有就用它，否则用匿名取到的（都没有时是空串） */
+    static String buvid3(String userCookie)
+    {
+        for(String part : sanitize(userCookie).split(";"))
+        {
+            String p = part.trim();
+            int eq = p.indexOf('=');
+            if(eq > 0 && p.substring(0, eq).trim().equalsIgnoreCase("buvid3"))
+                return p.substring(eq + 1).trim();
+        }
+        return buvid3;
+    }
+
     public static boolean hasBuvid()
     {
         return !buvid3.isEmpty();

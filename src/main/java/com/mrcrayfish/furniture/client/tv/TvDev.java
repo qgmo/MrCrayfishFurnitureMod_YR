@@ -45,6 +45,12 @@ public final class TvDev
         return enabled() ? BASE + "/api" : "https://api.bilibili.com";
     }
 
+    /** 直播接口地址（正式：https://api.live.bilibili.com） */
+    public static String liveApiBase()
+    {
+        return enabled() ? BASE + "/live" : "https://api.live.bilibili.com";
+    }
+
     /** 弹幕地址（正式：https://comment.bilibili.com） */
     public static String commentBase()
     {

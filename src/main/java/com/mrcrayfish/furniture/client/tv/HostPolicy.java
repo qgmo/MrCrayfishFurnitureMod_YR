@@ -13,11 +13,11 @@ public final class HostPolicy
 {
     public enum Purpose
     {
-        /** bilibili 接口（视频信息、取流地址、WBI 口令、匿名 buvid、弹幕） */
+        /** bilibili 接口（视频信息、取流地址、WBI 口令、匿名 buvid、弹幕、搜索；直播间信息、直播取流地址、直播弹幕的令牌） */
         API,
         /** 封面图 */
         COVER,
-        /** 视频、音频字节（bilibili 视频 CDN） */
+        /** 视频、音频字节（bilibili 视频 CDN；直播的 FLV 流、HLS 列表与分片也在同一批域名下） */
         CDN,
         /** 下载 FFmpeg 本地库 */
         LIBRARY
@@ -39,9 +39,10 @@ public final class HostPolicy
         switch(purpose)
         {
             case API:
-                return host.equals("api.bilibili.com") || host.equals("comment.bilibili.com");
+                return host.equals("api.bilibili.com") || host.equals("comment.bilibili.com") || host.equals("api.live.bilibili.com");
             case COVER:
-                return host.endsWith(".hdslb.com") && isPlainHost(host);
+                // 搜索结果里的视频封面有的在 archive.biliimg.com（11-18 实测）
+                return (host.endsWith(".hdslb.com") || host.endsWith(".biliimg.com")) && isPlainHost(host);
             case CDN:
                 return isCdnHost(host);
             case LIBRARY:
@@ -49,6 +50,20 @@ public final class HostPolicy
             default:
                 return false;
         }
+    }
+
+    /**
+     * 直播弹幕服务器：{@code wss://*.chat.bilibili.com:443/sub}（getDanmuInfo 给的 host_list，11-18 实测是
+     * {@code broadcastlv-mixed.chat.bilibili.com}、{@code hw-sg-live-comet-01.chat.bilibili.com} 一类）。端口只认 443。
+     */
+    public static boolean allowedLiveChat(@Nullable URI uri)
+    {
+        if(uri == null || uri.getHost() == null || uri.getRawUserInfo() != null || !"wss".equalsIgnoreCase(uri.getScheme()))
+            return false;
+        if(uri.getPort() != 443 && uri.getPort() != -1)
+            return false;
+        String host = uri.getHost().toLowerCase(Locale.ROOT);
+        return host.endsWith(".chat.bilibili.com") && isPlainHost(host);
     }
 
     /** bilibili 视频 CDN：*.bilivideo.com、*.bilivideo.cn（含 mcdn），海外的 upos-*-mirrorakam.akamaized.net */
@@ -89,6 +104,11 @@ public final class HostPolicy
         try
         {
             String text = url.trim();
+            if(text.startsWith("//"))
+            {
+                // 搜索结果的封面地址不带协议
+                text = "https:" + text;
+            }
             URI uri = new URI(text);
             if("http".equalsIgnoreCase(uri.getScheme()) && uri.getHost() != null && !uri.getHost().equals("127.0.0.1"))
             {

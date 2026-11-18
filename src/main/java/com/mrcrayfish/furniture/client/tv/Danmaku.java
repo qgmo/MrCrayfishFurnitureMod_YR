@@ -189,15 +189,49 @@ public final class Danmaku
      */
     public static List<Placed> layout(List<Comment> comments, int canvasWidth, int lanes, ToIntFunction<String> width)
     {
-        List<Placed> placed = new ArrayList<>();
         if(lanes <= 0 || canvasWidth <= 0)
-            return placed;
-        Placed[] scroll = new Placed[lanes];
-        long[] topUntil = new long[lanes];
-        long[] bottomUntil = new long[lanes];
+            return new ArrayList<>();
+        Incremental placer = new Incremental(canvasWidth, lanes);
         for(Comment c : comments)
+            placer.add(c, width.applyAsInt(c.text));
+        return placer.placed;
+    }
+
+    /**
+     * 一条一条地排（直播弹幕用，服主 11-18：弹幕随时到，来一条排一条，已经排好的位置不再变）。
+     * 规则同 {@link #layout}；加进来的时间要不早于上一条（早了按上一条的时间算）。只在渲染线程用。
+     */
+    public static final class Incremental
+    {
+        private final int canvasWidth;
+        private final int lanes;
+        private final Placed[] scroll;
+        private final long[] topUntil;
+        private final long[] bottomUntil;
+        private final List<Placed> placed = new ArrayList<>();
+        private long lastTime = Long.MIN_VALUE;
+
+        public Incremental(int canvasWidth, int lanes)
         {
-            int w = Math.max(1, width.applyAsInt(c.text));
+            this.canvasWidth = Math.max(1, canvasWidth);
+            this.lanes = Math.max(1, lanes);
+            this.scroll = new Placed[this.lanes];
+            this.topUntil = new long[this.lanes];
+            this.bottomUntil = new long[this.lanes];
+        }
+
+        public int canvasWidth()
+        {
+            return canvasWidth;
+        }
+
+        /** 排一条；放不下就丢掉，返回是否放下了 */
+        public boolean add(Comment c, int textWidth)
+        {
+            if(c.timeMs < lastTime)
+                c = new Comment(lastTime, c.mode, c.color, c.text);
+            lastTime = c.timeMs;
+            int w = Math.max(1, textWidth);
             if(c.mode == MODE_SCROLL)
             {
                 for(int lane = 0; lane < lanes; lane++)
@@ -207,25 +241,39 @@ public final class Danmaku
                         Placed p = new Placed(c, lane, w);
                         scroll[lane] = p;
                         placed.add(p);
-                        break;
+                        return true;
                     }
                 }
+                return false;
             }
-            else
+            long[] until = c.mode == MODE_TOP ? topUntil : bottomUntil;
+            for(int lane = 0; lane < lanes; lane++)
             {
-                long[] until = c.mode == MODE_TOP ? topUntil : bottomUntil;
-                for(int lane = 0; lane < lanes; lane++)
+                if(until[lane] <= c.timeMs)
                 {
-                    if(until[lane] <= c.timeMs)
-                    {
-                        until[lane] = c.timeMs + FIXED_MS;
-                        placed.add(new Placed(c, lane, w));
-                        break;
-                    }
+                    until[lane] = c.timeMs + FIXED_MS;
+                    placed.add(new Placed(c, lane, w));
+                    return true;
                 }
             }
+            return false;
         }
-        return placed;
+
+        /** 去掉早于 timeMs 的（已经走完的；只从列表里去掉，各行的占用照旧，后面的位置不变） */
+        public void trimBefore(long timeMs)
+        {
+            int n = 0;
+            while(n < placed.size() && placed.get(n).comment.timeMs < timeMs)
+                n++;
+            if(n > 0)
+                placed.subList(0, n).clear();
+        }
+
+        /** 排好的（按时间顺序） */
+        public List<Placed> placed()
+        {
+            return placed;
+        }
     }
 
     /** 前一条 prev 在同一行时，next 能不能在它出发的时刻放进去 */

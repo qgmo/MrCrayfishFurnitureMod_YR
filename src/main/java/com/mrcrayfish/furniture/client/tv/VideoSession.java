@@ -27,6 +27,16 @@ import java.util.concurrent.atomic.AtomicInteger;
  * 后台线程：取视频信息与流地址 → 登记本机转发 → 解码（MP4 一路、DASH 画面声音各一路），画面、声音放进有上限的队列。
  * 渲染线程（{@link #update}）：按服务端给的目标位置取该显示的那一帧，{@code glTexSubImage2D} 更新纹理；声音交给 {@link AudioOut}。
  * 本地位置与目标差太多时跳转（{@link TvClock#decide}），跳转最多每 3 秒一次。解码出错不会带崩游戏：出错就停在提示上，过一会儿重开。
+ * <p>
+ * 直播（服主 11-18，{@link TvChannel#isLive()}）：没有进度，不看服务端的时钟，各人放自己收到的最新画面（{@link LiveClock}）。
+ * 后台线程先查开播状态（{@link BiliApi#liveRoom}），没开播就停在 {@link Status#OFFLINE}（画测试卡、放“嘟——”声，{@link ToneOut}），
+ * 每 {@value #OFFLINE_POLL_MS} 毫秒再查一次，弹幕连接收到“开播”时马上查；开播了取流（FLV 或 HLS-TS，经本机转发给 FFmpeg）一直解到流断，
+ * 断了再从查开播状态开始。弹幕走直播弹幕连接（{@link LiveDanmakuClient}），来一条排一条（{@link Danmaku.Incremental}）。
+ * <p>
+ * 换清晰度（进出大屏，服主 11-18：无缝切换）：不重开整个视频。旧的一路照常放，后台按当前位置开新清晰度的视频（{@link #prepareVod}），
+ * 解到对上当前位置的那一帧（{@link FrameSeek}）再交给解码线程，在下一帧换过去、关掉旧的视频解码（{@link #takePrepared}）。
+ * 声音不动：DASH 的声音本来就是单独一路；单文件 MP4 的旧解码器改成只解声音继续用。直播的音视频在一条流里，换的时候音视频一起换。
+ * 什么时候开始准备、作废、失败多久再试见 {@link QualitySwitch}。
  */
 public final class VideoSession
 {
@@ -39,8 +49,17 @@ public final class VideoSession
         /** 播完了（回到噪点） */
         ENDED,
         /** 出错，见 {@link #getErrorKey()} */
-        ERROR
+        ERROR,
+        /** 直播：没开播 / 下播了（画测试卡） */
+        OFFLINE
     }
+
+    /** 直播没开播时多久再查一次开播状态 */
+    static final long OFFLINE_POLL_MS = 30_000L;
+    /** 直播弹幕最多积压多少条没画的 */
+    private static final int LIVE_PENDING = 256;
+    /** 收到多久还没画的直播弹幕就不画了 */
+    private static final long LIVE_STALE_MS = 3_000L;
 
     /** 画面队列最多这么多帧（480P 及以下）；更高清晰度时按 {@link #VIDEO_QUEUE_BYTES} 减少，见 {@link #queueFrames(int)} */
     private static final int VIDEO_QUEUE_MAX = 12;
@@ -90,7 +109,22 @@ public final class VideoSession
 
     private final BlockPos pos;
     private final TvChannel channel;
-    private final int maxQuality;
+    /** 清晰度：现在用的、想要的（进出大屏时无缝切换） */
+    private final QualitySwitch quality;
+    /** 画面队列按这一档算（玩家设置的生效上限）：切换清晰度时不用重建队列 */
+    private final int queueQuality;
+    private final boolean live;
+    /** 准备好的新一路视频，等解码线程换上 */
+    private final java.util.concurrent.atomic.AtomicReference<Prepared> prepared = new java.util.concurrent.atomic.AtomicReference<>();
+    @Nullable
+    private volatile Thread prepareThread;
+    /** 解码线程打开着的解码器（结束时一起关） */
+    private final List<VideoDecoder> openDecoders = Collections.synchronizedList(new ArrayList<>());
+    /** 换清晰度后由旧的单文件 MP4 接着解声音的线程 */
+    private final List<Thread> trackThreads = Collections.synchronizedList(new ArrayList<>());
+    /** 只在解码线程用：最近放进队列的画面时间戳（换上新的一路时，不晚于它的帧丢掉，前后接得上） */
+    private long lastQueuedPts = -1;
+    private volatile long liveRoomId;
 
     private volatile Status status = Status.LOADING;
     private volatile String errorKey = "";
@@ -138,12 +172,32 @@ public final class VideoSession
     private final java.util.Map<Integer, List<Danmaku.Placed>> layouts = new java.util.HashMap<>();
     private List<Danmaku.Comment> layoutSource;
 
-    public VideoSession(BlockPos pos, TvChannel channel, int maxQuality, long startTargetMs)
+    // ---- 直播 ----
+    /** 弹幕连接收到“开播”：不用等到下一次轮询 */
+    private volatile boolean liveWake;
+    /** 弹幕连接收到“下播”：解码线程别等读超时，马上停 */
+    private volatile boolean liveStop;
+    @Nullable
+    private volatile LiveDanmakuClient liveDanmaku;
+    private final BlockingQueue<Danmaku.Comment> livePending = new ArrayBlockingQueue<>(LIVE_PENDING);
+    /** 只在渲染线程用 */
+    private final LiveClock liveClock = new LiveClock();
+    @Nullable
+    private Danmaku.Incremental liveLayout;
+    private final ToneOut tone = new ToneOut();
+
+    /**
+     * @param maxQuality   开始时的清晰度上限
+     * @param queueQuality 画面队列按哪一档的帧大小算（玩家设置的生效上限，以后换清晰度都不超过它）
+     */
+    public VideoSession(BlockPos pos, TvChannel channel, int maxQuality, int queueQuality, long startTargetMs)
     {
         this.pos = pos;
         this.channel = channel;
-        this.maxQuality = maxQuality;
-        this.videoQueueSize = queueFrames(maxQuality);
+        this.quality = new QualitySwitch(maxQuality);
+        this.queueQuality = queueQuality;
+        this.live = channel.isLive();
+        this.videoQueueSize = queueFrames(Math.max(maxQuality, queueQuality));
         this.videoQueue = new ArrayBlockingQueue<>(videoQueueSize);
         this.freeFrames = new ArrayBlockingQueue<>(videoQueueSize + 4);
         this.targetMs = startTargetMs;
@@ -162,9 +216,26 @@ public final class VideoSession
         return (int) Math.max(VIDEO_QUEUE_MIN, Math.min(VIDEO_QUEUE_MAX, n));
     }
 
+    public boolean isLive()
+    {
+        return live;
+    }
+
+    /** 现在画面用的清晰度上限 */
     public int getMaxQuality()
     {
-        return maxQuality;
+        return quality.current();
+    }
+
+    public int getQueueQuality()
+    {
+        return queueQuality;
+    }
+
+    /** 想要的清晰度上限（进出大屏时由 {@link TvVideoManager} 设）：不同于现在的就在后台无缝切换 */
+    public void setQualityTarget(int cap)
+    {
+        quality.setTarget(cap);
     }
 
     public BlockPos getPos()
@@ -249,6 +320,11 @@ public final class VideoSession
 
     private void run()
     {
+        if(live)
+        {
+            runLive();
+            return;
+        }
         int failures = 0;
         while(!closed)
         {
@@ -303,6 +379,244 @@ public final class VideoSession
         releaseRelay();
     }
 
+    // ---- 直播的后台线程 ----
+
+    private void runLive()
+    {
+        int failures = 0;
+        while(!closed)
+        {
+            try
+            {
+                LiveData.Room room = BiliApi.liveRoom(channel.getRoom());
+                liveRoomId = room.roomId;
+                startLiveDanmaku(room.roomId);
+                if(!room.isLive())
+                {
+                    goOffline();
+                    continue;
+                }
+                BiliApi.LiveSource src = BiliApi.liveStream(room.roomId, quality.current());
+                if(src.stream == null)
+                {
+                    goOffline();
+                    continue;
+                }
+                long started = System.currentTimeMillis();
+                playLive(src.stream);
+                // 流断了（下播、网络、地址过期）：稍等再从查开播状态开始；连着很快断就等久一点（最多 30 秒）
+                failures = System.currentTimeMillis() - started > 60_000L ? 0 : failures + 1;
+                sleepLive(Math.min(30_000L, 1000L << Math.min(5, Math.max(0, failures - 1))));
+            }
+            catch(BiliData.BiliException e)
+            {
+                fail(e.getKey(), e.getMessage());
+                sleepLive(30_000L);
+            }
+            catch(InterruptedException e)
+            {
+                break;
+            }
+            catch(Throwable t)
+            {
+                failures++;
+                MrCrayfishFurnitureMod.logger().warn("TV live at {}: decoder error: {}", pos, t.toString());
+                fail("cfm.tv.video.decode_error", t.toString());
+                sleepLive(failures >= 3 ? 30_000L : 3_000L);
+            }
+        }
+        releaseRelay();
+    }
+
+    private void goOffline()
+    {
+        if(status != Status.OFFLINE && !closed)
+            MrCrayfishFurnitureMod.logger().info("TV live at {}: room {} is off air", pos, channel.getRoom());
+        status = Status.OFFLINE;
+        sleepLive(OFFLINE_POLL_MS);
+    }
+
+    /** 等 ms 毫秒，关掉或弹幕连接说开播了就提前醒 */
+    private void sleepLive(long ms)
+    {
+        long end = System.currentTimeMillis() + ms;
+        while(!closed && !liveWake && System.currentTimeMillis() < end)
+        {
+            try
+            {
+                Thread.sleep(100);
+            }
+            catch(InterruptedException e)
+            {
+                return;
+            }
+        }
+        liveWake = false;
+    }
+
+    private void startLiveDanmaku(long roomId)
+    {
+        LiveDanmakuClient old = liveDanmaku;
+        if(old != null && old.roomId() == roomId)
+            return;
+        if(old != null)
+            old.close();
+        if(closed)
+            return;
+        liveDanmaku = new LiveDanmakuClient(roomId, new LiveDanmakuClient.Listener()
+        {
+            @Override
+            public void onComment(Danmaku.Comment comment)
+            {
+                // 时间先记成收到的本机时刻（排版时换成放到的位置）；积压满了（画不过来、或弹幕关着没人取）就丢掉
+                livePending.offer(new Danmaku.Comment(System.currentTimeMillis(), comment.mode, comment.color, comment.text));
+            }
+
+            @Override
+            public void onLive()
+            {
+                liveWake = true;
+            }
+
+            @Override
+            public void onPreparing()
+            {
+                liveStop = true;
+            }
+        });
+        if(closed)
+            liveDanmaku.close();
+    }
+
+    /** 解一路直播，直到流断、下播、关掉 */
+    private void playLive(LiveData.Stream stream) throws Exception
+    {
+        releaseRelay();
+        String url = LocalRelay.registerLive(feed(stream));
+        relayUrls.add(url);
+        liveStop = false;
+        int gen = ++generation;
+        videoEof = false;
+        VideoDecoder video = new VideoDecoder(url, true, true, 0, quality.current(), container(stream));
+        openDecoders.add(video);
+        try
+        {
+            hasAudio = video.hasAudio();
+            status = Status.PLAYING;
+            decodeLoop(video, gen, true);
+        }
+        finally
+        {
+            closeDecoders();
+            discardPrepared();
+            releaseRelay();
+        }
+    }
+
+    private static VideoDecoder.Container container(LiveData.Stream stream)
+    {
+        return stream.isFlv() ? VideoDecoder.Container.FLV : VideoDecoder.Container.MPEGTS;
+    }
+
+    private static LocalRelay.LiveFeed feed(LiveData.Stream stream)
+    {
+        return stream.isFlv() ? flvFeed(stream.urls) : hlsFeed(stream.urls);
+    }
+
+    /** HTTP-FLV：依次试各个 CDN 地址，哪个回 200 用哪个 */
+    private static LocalRelay.LiveFeed flvFeed(List<URI> urls)
+    {
+        return new LocalRelay.LiveFeed()
+        {
+            @Override
+            public java.io.InputStream open() throws IOException
+            {
+                IOException last = null;
+                for(URI u : urls)
+                {
+                    try
+                    {
+                        TvHttp.Response res = TvHttp.get(u, HostPolicy.Purpose.CDN, "*/*", -1, -1, -1, 20_000);
+                        if(res.status == 200)
+                            return closing(res);
+                        last = new IOException("HTTP " + res.status + " from " + TvHttp.safe(res.uri));
+                        res.close();
+                    }
+                    catch(IOException e)
+                    {
+                        last = e;
+                    }
+                }
+                throw last != null ? last : new IOException("no live stream address");
+            }
+
+            @Override
+            public String contentType()
+            {
+                return "video/x-flv";
+            }
+        };
+    }
+
+    /** HLS-TS：分片在 Java 里取、接成一条流（{@link HlsFeed}） */
+    private static LocalRelay.LiveFeed hlsFeed(List<URI> playlists)
+    {
+        HlsFeed.Fetcher fetcher = new HlsFeed.Fetcher()
+        {
+            @Override
+            public String playlist(URI uri) throws IOException
+            {
+                return TvHttp.getText(uri, HostPolicy.Purpose.CDN, 1024 * 1024);
+            }
+
+            @Override
+            public java.io.InputStream segment(URI uri) throws IOException
+            {
+                TvHttp.Response res = TvHttp.get(uri, HostPolicy.Purpose.CDN, "*/*", -1, -1, 64L * 1024 * 1024, 20_000);
+                if(res.status != 200)
+                {
+                    res.close();
+                    throw new IOException("HTTP " + res.status + " from " + TvHttp.safe(res.uri));
+                }
+                return closing(res);
+            }
+        };
+        return new LocalRelay.LiveFeed()
+        {
+            @Override
+            public java.io.InputStream open()
+            {
+                return new HlsFeed(playlists, fetcher, Thread::sleep);
+            }
+
+            @Override
+            public String contentType()
+            {
+                return "video/mp2t";
+            }
+        };
+    }
+
+    /** 响应体，关的时候连同连接一起关 */
+    private static java.io.InputStream closing(TvHttp.Response res) throws IOException
+    {
+        return new java.io.FilterInputStream(res.body())
+        {
+            @Override
+            public void close() throws IOException
+            {
+                try
+                {
+                    super.close();
+                }
+                finally
+                {
+                    res.close();
+                }
+            }
+        };
+    }
+
     private void fail(String key, String detail)
     {
         if(closed)
@@ -320,39 +634,60 @@ public final class VideoSession
         // 短时间内多路同时要刷新，只刷一次
         if(stream != null && System.currentTimeMillis() - streamAt < 10_000L)
             return;
-        BiliData.Stream s = BiliApi.playurl(i, maxQuality);
+        BiliData.Stream s = BiliApi.playurl(i, quality.current());
         stream = s;
         streamAt = System.currentTimeMillis();
         if(s.durationMs > 0 && durationMs <= 0)
             durationMs = s.durationMs;
     }
 
-    private LocalRelay.Source source(boolean audioTrack)
+    /**
+     * 本机转发的一路（画面或声音）：记着自己的流地址与清晰度，地址过期时按同一档重新取。换清晰度后新旧两路各用各的。
+     */
+    private final class Track implements LocalRelay.Source
     {
-        return new LocalRelay.Source()
-        {
-            @Override
-            public List<URI> urls()
-            {
-                BiliData.Stream s = stream;
-                if(s == null)
-                    return Collections.emptyList();
-                return audioTrack ? s.audio : s.video;
-            }
+        private final boolean audioTrack;
+        private final int cap;
+        private volatile BiliData.Stream current;
+        private long at;
 
-            @Override
-            public void refresh() throws IOException
+        Track(BiliData.Stream stream, boolean audioTrack, int cap)
+        {
+            this.current = stream;
+            this.audioTrack = audioTrack;
+            this.cap = cap;
+            this.at = System.currentTimeMillis();
+        }
+
+        @Override
+        public List<URI> urls()
+        {
+            BiliData.Stream s = current;
+            return s == null ? Collections.emptyList() : audioTrack ? s.audio : s.video;
+        }
+
+        @Override
+        public synchronized void refresh() throws IOException
+        {
+            if(System.currentTimeMillis() - at < 10_000L)
+                return;
+            BiliData.VideoInfo i = info;
+            if(i == null)
+                return;
+            try
             {
-                try
-                {
-                    refreshStream();
-                }
-                catch(BiliData.BiliException e)
-                {
-                    throw new IOException(e.getMessage());
-                }
+                BiliData.Stream s = BiliApi.playurl(i, cap);
+                // 单文件 MP4 换成了 DASH（或反过来）：不是同一个文件，接不上
+                if(current != null && s.dash != current.dash)
+                    throw new IOException("stream type changed");
+                current = s;
+                at = System.currentTimeMillis();
             }
-        };
+            catch(BiliData.BiliException e)
+            {
+                throw new IOException(e.getMessage());
+            }
+        }
     }
 
     /** 打开解码器从目标位置开始解，直到读完、出错或关掉 */
@@ -362,43 +697,397 @@ public final class VideoSession
         if(s == null)
             return;
         releaseRelay();
-        String videoUrl = LocalRelay.register(source(false));
+        int cap = quality.current();
+        String videoUrl = LocalRelay.register(new Track(s, false, cap));
         relayUrls.add(videoUrl);
         String audioUrl = null;
         if(s.dash && !s.audio.isEmpty())
         {
-            audioUrl = LocalRelay.register(source(true));
+            audioUrl = LocalRelay.register(new Track(s, true, cap));
             relayUrls.add(audioUrl);
         }
         int gen = generation;
         long start = seekToMs >= 0 ? seekToMs : targetMs;
         seekToMs = -1;
         videoEof = false;
-        try(VideoDecoder video = new VideoDecoder(videoUrl, true, !s.dash, start, maxQuality))
+        lastQueuedPts = -1;
+        VideoDecoder video = new VideoDecoder(videoUrl, true, !s.dash, start, cap);
+        openDecoders.add(video);
+        try
         {
             if(durationMs <= 0)
                 durationMs = video.lengthMs();
             hasAudio = video.hasAudio();
-            Thread audioThread = null;
             if(audioUrl != null)
             {
                 hasAudio = true;
                 String url = audioUrl;
-                audioThread = new Thread(() -> audioLoop(url, start, gen), "cfm-tv-audio-" + THREADS.incrementAndGet());
+                Thread audioThread = new Thread(() -> audioLoop(url, start, gen), "cfm-tv-audio-" + THREADS.incrementAndGet());
                 audioThread.setDaemon(true);
                 audioThread.setPriority(Thread.NORM_PRIORITY - 1);
                 threads.add(audioThread);
+                trackThreads.add(audioThread);
                 audioThread.start();
             }
             status = Status.PLAYING;
             decodeLoop(video, gen, true);
-            if(audioThread != null)
+        }
+        finally
+        {
+            stopTrackThreads();
+            closeDecoders();
+            discardPrepared();
+        }
+    }
+
+    private void stopTrackThreads()
+    {
+        List<Thread> list;
+        synchronized(trackThreads)
+        {
+            list = new ArrayList<>(trackThreads);
+            trackThreads.clear();
+        }
+        for(Thread t : list)
+            t.interrupt();
+        for(Thread t : list)
+        {
+            try
             {
-                audioThread.interrupt();
-                audioThread.join(2000);
-                threads.remove(audioThread);
+                t.join(2000);
+            }
+            catch(InterruptedException e)
+            {
+                Thread.currentThread().interrupt();
+            }
+            threads.remove(t);
+        }
+    }
+
+    private void closeDecoders()
+    {
+        List<VideoDecoder> list;
+        synchronized(openDecoders)
+        {
+            list = new ArrayList<>(openDecoders);
+            openDecoders.clear();
+        }
+        for(VideoDecoder d : list)
+            d.close();
+    }
+
+    // ---- 无缝换清晰度（服主 11-18） ----
+
+    /** 准备好的新一路视频：解码器已经停在对上当前位置的那一帧之后 */
+    private static final class Prepared
+    {
+        final int attempt;
+        final int generation;
+        final int cap;
+        final VideoDecoder decoder;
+        final String relayUrl;
+        final VideoFrame first;
+        @Nullable
+        final BiliData.Stream stream;
+
+        Prepared(int attempt, int generation, int cap, VideoDecoder decoder, String relayUrl, VideoFrame first, @Nullable BiliData.Stream stream)
+        {
+            this.attempt = attempt;
+            this.generation = generation;
+            this.cap = cap;
+            this.decoder = decoder;
+            this.relayUrl = relayUrl;
+            this.first = first;
+            this.stream = stream;
+        }
+
+        void close()
+        {
+            decoder.close();
+            LocalRelay.unregister(relayUrl);
+        }
+    }
+
+    private void discardPrepared()
+    {
+        Prepared p = prepared.getAndSet(null);
+        if(p != null)
+            p.close();
+    }
+
+    private void publish(Prepared p)
+    {
+        Prepared old = prepared.getAndSet(p);
+        if(old != null)
+            old.close();
+        if(closed)
+            discardPrepared();
+    }
+
+    /** 渲染线程每帧：按 {@link QualitySwitch} 的决定开始准备新的一路。同一台电视同一时间最多一个准备线程 */
+    private void pollQuality(long nowMs)
+    {
+        if(status != Status.PLAYING || !hasPicture())
+            return;
+        QualitySwitch.Decision d = quality.poll(nowMs);
+        if(d != QualitySwitch.Decision.START && d != QualitySwitch.Decision.RESTART)
+            return;
+        int attempt = quality.preparingAttempt();
+        int cap = quality.preparingQuality();
+        Thread old = prepareThread;
+        if(old != null && old.isAlive())
+        {
+            // 上一次（已作废）的准备还没退出：不叠着开，下一帧再说
+            quality.interrupted(attempt);
+            return;
+        }
+        Thread t = new Thread(() ->
+        {
+            try
+            {
+                if(live)
+                    prepareLive(attempt, cap);
+                else
+                    prepareVod(attempt, cap);
+            }
+            finally
+            {
+                threads.remove(Thread.currentThread());
+            }
+        }, "cfm-tv-switch-" + THREADS.incrementAndGet());
+        t.setDaemon(true);
+        t.setPriority(Thread.NORM_PRIORITY - 1);
+        prepareThread = t;
+        threads.add(t);
+        t.start();
+    }
+
+    /** 准备时最多解多少帧还没对上就算失败（约 30 秒的画面） */
+    private static final int MAX_PREPARE_FRAMES = 1800;
+
+    /** 点播：按新清晰度取流，只开画面，从当前位置前最近的关键帧解到对上当前位置 */
+    private void prepareVod(int attempt, int cap)
+    {
+        int gen = generation;
+        VideoDecoder dec = null;
+        String url = null;
+        boolean handed = false;
+        java.util.function.BooleanSupplier cancelled = () -> closed || generation != gen || !quality.valid(attempt);
+        try
+        {
+            BiliData.VideoInfo i = info;
+            if(i == null)
+            {
+                quality.interrupted(attempt);
+                return;
+            }
+            BiliData.Stream s = BiliApi.playurl(i, cap);
+            if(cancelled.getAsBoolean())
+                return;
+            url = LocalRelay.register(new Track(s, false, cap));
+            dec = new VideoDecoder(url, true, false, Math.max(0, targetMs), cap);
+            VideoFrame first = seekFirst(dec, () -> targetMs, cancelled);
+            if(first == null)
+            {
+                if(generation != gen)
+                    quality.interrupted(attempt);
+                else if(!closed && quality.valid(attempt))
+                    quality.failed(attempt, System.currentTimeMillis());
+                return;
+            }
+            first.generation = gen;
+            publish(new Prepared(attempt, gen, cap, dec, url, first, s));
+            handed = true;
+        }
+        catch(InterruptedException e)
+        {
+            quality.interrupted(attempt);
+        }
+        catch(Throwable t)
+        {
+            MrCrayfishFurnitureMod.logger().info("TV video at {}: switching to quality {} failed, keeping the current one: {}", pos, cap, t instanceof BiliData.BiliException ? ((BiliData.BiliException) t).getKey() : t.toString());
+            quality.failed(attempt, System.currentTimeMillis());
+        }
+        finally
+        {
+            if(!handed)
+            {
+                if(dec != null)
+                    dec.close();
+                LocalRelay.unregister(url);
             }
         }
+    }
+
+    /** 直播：按新清晰度重新取流（音视频在一条流里），解出第一帧画面就算准备好 */
+    private void prepareLive(int attempt, int cap)
+    {
+        VideoDecoder dec = null;
+        String url = null;
+        boolean handed = false;
+        java.util.function.BooleanSupplier cancelled = () -> closed || status != Status.PLAYING || !quality.valid(attempt);
+        try
+        {
+            long room = liveRoomId;
+            if(room <= 0)
+            {
+                quality.interrupted(attempt);
+                return;
+            }
+            BiliApi.LiveSource src = BiliApi.liveStream(room, cap);
+            if(src.stream == null)
+            {
+                quality.failed(attempt, System.currentTimeMillis());
+                return;
+            }
+            if(cancelled.getAsBoolean())
+                return;
+            url = LocalRelay.registerLive(feed(src.stream));
+            dec = new VideoDecoder(url, true, true, 0, cap, container(src.stream));
+            VideoFrame first = seekFirst(dec, () -> Long.MIN_VALUE / 2, cancelled);
+            if(first == null)
+            {
+                if(!closed && quality.valid(attempt))
+                    quality.failed(attempt, System.currentTimeMillis());
+                return;
+            }
+            publish(new Prepared(attempt, generation, cap, dec, url, first, null));
+            handed = true;
+        }
+        catch(InterruptedException e)
+        {
+            quality.interrupted(attempt);
+        }
+        catch(Throwable t)
+        {
+            MrCrayfishFurnitureMod.logger().info("TV live at {}: switching to quality {} failed, keeping the current one: {}", pos, cap, t instanceof BiliData.BiliException ? ((BiliData.BiliException) t).getKey() : t.toString());
+            quality.failed(attempt, System.currentTimeMillis());
+        }
+        finally
+        {
+            if(!handed)
+            {
+                if(dec != null)
+                    dec.close();
+                LocalRelay.unregister(url);
+            }
+        }
+    }
+
+    /** 解到对上 target 的那一帧画面，拷进一个新的帧缓冲 */
+    @Nullable
+    private VideoFrame seekFirst(VideoDecoder dec, java.util.function.LongSupplier target, java.util.function.BooleanSupplier cancelled) throws Exception
+    {
+        Frame f = FrameSeek.seek(new FrameSeek.Source<Frame>()
+        {
+            @Override
+            public Frame next() throws Exception
+            {
+                while(true)
+                {
+                    Frame fr = dec.next();
+                    if(fr == null || (VideoDecoder.isImage(fr) && fr.imageWidth > 0 && fr.imageHeight > 0))
+                        return fr;
+                }
+            }
+
+            @Override
+            public long ptsMs(Frame frame)
+            {
+                return frame.timestamp / 1000L;
+            }
+        }, target, cancelled, MAX_PREPARE_FRAMES);
+        if(f == null)
+            return null;
+        VideoFrame vf = new VideoFrame(f.imageWidth * f.imageHeight * 4);
+        VideoDecoder.copyImage(f, vf.data);
+        vf.width = f.imageWidth;
+        vf.height = f.imageHeight;
+        vf.ptsMs = f.timestamp / 1000L;
+        return vf;
+    }
+
+    /**
+     * 解码线程：有准备好的新一路就换上（返回新的解码器），否则返回 current。作废了的（目标又变了、跳转过进度）关掉。
+     */
+    private VideoDecoder takePrepared(VideoDecoder current) throws InterruptedException
+    {
+        Prepared p = prepared.getAndSet(null);
+        if(p == null)
+            return current;
+        if(!live && p.generation != generation)
+        {
+            // 准备期间跳转过进度：位置对不上了，重新准备
+            quality.interrupted(p.attempt);
+            p.close();
+            return current;
+        }
+        if(!quality.ready(p.attempt))
+        {
+            p.close();
+            return current;
+        }
+        quality.handedOver(p.attempt);
+        relayUrls.add(p.relayUrl);
+        openDecoders.add(p.decoder);
+        if(live)
+        {
+            // 直播的音视频在一条流里：一起换，渲染线程按新的一代重新对时钟（声音会断一下）
+            openDecoders.remove(current);
+            current.close();
+            int gen = ++generation;
+            p.first.generation = gen;
+            hasAudio = p.decoder.hasAudio();
+            if(!videoQueue.offer(p.first))
+                recycle(p.first);
+        }
+        else
+        {
+            if(current.audioEnabled())
+            {
+                // 单文件 MP4：旧的解码器不再解画面，接着解声音（声音不断）
+                current.setVideoEnabled(false);
+                int g = generation;
+                Thread t = new Thread(() ->
+                {
+                    try
+                    {
+                        decodeLoop(current, g, false);
+                    }
+                    catch(InterruptedException e)
+                    {
+                        // 结束
+                    }
+                    catch(Throwable e)
+                    {
+                        MrCrayfishFurnitureMod.logger().info("TV video at {}: audio stopped: {}", pos, e.toString());
+                    }
+                }, "cfm-tv-audio-" + THREADS.incrementAndGet());
+                t.setDaemon(true);
+                t.setPriority(Thread.NORM_PRIORITY - 1);
+                threads.add(t);
+                trackThreads.add(t);
+                t.start();
+            }
+            else
+            {
+                // DASH：声音本来就是单独一路，旧的画面解码直接关
+                openDecoders.remove(current);
+                current.close();
+            }
+            p.first.generation = generation;
+            if(p.first.ptsMs > lastQueuedPts && videoQueue.offer(p.first))
+                lastQueuedPts = p.first.ptsMs;
+            else
+                recycle(p.first);
+            if(p.stream != null)
+            {
+                stream = p.stream;
+                streamAt = System.currentTimeMillis();
+            }
+        }
+        MrCrayfishFurnitureMod.logger().info("TV video at {}: switched to quality {}", pos, p.cap);
+        return p.decoder;
     }
 
     /** DASH 的声音单独一路；出错（例如地址过期、网络断了）时隔一会儿从当前位置重开，连续失败 5 次才放弃 */
@@ -409,7 +1098,7 @@ public final class VideoSession
         int gen = startGen;
         while(!closed && !Thread.currentThread().isInterrupted())
         {
-            try(VideoDecoder decoder = new VideoDecoder(url, false, true, from, maxQuality))
+            try(VideoDecoder decoder = new VideoDecoder(url, false, true, from, quality.current()))
             {
                 failures = 0;
                 decodeLoop(decoder, gen, false);
@@ -446,15 +1135,42 @@ public final class VideoSession
         boolean eof = false;
         while(!closed && !Thread.currentThread().isInterrupted())
         {
+            if(live && liveStop)
+                return;
+            if(main)
+            {
+                VideoDecoder next = takePrepared(decoder);
+                if(next != decoder)
+                {
+                    decoder = next;
+                    eof = false;
+                    videoEof = false;
+                    if(live)
+                        gen = generation;
+                }
+            }
             int g = generation;
-            if(g != gen)
+            if(g != gen && live)
+            {
+                // 直播不跳转
+                gen = g;
+            }
+            else if(g != gen)
             {
                 long to = Math.max(0, seekToMs >= 0 ? seekToMs : targetMs);
                 decoder.seek(to);
                 gen = g;
                 eof = false;
                 if(main)
+                {
                     videoEof = false;
+                    lastQueuedPts = -1;
+                }
+            }
+            if(eof && live)
+            {
+                // 直播流断了：交回后台线程重新查开播状态
+                return;
             }
             if(eof)
             {
@@ -472,6 +1188,11 @@ public final class VideoSession
             long pts = f.timestamp / 1000L;
             if(VideoDecoder.isImage(f) && f.imageWidth > 0 && f.imageHeight > 0)
             {
+                if(main && !live && pts <= lastQueuedPts)
+                {
+                    // 刚换上新的一路：旧的已经放到这里了，接着往后放
+                    continue;
+                }
                 VideoFrame vf = takeFree(f.imageWidth * f.imageHeight * 4);
                 if(vf == null)
                     return;
@@ -480,12 +1201,15 @@ public final class VideoSession
                 vf.height = f.imageHeight;
                 vf.ptsMs = pts;
                 vf.generation = gen;
-                while(!closed && generation == gen && !videoQueue.offer(vf, 50, TimeUnit.MILLISECONDS))
+                boolean offered = false;
+                while(!closed && generation == gen && !(main && prepared.get() != null) && !(offered = videoQueue.offer(vf, 50, TimeUnit.MILLISECONDS)))
                 {
-                    // 队列满（暂停、或解得比播得快）：等
+                    // 队列满（暂停、或解得比播得快）：等；有准备好的新一路时不等，先去换上
                 }
-                if(generation != gen)
+                if(!offered)
                     recycle(vf);
+                else if(main)
+                    lastQueuedPts = pts;
             }
             else if(VideoDecoder.isAudio(f))
             {
@@ -567,6 +1291,11 @@ public final class VideoSession
      */
     public void update(TvClock clock, long nowMs, float gain, double x, double y, double z, boolean fullscreen)
     {
+        if(live)
+        {
+            updateLive(nowMs, gain, x, y, z, fullscreen);
+            return;
+        }
         long target = clock.targetAt(nowMs);
         boolean playing = clock.isPlaying();
         this.targetMs = target;
@@ -602,6 +1331,7 @@ public final class VideoSession
             audio.stop();
             return;
         }
+        pollQuality(nowMs);
         int gen = generation;
         if(gen != seenGeneration)
         {
@@ -662,6 +1392,103 @@ public final class VideoSession
             status = Status.ENDED;
     }
 
+    /** 直播：按本地时钟放最新收到的画面与声音；没开播时放测试卡的“嘟——”声（本地配置能关） */
+    private void updateLive(long nowMs, float gain, double x, double y, double z, boolean fullscreen)
+    {
+        if(status == Status.OFFLINE)
+        {
+            audio.stop();
+            if(gain > 0 && TvClientConfig.get().offlineTone)
+                tone.play(gain, x, y, z, fullscreen);
+            else
+                tone.stop();
+            return;
+        }
+        tone.stop();
+        if(status != Status.PLAYING)
+        {
+            audio.stop();
+            return;
+        }
+        pollQuality(nowMs);
+        int gen = generation;
+        if(gen != seenGeneration)
+        {
+            // 换了一路流（重连、换清晰度）：时钟重新对
+            seenGeneration = gen;
+            liveClock.reset();
+            syncPts = -1;
+            audio.flush();
+        }
+        VideoFrame head;
+        while((head = videoQueue.peek()) != null && head.generation != gen)
+        {
+            videoQueue.poll();
+            recycle(head);
+        }
+        if(head != null)
+        {
+            liveClock.observe(head.ptsMs, nowMs);
+        }
+        else
+        {
+            AudioChunk a = audioQueue.peek();
+            if(a != null && a.generation == gen)
+                liveClock.observe(a.ptsMs, nowMs);
+        }
+        long target = liveClock.target(nowMs);
+        if(target < 0)
+            return;
+        this.targetMs = target;
+        VideoFrame pending = null;
+        VideoFrame f;
+        while((f = videoQueue.peek()) != null && f.ptsMs <= target + 15)
+        {
+            videoQueue.poll();
+            if(f.generation != gen)
+            {
+                recycle(f);
+                continue;
+            }
+            if(pending != null)
+                recycle(pending);
+            pending = f;
+        }
+        if(pending != null)
+        {
+            upload(pending);
+            shownPts = pending.ptsMs;
+            syncPts = pending.ptsMs;
+            recycle(pending);
+        }
+        audio.pump(audioQueue, gen, target, true, gain, x, y, z, fullscreen);
+    }
+
+    /**
+     * 直播弹幕（渲染线程）：把新到的排进去（时间记成现在放到的位置），返回此刻要画的。canvasWidth 变了（进出大屏）就重新排。
+     */
+    public List<Danmaku.Visible> liveDanmaku(int canvasWidth, int canvasHeight, int lanes, int lineHeight, java.util.function.ToIntFunction<String> width, long nowMs)
+    {
+        long t = liveClock.target(nowMs);
+        if(t < 0 || status != Status.PLAYING)
+        {
+            livePending.clear();
+            return Collections.emptyList();
+        }
+        if(liveLayout == null || liveLayout.canvasWidth() != Math.max(1, canvasWidth))
+            liveLayout = new Danmaku.Incremental(canvasWidth, lanes);
+        Danmaku.Comment c;
+        while((c = livePending.poll()) != null)
+        {
+            // 积压太久的（弹幕关着时攒下的）不画
+            if(nowMs - c.timeMs > LIVE_STALE_MS)
+                continue;
+            liveLayout.add(new Danmaku.Comment(t, c.mode, c.color, c.text), width.applyAsInt(c.text));
+        }
+        liveLayout.trimBefore(t - Danmaku.SCROLL_MS - 1000);
+        return Danmaku.visibleAt(liveLayout.placed(), t, canvasWidth, canvasHeight, lineHeight);
+    }
+
     private void requestSeek(long toMs, long nowMs)
     {
         lastSeekAt = nowMs;
@@ -713,6 +1540,12 @@ public final class VideoSession
             texture = -1;
         }
         audio.release();
+        tone.release();
+        discardPrepared();
+        LiveDanmakuClient d = liveDanmaku;
+        if(d != null)
+            d.close();
+        livePending.clear();
         videoQueue.clear();
         freeFrames.clear();
         audioQueue.clear();

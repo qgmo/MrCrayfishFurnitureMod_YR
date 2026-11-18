@@ -6,6 +6,7 @@ import com.mrcrayfish.furniture.network.ServerThread;
 import com.mrcrayfish.furniture.network.TvRequests;
 import com.mrcrayfish.furniture.tileentity.TileEntityTV;
 import com.mrcrayfish.furniture.tv.TvChannel;
+import com.mrcrayfish.furniture.tv.TvEndMode;
 import com.mrcrayfish.furniture.util.RejectLog;
 import com.mrcrayfish.furniture.util.TextLimits;
 import io.netty.buffer.ByteBuf;
@@ -21,7 +22,7 @@ import java.util.List;
 
 /**
  * 频道设置界面的“保存”（客户端 → 服务端，悠然服务器魔改）。服务端只收开着这台电视设置界面的玩家发的，
- * 逐个核对频道的长度与写法，结果用 {@link MessageTVChannelsResult} 回给客户端（界面只在成功后才清掉草稿）。
+ * 逐个核对频道的长度与写法、播完模式的编号，结果用 {@link MessageTVChannelsResult} 回给客户端（界面只在成功后才清掉草稿）。
  */
 public class MessageTVChannels implements IMessage, IMessageHandler<MessageTVChannels, IMessage>
 {
@@ -31,13 +32,16 @@ public class MessageTVChannels implements IMessage, IMessageHandler<MessageTVCha
     private int requestId;
     private String[] channels = new String[CHANNELS];
     private boolean stretch;
+    /** 播完模式（{@link TvEndMode} 的编号） */
+    private int endMode;
     /** 包里的字符串太长（解包时就发现） */
     private boolean malformed;
 
     public MessageTVChannels() {}
 
-    public MessageTVChannels(BlockPos pos, int requestId, String[] channels, boolean stretch)
+    public MessageTVChannels(BlockPos pos, int requestId, String[] channels, boolean stretch, TvEndMode endMode)
     {
+        this.endMode = endMode.ordinal();
         this.pos = pos;
         this.requestId = requestId;
         this.channels = channels.clone();
@@ -54,6 +58,7 @@ public class MessageTVChannels implements IMessage, IMessageHandler<MessageTVCha
             ByteBufUtils.writeUTF8String(buf, channels[i] == null ? "" : channels[i]);
         }
         buf.writeBoolean(stretch);
+        buf.writeByte(endMode);
     }
 
     @Override
@@ -72,6 +77,7 @@ public class MessageTVChannels implements IMessage, IMessageHandler<MessageTVCha
             channels[i] = s;
         }
         stretch = buf.readBoolean();
+        endMode = buf.readUnsignedByte();
     }
 
     @Override
@@ -107,6 +113,13 @@ public class MessageTVChannels implements IMessage, IMessageHandler<MessageTVCha
             reply(player, message, "cfm.tv.settings.rejected", -1);
             return;
         }
+        TvEndMode endMode = TvEndMode.byId(message.endMode);
+        if(endMode == null)
+        {
+            RejectLog.log(player, "TV end mode " + message.endMode + " for " + message.pos);
+            reply(player, message, "cfm.tv.settings.rejected", -1);
+            return;
+        }
         for(int i = 0; i < CHANNELS; i++)
         {
             String reason = TvChannel.rejectReason(message.channels[i]);
@@ -118,7 +131,7 @@ public class MessageTVChannels implements IMessage, IMessageHandler<MessageTVCha
             }
         }
         List<String> list = Arrays.asList(message.channels);
-        tv.applySettings(list, message.stretch);
+        tv.applySettings(list, message.stretch, endMode);
         reply(player, message, null, -1);
     }
 

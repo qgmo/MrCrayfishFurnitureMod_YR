@@ -28,7 +28,7 @@ import java.util.Map;
 /**
  * 客户端：哪些电视放视频（悠然服务器魔改，服主 11-14 定的数字都可在本地配置里改）。
  * <ul>
- * <li>开着、有电、当前频道是 bilibili 视频、在 {@code start-range}（默认 32 格）内的电视开始取流、显示；</li>
+ * <li>开着、有电、当前频道是 bilibili 视频或直播间、在 {@code start-range}（默认 32 格）内的电视开始取流、显示；</li>
  * <li>按距离（大屏看的那台最优先）取前 {@code max-decoders}（默认 2）台解码，其余显示封面；</li>
  * <li>{@code hear-range}（默认 16 格）内有声音，按距离线性衰减；音量 = 电视音量 × 游戏的主音量与“唱片机/音符盒”音量 × 电视总音量。</li>
  * </ul>
@@ -47,7 +47,9 @@ public final class TvVideoManager
     {
         public enum Kind
         {
-            NOISE, VIDEO, COVER, TEXT
+            NOISE, VIDEO, COVER, TEXT,
+            /** 直播没开播：测试卡（服主 11-18） */
+            TEST_CARD
         }
 
         public final Kind kind;
@@ -71,6 +73,11 @@ public final class TvVideoManager
         static Screen noise(@Nullable VideoSession session)
         {
             return new Screen(Kind.NOISE, -1, 0, 0, "", session);
+        }
+
+        static Screen testCard(VideoSession session)
+        {
+            return new Screen(Kind.TEST_CARD, -1, 0, 0, "", session);
         }
 
         static Screen text(String text, @Nullable VideoSession session)
@@ -106,7 +113,10 @@ public final class TvVideoManager
         return fullscreen ? effectiveQuality : Math.min(effectiveQuality, BiliData.QN_480P);
     }
 
-    /** 现有会话的上限和现在该用的不一样才重开（玩家设置本来就 ≤480P 或没 cookie 时，进出大屏都不会重开） */
+    /**
+     * 现有会话的上限和现在该用的不一样才要换（玩家设置本来就 ≤480P 或没 cookie 时，进出大屏都不用换）。
+     * 11-18 起换清晰度不再重开会话，由会话在后台无缝切换（{@link VideoSession#setQualityTarget}）；只有本地配置改了生效上限才重开。
+     */
     static boolean needsRestart(int currentCap, int effectiveQuality, boolean fullscreen)
     {
         return currentCap != capFor(effectiveQuality, fullscreen);
@@ -289,9 +299,15 @@ public final class TvVideoManager
                 e.getValue().close();
                 it.remove();
             }
-            else if(needsRestart(e.getValue().getMaxQuality(), cfg.effectiveQuality(), e.getKey().equals(fullscreen)))
+            else if(e.getValue().getQueueQuality() == cfg.effectiveQuality())
             {
-                // 上限变了：从现在的位置换一路新的，旧的先留着当画面
+                // 进出大屏（服主 11-18）：会话自己在后台无缝换清晰度（旧的照常放，新的对上当前位置后在下一帧换过去）；
+                // 来回快速进出时只留最后一次的目标
+                e.getValue().setQualityTarget(capFor(cfg.effectiveQuality(), e.getKey().equals(fullscreen)));
+            }
+            else
+            {
+                // 本地配置里改了清晰度上限（画面队列要按新的大小建）：从现在的位置换一路新的，旧的先留着当画面
                 VideoSession old = retiring.put(e.getKey(), e.getValue());
                 if(old != null)
                     old.close();
@@ -306,7 +322,7 @@ public final class TvVideoManager
             {
                 TileEntity te = world.getTileEntity(e.getKey());
                 long start = te instanceof TileEntityTV ? ((TileEntityTV) te).clientClock(latency).targetAt(now) : 0;
-                sessions.put(e.getKey(), new VideoSession(e.getKey(), e.getValue(), capFor(cfg.effectiveQuality(), e.getKey().equals(fullscreen)), start));
+                sessions.put(e.getKey(), new VideoSession(e.getKey(), e.getValue(), capFor(cfg.effectiveQuality(), e.getKey().equals(fullscreen)), cfg.effectiveQuality(), start));
             }
         }
         retiring.entrySet().removeIf(r ->
@@ -326,7 +342,7 @@ public final class TvVideoManager
         for(VideoSession session : sessions.values())
         {
             long duration = session.getDurationMs();
-            if(duration <= 0)
+            if(duration <= 0 || session.isLive())
                 continue;
             TileEntity te = world.getTileEntity(session.getPos());
             if(!(te instanceof TileEntityTV))
@@ -343,12 +359,12 @@ public final class TvVideoManager
         }
     }
 
-    /** 当前频道是视频，服务端也没关视频功能 */
+    /** 当前频道是视频或直播，服务端也没关视频功能 */
     private static boolean wantsVideo(TileEntityTV tv)
     {
         if(!tv.isPowered() || tv.isClientVideoOff())
             return false;
-        return TvChannel.parse(tv.getCurrentChannel()).isVideo();
+        return TvChannel.parse(tv.getCurrentChannel()).isStream();
     }
 
     public void closeAll()
@@ -393,6 +409,11 @@ public final class TvVideoManager
         VideoSession old = retiring.get(tv.getPos());
         if(session != null && old != null && !session.hasPicture() && old.hasPicture() && session.getStatus() != VideoSession.Status.ERROR)
             session = old;
+        if(session == null && channel.isLive())
+        {
+            // 超出同时解码的台数的直播：不知道开没开播，显示噪点
+            return Screen.noise(null);
+        }
         if(session == null)
         {
             // 超出同时解码的台数：显示封面
@@ -408,6 +429,8 @@ public final class TvVideoManager
                 return Screen.text(session.getErrorKey(), session);
             case ENDED:
                 return Screen.noise(session);
+            case OFFLINE:
+                return Screen.testCard(session);
             default:
                 if(session.hasPicture())
                     return new Screen(Screen.Kind.VIDEO, session.getTexture(), session.getTexWidth(), session.getTexHeight(), "", session);

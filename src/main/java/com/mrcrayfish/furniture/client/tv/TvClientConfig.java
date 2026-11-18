@@ -36,6 +36,8 @@ public final class TvClientConfig
         public int maxDecoders = 2;
         public int masterVolume = 100;
         public boolean alwaysHideDanmaku = false;
+        /** 直播没开播时测试卡配的“嘟——”声（服主 11-18，默认开） */
+        public boolean offlineTone = true;
         public ProxyType proxyType = ProxyType.NONE;
         public String proxyHost = "";
         public int proxyPort = 0;
@@ -52,6 +54,7 @@ public final class TvClientConfig
             v.maxDecoders = maxDecoders;
             v.masterVolume = masterVolume;
             v.alwaysHideDanmaku = alwaysHideDanmaku;
+            v.offlineTone = offlineTone;
             v.proxyType = proxyType;
             v.proxyHost = proxyHost;
             v.proxyPort = proxyPort;
@@ -100,6 +103,7 @@ public final class TvClientConfig
         v.maxDecoders = config.getInt("max-decoders", CATEGORY, 2, 1, 8, "At most this many TVs decode video at the same time; the others show the video cover.");
         v.masterVolume = config.getInt("master-volume", CATEGORY, 100, 0, 100, "TV master volume in percent (multiplied with the TV's own volume and the game's Jukebox/Note Blocks volume).");
         v.alwaysHideDanmaku = config.getBoolean("always-hide-danmaku", CATEGORY, false, "Never show danmaku (bullet comments), even on TVs that have them switched on.");
+        v.offlineTone = config.getBoolean("offline-tone", CATEGORY, true, "Play a quiet 1 kHz tone with the test card while a live room is off air.");
         v.proxyType = parseProxyType(config.getString("proxy-type", CATEGORY, "none", "Proxy for fetching videos: none, http or socks5.", new String[]{"none", "http", "socks5"}));
         v.proxyHost = config.getString("proxy-host", CATEGORY, "", "Proxy host name or IP address.").trim();
         v.proxyPort = config.getInt("proxy-port", CATEGORY, 0, 0, 65535, "Proxy port.");
@@ -121,6 +125,7 @@ public final class TvClientConfig
         config.get(CATEGORY, "max-decoders", 2).set(clamp(v.maxDecoders, 1, 8));
         config.get(CATEGORY, "master-volume", 100).set(clamp(v.masterVolume, 0, 100));
         config.get(CATEGORY, "always-hide-danmaku", false).set(v.alwaysHideDanmaku);
+        config.get(CATEGORY, "offline-tone", true).set(v.offlineTone);
         config.get(CATEGORY, "proxy-type", "none").set(v.proxyType.name().toLowerCase(Locale.ROOT));
         config.get(CATEGORY, "proxy-host", "").set(v.proxyHost.trim());
         config.get(CATEGORY, "proxy-port", 0).set(clamp(v.proxyPort, 0, 65535));

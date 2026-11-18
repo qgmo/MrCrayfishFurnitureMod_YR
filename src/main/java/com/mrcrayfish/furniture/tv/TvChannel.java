@@ -15,6 +15,8 @@ import java.util.regex.Pattern;
  * <li>GIF 网址（照旧，客户端只认白名单域名里的 .gif）；</li>
  * <li>bilibili 视频：{@code BV…}、{@code av…}，可带 {@code ?p=N} 指定分 P（不写是第 1 P）；
  * 也认 {@code https://www.bilibili.com/video/BV…?p=N} 这样的播放页地址（只取视频号和 p，别的参数不管）；</li>
+ * <li>bilibili 直播间（服主 11-18）：{@code https://live.bilibili.com/房间号}（也认 {@code /h5/房间号}、{@code /blanc/房间号}，
+ * 查询串不管），或短写法 {@code live房间号}；房间号可以是短号，客户端用接口换成真实房间号；</li>
  * <li>番剧、影视（{@code ep…}、{@code ss…}、{@code /bangumi/play/…}）：认得但暂不支持。</li>
  * </ul>
  * 服务端只存玩家填的原文，客户端各自解析。
@@ -29,6 +31,8 @@ public final class TvChannel
         GIF,
         /** bilibili 视频 */
         BILIBILI,
+        /** bilibili 直播间 */
+        LIVE,
         /** 番剧、影视：暂不支持 */
         UNSUPPORTED,
         /** 写法不对 */
@@ -42,6 +46,12 @@ public final class TvChannel
     private static final Pattern BV = Pattern.compile("(?i:BV)(1[1-9A-HJ-NP-Za-km-z]{9})");
     private static final Pattern AV = Pattern.compile("(?i:av)([0-9]{1,16})");
     private static final Pattern EP_SS = Pattern.compile("(?i:ep|ss|md)[0-9]{1,16}");
+    /** 直播间短写法：live + 房间号 */
+    private static final Pattern LIVE_SHORT = Pattern.compile("(?i:live)([0-9]{1,12})");
+    /** 直播间地址的路径：/房间号、/h5/房间号、/blanc/房间号 */
+    private static final Pattern LIVE_PATH = Pattern.compile("/(?:h5/|blanc/)?([0-9]{1,12})/?");
+    /** 房间号上限（现在的房间号是八九位数，留足余量） */
+    public static final long MAX_ROOM = 999_999_999_999L;
     private static final Pattern PAGE = Pattern.compile("(?:^|&)p=([0-9]{1,4})(?:&|$)");
 
     private final Kind kind;
@@ -50,14 +60,39 @@ public final class TvChannel
     private final String bvid;
     private final long aid;
     private final int page;
+    /** 直播间号（玩家填的，可能是短号）；不是直播间时为 0 */
+    private final long room;
 
     private TvChannel(Kind kind, String raw, @Nullable String bvid, long aid, int page)
+    {
+        this(kind, raw, bvid, aid, page, 0);
+    }
+
+    private TvChannel(Kind kind, String raw, @Nullable String bvid, long aid, int page, long room)
     {
         this.kind = kind;
         this.raw = raw;
         this.bvid = bvid;
         this.aid = aid;
         this.page = page;
+        this.room = room;
+    }
+
+    /** 直播间号（玩家填的，可能是短号，客户端用接口换成真实房间号）；不是直播间时为 0 */
+    public long getRoom()
+    {
+        return room;
+    }
+
+    public boolean isLive()
+    {
+        return kind == Kind.LIVE;
+    }
+
+    /** 要取流放的（视频或直播）：客户端交给解码，用电按视频算 */
+    public boolean isStream()
+    {
+        return kind == Kind.BILIBILI || kind == Kind.LIVE;
     }
 
     public Kind getKind()
@@ -94,9 +129,11 @@ public final class TvChannel
         return kind == Kind.BILIBILI;
     }
 
-    /** 同一个视频同一 P 的键（客户端缓存、判断换没换台用）；不是视频时就是原文 */
+    /** 同一个视频同一 P（或同一个直播间）的键（客户端缓存、判断换没换台用）；不是视频、直播时就是原文 */
     public String key()
     {
+        if(kind == Kind.LIVE)
+            return "live#" + room;
         if(kind != Kind.BILIBILI)
             return raw;
         return (bvid != null ? bvid : "av" + aid) + "#" + page;
@@ -113,6 +150,9 @@ public final class TvChannel
         String lower = raw.toLowerCase(Locale.ROOT);
         if(lower.startsWith("http://") || lower.startsWith("https://"))
             return parseUrl(raw);
+        Matcher lm = LIVE_SHORT.matcher(raw);
+        if(lm.matches())
+            return live(raw, lm.group(1));
         return parseId(raw, null);
     }
 
@@ -132,6 +172,11 @@ public final class TvChannel
             return invalid(raw);
         host = host.toLowerCase(Locale.ROOT);
         String path = uri.getRawPath() == null ? "" : uri.getRawPath();
+        if(host.equals("live.bilibili.com"))
+        {
+            Matcher m = LIVE_PATH.matcher(path);
+            return m.matches() ? live(raw, m.group(1)) : invalid(raw);
+        }
         if(host.equals("bilibili.com") || host.endsWith(".bilibili.com"))
         {
             if(path.startsWith("/bangumi/"))
@@ -147,6 +192,22 @@ public final class TvChannel
         }
         // 别的网址都按 GIF 网址处理（能不能放由客户端照白名单和文件类型判断）
         return new TvChannel(Kind.GIF, raw, null, 0, 1);
+    }
+
+    private static TvChannel live(String raw, String digits)
+    {
+        long room;
+        try
+        {
+            room = Long.parseLong(digits);
+        }
+        catch(NumberFormatException e)
+        {
+            return invalid(raw);
+        }
+        if(room <= 0 || room > MAX_ROOM)
+            return invalid(raw);
+        return new TvChannel(Kind.LIVE, raw, null, 0, 1, room);
     }
 
     /** 解析 "BV…"、"av…"（可带 "?p=N"）；query 是播放页地址里的查询串 */
@@ -205,7 +266,7 @@ public final class TvChannel
 
     private TvChannel withRaw(String newRaw)
     {
-        return new TvChannel(kind, newRaw, bvid, aid, page);
+        return new TvChannel(kind, newRaw, bvid, aid, page, room);
     }
 
     private static TvChannel invalid(String raw)
@@ -225,7 +286,7 @@ public final class TvChannel
     }
 
     /**
-     * 服务端核对玩家填的一个频道：空、GIF 网址、bilibili 视频都收；写法不对、番剧影视拒绝。
+     * 服务端核对玩家填的一个频道：空、GIF 网址、bilibili 视频、直播间都收；写法不对、番剧影视拒绝。
      *
      * @return null 表示可以；否则是给玩家看的语言键
      */
@@ -240,6 +301,7 @@ public final class TvChannel
             case EMPTY:
             case GIF:
             case BILIBILI:
+            case LIVE:
                 return null;
             case UNSUPPORTED:
                 return "cfm.tv.channel.unsupported";

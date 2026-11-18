@@ -5,7 +5,10 @@ import com.mrcrayfish.furniture.items.ItemTVRemote;
 import com.mrcrayfish.furniture.network.PacketHandler;
 import com.mrcrayfish.furniture.network.message.MessageTVRemote;
 import com.mrcrayfish.furniture.tileentity.TileEntityTV;
+import com.mrcrayfish.furniture.tv.RemoteAction;
 import com.mrcrayfish.furniture.tv.RemoteInput;
+import net.minecraft.tileentity.TileEntity;
+import net.minecraft.util.text.TextComponentTranslation;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.settings.KeyBinding;
 import net.minecraft.entity.player.EntityPlayer;
@@ -181,6 +184,12 @@ public final class RemoteControls
                 if(mc.currentScreen == null)
                     mc.displayGuiScreen(new GuiTVClientConfig(null));
             }
+            else if(out.target != null && out.action != null && isLiveOnlyNoop(mc, out.target, out.action))
+            {
+                // 直播没有进度（服主 11-18）：暂停、快进、后退不发给服务端（也不耗电池），操作栏提示一下
+                if(mc.player != null)
+                    mc.player.sendStatusMessage(new TextComponentTranslation("cfm.tv.live.no_seek"), true);
+            }
             else if(out.target != null && out.action != null)
             {
                 // 带上这台电视的视频时长（后退时服务端没采信时长就按它夹到片尾以内）
@@ -189,6 +198,17 @@ public final class RemoteControls
                 PacketHandler.INSTANCE.sendToServer(new MessageTVRemote(out.target, out.action, duration));
             }
         }
+    }
+
+    /** 对着的电视在放直播，按的是暂停、快进或后退 */
+    private static boolean isLiveOnlyNoop(Minecraft mc, BlockPos target, RemoteAction action)
+    {
+        if(action != RemoteAction.TOGGLE_PLAY && action != RemoteAction.SEEK_BACK && action != RemoteAction.SEEK_FORWARD)
+            return false;
+        if(mc.world == null)
+            return false;
+        TileEntity te = mc.world.getTileEntity(target);
+        return te instanceof TileEntityTV && ((TileEntityTV) te).isPowered() && ((TileEntityTV) te).isLiveChannel();
     }
 
     /** 大屏界面每帧：长按的步数 */
