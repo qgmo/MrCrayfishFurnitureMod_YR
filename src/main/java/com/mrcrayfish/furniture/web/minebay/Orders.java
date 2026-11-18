@@ -60,16 +60,10 @@ public final class Orders
         /** 下单时间（毫秒） */
         public final long time;
         public final List<Item> items;
-        /** 付款的 pay.yr 收款单号（改接 pay.yr 以前的订单为 null） */
-        @Nullable
+        /** 付款的 pay.yr 收款单号 */
         public final String payId;
 
-        public Order(long number, long time, List<Item> items)
-        {
-            this(number, time, items, null);
-        }
-
-        public Order(long number, long time, List<Item> items, @Nullable String payId)
+        public Order(long number, long time, List<Item> items, String payId)
         {
             this.number = number;
             this.time = time;
@@ -131,8 +125,7 @@ public final class Orders
             NBTTagCompound t = new NBTTagCompound();
             t.setLong("no", o.number);
             t.setLong("time", o.time);
-            if(o.payId != null)
-                t.setString("pay", o.payId);
+            t.setString("pay", o.payId);
             t.setTag("items", writeItems(o.items));
             list.appendTag(t);
         }
@@ -146,7 +139,7 @@ public final class Orders
         {
             NBTTagCompound t = list.getCompoundTagAt(i);
             List<Item> parsed = readItems(t.getTagList("items", Constants.NBT.TAG_COMPOUND));
-            out.orders.add(new Order(t.getLong("no"), t.getLong("time"), parsed, t.hasKey("pay", Constants.NBT.TAG_STRING) ? t.getString("pay") : null));
+            out.orders.add(new Order(t.getLong("no"), t.getLong("time"), parsed, t.getString("pay")));
         }
         return out;
     }

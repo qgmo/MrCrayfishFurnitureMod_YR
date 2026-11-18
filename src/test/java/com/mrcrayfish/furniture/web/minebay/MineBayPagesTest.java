@@ -123,7 +123,7 @@ class MineBayPagesTest
             List<Orders.Item> items = new ArrayList<>();
             for(int i = 0; i < Cart.MAX_LINES; i++)
                 items.add(new Orders.Item(list.get(i).id, list.get(i).icon, 64, i % 2 == 0 ? null : "名字很长很长很长很长很长很长很长很长很长很长很长很长", "染料", 64, "minecraft:emerald", 1_000_000L));
-            orders.add(new Orders.Order(1000 - o, 1_700_000_000_000L, items));
+            orders.add(new Orders.Order(1000 - o, 1_700_000_000_000L, items, "ord_" + o));
         }
         for(int p = 1; p <= 10; p++)
             check(MineBayPages.orders(VIEWER, orders, p, MineBayPages.Notice.ok("下单成功"), 1000));
@@ -196,7 +196,7 @@ class MineBayPagesTest
         check(c);
         assertTrue(c.contains("data-yr-lang=\"youranmod.minebay.tool_disk.basic.name\""));
         Orders.Order o = new Orders.Order(9, 1_700_000_000_000L, Collections.singletonList(
-                new Orders.Item(l.id, l.icon, 1, l.name, l.nameKey, l.sortName, 2, l.currency, 32)));
+                new Orders.Item(l.id, l.icon, 1, l.name, l.nameKey, l.sortName, 2, l.currency, 32)), "ord_9");
         String orders = MineBayPages.orders(VIEWER, Collections.singletonList(o), 1, null, 9);
         check(orders);
         assertTrue(orders.contains("data-yr-lang=\"youranmod.minebay.tool_disk.basic.name\">BASIC 软盘</span>"));

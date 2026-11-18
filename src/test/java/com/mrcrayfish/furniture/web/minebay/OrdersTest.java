@@ -14,7 +14,7 @@ class OrdersTest
         return new Orders.Order(no, 1_700_000_000_000L + no, Arrays.asList(
                 new Orders.Item("config:a", "minecraft:hardened_clay", 16, null, "陶瓦", 2, "minecraft:emerald", 2),
                 new Orders.Item("mod:b", "minecraft:paper", 1, "软盘", "软盘", 1, "minecraft:diamond", 3),
-                new Orders.Item("config:c", "minecraft:saddle", 1, null, "鞍", 1, "minecraft:emerald", 4)));
+                new Orders.Item("config:c", "minecraft:saddle", 1, null, "鞍", 1, "minecraft:emerald", 4)), "ord_" + no);
     }
 
     @Test
@@ -55,7 +55,7 @@ class OrdersTest
         o.add(new Orders.Order(7, 1_700_000_000_007L, Arrays.asList(
                 new Orders.Item("youranmod:tool_disk/basic", "youranmod:floppy_disk", 1, "BASIC 软盘", "youranmod.minebay.tool_disk.basic.name", "BASIC 软盘", 1,
                         "minecraft:emerald", 16),
-                new Orders.Item("mod:x", "minecraft:paper", 1, "坏键", "bad key<>", "坏键", 1, "minecraft:emerald", 1))));
+                new Orders.Item("mod:x", "minecraft:paper", 1, "坏键", "bad key<>", "坏键", 1, "minecraft:emerald", 1)), "ord_7"));
         Orders.Order back = Orders.read(o.write()).find(7);
         assertNotNull(back);
         assertEquals("youranmod.minebay.tool_disk.basic.name", back.items.get(0).nameKey);

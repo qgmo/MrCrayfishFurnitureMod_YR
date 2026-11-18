@@ -117,12 +117,6 @@ public class MineBayData extends WorldSavedData
         return o == null ? new Orders() : o;
     }
 
-    /** 记一单（订单号在这里分配）；人数到上限时不记，返回的订单照样有号 */
-    public Orders.Order record(UUID player, long time, java.util.List<Orders.Item> items)
-    {
-        return record(player, new Orders.Order(nextOrder++, time, items));
-    }
-
     /** 分一个订单号（开 pay.yr 收款单时） */
     public long nextOrderNumber()
     {
