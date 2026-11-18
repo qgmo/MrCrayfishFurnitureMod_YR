@@ -18,7 +18,6 @@ import net.minecraft.entity.player.InventoryPlayer;
 import net.minecraft.util.ResourceLocation;
 import net.minecraft.util.math.BlockPos;
 import org.lwjgl.input.Keyboard;
-import org.lwjgl.input.Mouse;
 
 import java.io.IOException;
 import java.util.List;
@@ -30,7 +29,8 @@ import java.util.List;
  * 填的内容（含拉伸、播完模式）随改随存成草稿（{@link ChannelDrafts}）：关界面、断线、服务器拒绝时都保留，重开时接着填；
  * 只有“保存”成功（服务端回了成功）或玩家点“放弃修改”并再点一次确认时才清掉。
  * <p>
- * 搜索（服主 11-18，{@link GuiTVSearchPanel}）画在这个界面上面、铺满窗口，不另开界面（另开会关掉服务端的 Container）；
+ * 搜索（服主 11-18）是单独的界面（{@link GuiTVSearch}，普通 GuiScreen，JEI 的物品列表不会盖上去），用 {@code displayGuiScreen} 打开，
+ * 回来时显示的还是这个实例；换界面不发关窗口的包，服务端的 Container 照样开着，这边关的时候也不走客户端的容器关闭（{@link TvSearchLink}）。
  * 点一个结果只把写法填进那一格，还要点“保存”。
  */
 public class GuiTVSettings extends GuiContainer
@@ -57,9 +57,8 @@ public class GuiTVSettings extends GuiContainer
     private GuiButton stretchButton;
     private GuiButton endModeButton;
     private final GuiIconButton[] searchButtons = new GuiIconButton[MessageTVChannels.CHANNELS];
-    /** 打开着的搜索（null 表示没开）与它要填的那一格 */
-    private GuiTVSearchPanel search;
-    private int searchField = -1;
+    /** 去搜索界面、回来 */
+    private final TvSearchLink searchLink = new TvSearchLink();
     private GuiButton saveButton;
     private GuiButton discardButton;
     private long discardArmedAt;
@@ -131,8 +130,8 @@ public class GuiTVSettings extends GuiContainer
             buttonList.add(searchButtons[i]);
         }
         updateButtons();
-        if(search != null)
-            search.init(width, height);
+        // 从搜索界面回来（或第一次打开）
+        searchLink.returned();
         open = this;
     }
 
@@ -196,8 +195,6 @@ public class GuiTVSettings extends GuiContainer
     public void updateScreen()
     {
         super.updateScreen();
-        if(search != null)
-            search.update();
         for(GuiTextField f : fields)
             f.updateCursorCounter();
         if(pendingRequest != 0 && System.currentTimeMillis() - pendingSince >= REPLY_TIMEOUT_MS)
@@ -211,8 +208,6 @@ public class GuiTVSettings extends GuiContainer
     @Override
     protected void actionPerformed(GuiButton button) throws IOException
     {
-        if(search != null)
-            return;
         if(button == stretchButton)
         {
             stretch = !stretch;
@@ -281,7 +276,8 @@ public class GuiTVSettings extends GuiContainer
     public static void onResult(MessageTVChannelsResult message)
     {
         GuiTVSettings gui = open;
-        if(gui == null || gui.mc.currentScreen != gui)
+        // 玩家在搜索界面里时也收下（回到设置界面时看得到结果）
+        if(gui == null || !gui.searchLink.acceptsResult(gui.mc.currentScreen == gui))
             return;
         gui.handleResult(message);
     }
@@ -310,40 +306,40 @@ public class GuiTVSettings extends GuiContainer
         updateButtons();
     }
 
-    /** 打开第 index 格的搜索 */
+    /** 打开第 index 格的搜索（单独的界面；服务端的 Container 留着） */
     private void openSearch(int index)
     {
         storeDraft();
-        searchField = index;
-        search = new GuiTVSearchPanel(mc, new GuiTVSearchPanel.Host()
+        if(!searchLink.begin(index, fields.length))
+            return;
+        mc.displayGuiScreen(new GuiTVSearch(this, index + 1));
+        if(mc.currentScreen == this)
         {
-            @Override
-            public void onPick(String channel)
-            {
-                // 只填进这一格，存草稿；还要玩家点“保存”
-                fields[searchField].setText(channel);
-                fields[searchField].setCursorPositionZero();
-                if(badField == searchField)
-                    badField = -1;
-                storeDraft();
-                setStatus(I18n.format("cfm.tv.settings.search_filled", searchField + 1), 0x705000);
-                closeSearch();
-            }
-
-            @Override
-            public void onClose()
-            {
-                closeSearch();
-            }
-        }, index + 1);
-        search.init(width, height);
+            // 被别的事件拦住、没换过去
+            searchLink.cancel();
+        }
     }
 
-    private void closeSearch()
+    /** 搜索界面里点了一个结果：只填进那一格，存草稿；还要玩家点“保存” */
+    void fillFromSearch(String channel)
     {
-        search = null;
-        searchField = -1;
-        Keyboard.enableRepeatEvents(true);
+        int i = searchLink.field();
+        if(i < 0 || i >= fields.length)
+            return;
+        fields[i].setText(channel);
+        fields[i].setCursorPositionZero();
+        if(badField == i)
+            badField = -1;
+        storeDraft();
+        setStatus(I18n.format("cfm.tv.settings.search_filled", i + 1), 0x705000);
+    }
+
+    /** 搜索界面没回到这里就关了（服务端关了容器、断线）：这个界面不再算开着 */
+    void searchClosedElsewhere()
+    {
+        searchLink.searchClosedElsewhere();
+        if(open == this)
+            open = null;
     }
 
     private void setStatus(String text, int color)
@@ -355,12 +351,6 @@ public class GuiTVSettings extends GuiContainer
     @Override
     protected void keyTyped(char typedChar, int keyCode) throws IOException
     {
-        if(search != null)
-        {
-            // 搜索开着：键都给搜索（Esc 回到设置界面，不关掉设置）
-            search.keyTyped(typedChar, keyCode);
-            return;
-        }
         if(keyCode == Keyboard.KEY_ESCAPE)
         {
             // 关界面：草稿留着；回到大屏
@@ -408,45 +398,24 @@ public class GuiTVSettings extends GuiContainer
     @Override
     protected void mouseClicked(int mouseX, int mouseY, int mouseButton) throws IOException
     {
-        if(search != null)
-        {
-            search.mouseClicked(mouseX, mouseY, mouseButton);
-            return;
-        }
         super.mouseClicked(mouseX, mouseY, mouseButton);
         for(GuiTextField f : fields)
             f.mouseClicked(mouseX, mouseY, mouseButton);
     }
 
     @Override
-    protected void mouseClickMove(int mouseX, int mouseY, int clickedMouseButton, long timeSinceLastClick)
-    {
-        if(search == null)
-            super.mouseClickMove(mouseX, mouseY, clickedMouseButton, timeSinceLastClick);
-    }
-
-    @Override
-    protected void mouseReleased(int mouseX, int mouseY, int state)
-    {
-        if(search == null)
-            super.mouseReleased(mouseX, mouseY, state);
-    }
-
-    @Override
-    public void handleMouseInput() throws IOException
-    {
-        super.handleMouseInput();
-        if(search != null)
-            search.scroll(Mouse.getEventDWheel());
-    }
-
-    @Override
     public void onGuiClosed()
     {
-        super.onGuiClosed();
         Keyboard.enableRepeatEvents(false);
-        // 不论怎么关的（断线、服务器关了界面、Esc），填的内容都留在草稿里
+        // 不论怎么关的（断线、服务器关了界面、Esc、去搜索），填的内容都留在草稿里
         storeDraft();
+        if(searchLink.settingsClosed() == TvSearchLink.Close.KEEP_FOR_SEARCH)
+        {
+            // 去搜索界面：不走 GuiContainer.onGuiClosed（它会在客户端把鼠标上的物品扔掉，服务端却没扔）；
+            // 服务端的 Container 本来就开着（换界面不发关窗口的包）
+            return;
+        }
+        super.onGuiClosed();
         if(open == this)
             open = null;
     }
@@ -454,12 +423,6 @@ public class GuiTVSettings extends GuiContainer
     @Override
     public void drawScreen(int mouseX, int mouseY, float partialTicks)
     {
-        if(search != null)
-        {
-            this.drawDefaultBackground();
-            search.draw(mouseX, mouseY, partialTicks);
-            return;
-        }
         this.drawDefaultBackground();
         super.drawScreen(mouseX, mouseY, partialTicks);
         GlStateManager.disableLighting();
