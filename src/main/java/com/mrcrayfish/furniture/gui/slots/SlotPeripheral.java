@@ -12,7 +12,7 @@ import java.util.function.Predicate;
  * 电脑界面里的外设槽（悠然服务器魔改）：只收认得的外设（{@link ComputerPeripherals#accepts}），一格一个；
  * 只有 {@code canChange} 通过的玩家（操作者、且过保护检查）能放、拿。
  */
-public class SlotPeripheral extends Slot
+public class SlotPeripheral extends Slot implements PartSlot
 {
     private final Predicate<EntityPlayer> canChange;
 

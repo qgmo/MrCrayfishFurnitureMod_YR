@@ -3,6 +3,7 @@ package com.mrcrayfish.furniture.power;
 import com.mrcrayfish.furniture.compat.RfToolsCards;
 import com.mrcrayfish.furniture.gui.inventory.InventoryApplianceCard;
 import com.mrcrayfish.furniture.gui.slots.SlotPowerCard;
+import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.inventory.Container;
 import net.minecraft.inventory.IContainerListener;
 import net.minecraft.inventory.IInventory;
@@ -50,15 +51,23 @@ public final class ApplianceContainers
     /**
      * 卡槽相关的 Shift 点击。返回 null 表示不归卡槽管，交给界面原来的处理。
      *
+     * @param player      点的玩家
      * @param cardIndex   卡槽的编号（没有卡槽时 -1）
      * @param playerStart 玩家背包槽位的起始编号（含）
      * @param playerEnd   玩家背包槽位的结束编号（不含）
      */
     @Nullable
-    public static ItemStack transfer(Container container, int index, int cardIndex, int playerStart, int playerEnd, Merger merger)
+    public static ItemStack transfer(Container container, EntityPlayer player, int index, int cardIndex, int playerStart, int playerEnd, Merger merger)
     {
         if(cardIndex < 0 || index < 0 || index >= container.inventorySlots.size())
             return null;
+        // 只许创造模式的维度里，卡槽的放、拿都不认（界面点击在 PartRules.slotClick 里已经拦过，这里是再保险）
+        if(!PartRules.canChange(player))
+        {
+            boolean toCard = index == cardIndex || (RfToolsCards.isCard(container.inventorySlots.get(index).getStack()) && index >= playerStart && index < playerEnd);
+            if(toCard)
+                return ItemStack.EMPTY;
+        }
         Slot slot = container.inventorySlots.get(index);
         if(slot == null || !slot.getHasStack())
             return null;

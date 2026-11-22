@@ -6,6 +6,7 @@ import com.mrcrayfish.furniture.computer.ComputerCookies;
 import com.mrcrayfish.furniture.computer.ComputerCpu;
 import com.mrcrayfish.furniture.computer.ComputerNetwork;
 import com.mrcrayfish.furniture.computer.ComputerPeripherals;
+import com.mrcrayfish.furniture.power.PartRules;
 import com.mrcrayfish.furniture.computer.ComputerSync;
 import com.mrcrayfish.furniture.computer.CpuRuntime;
 import moe.qingu.youran.api.chip.ChipNumbers;
@@ -365,12 +366,13 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
     }
 
     /**
-     * 能不能放、拿外设：是现在的操作者，且过保护检查（同接管电脑的 {@link RegionUse#canUse}）。
+     * 能不能放、拿外设：是现在的操作者，且过保护检查（同接管电脑的 {@link RegionUse#canUse}），
+     * 在只许创造模式改部件的维度（配置 parts-creative-only-dimensions，默认主城）里还得是创造模式（{@link PartRules}）。
      * 客户端上按同步来的操作者判断（只用来少发不会被接受的点击），服务端说了算。
      */
     public boolean canChangePeripherals(EntityPlayer player)
     {
-        return world != null && isOperator(player) && RegionUse.canUse(world, player, pos);
+        return world != null && isOperator(player) && RegionUse.canUse(world, player, pos) && PartRules.canChange(player);
     }
 
     private void onPeripheralsChanged()

@@ -4,11 +4,13 @@ import com.mrcrayfish.furniture.api.RecipeAPI;
 import com.mrcrayfish.furniture.api.RecipeData;
 import com.mrcrayfish.furniture.gui.slots.SlotOven;
 import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.inventory.ClickType;
 import net.minecraft.inventory.Container;
 import net.minecraft.inventory.IInventory;
 import net.minecraft.inventory.Slot;
 import net.minecraft.item.ItemStack;
 import com.mrcrayfish.furniture.power.ApplianceContainers;
+import com.mrcrayfish.furniture.power.PartRules;
 import com.mrcrayfish.furniture.power.IAppliance;
 import com.mrcrayfish.furniture.gui.slots.SlotPowerCard;
 import net.minecraft.inventory.IContainerListener;
@@ -101,10 +103,17 @@ public class ContainerOven extends Container
         return this.ovenInventory.isUsableByPlayer(player);
     }
 
+    /** 能量单元卡槽：只许创造模式的维度里，生存等玩家放不进、拿不走（{@link PartRules}） */
+    @Override
+    public ItemStack slotClick(int slotId, int dragType, ClickType clickType, EntityPlayer player)
+    {
+        return PartRules.slotClick(this, slotId, dragType, clickType, player, super::slotClick);
+    }
+
     @Override
     public ItemStack transferStackInSlot(EntityPlayer player, int slotNum)
     {
-        ItemStack card = ApplianceContainers.transfer(this, slotNum, cardIndex, 8, end, this::mergeItemStack);
+        ItemStack card = ApplianceContainers.transfer(this, player, slotNum, cardIndex, 8, end, this::mergeItemStack);
         if(card != null)
             return card;
         if(slotNum >= end)

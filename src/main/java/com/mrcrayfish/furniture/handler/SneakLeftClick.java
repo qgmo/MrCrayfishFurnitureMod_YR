@@ -5,6 +5,7 @@ import com.mrcrayfish.furniture.compat.RfToolsCards;
 import com.mrcrayfish.furniture.init.FurnitureSounds;
 import com.mrcrayfish.furniture.power.ApplianceEnergy;
 import com.mrcrayfish.furniture.power.IAppliance;
+import com.mrcrayfish.furniture.power.PartRules;
 import com.mrcrayfish.furniture.tileentity.TileEntityCeilingFan;
 import com.mrcrayfish.furniture.tileentity.TileEntityToaster;
 import net.minecraft.entity.player.EntityPlayer;
@@ -37,7 +38,7 @@ import com.mrcrayfish.furniture.water.WaterBasins;
 /**
  * 家具的“潜行 + 左键”操作（悠然服务器魔改）。潜行 + 空手右键留给 Carry On 搬方块，家具的新操作一律避开它：
  * <ul>
- * <li>没有界面的电器（吊扇、烤面包机）：拿能量单元卡潜行左键放入（已有卡时交换），空手潜行左键取出；
+ * <li>没有界面的电器（吊扇、烤面包机）：拿能量单元卡潜行左键放入（已有卡时交换），空手潜行左键取出（只许创造模式改部件的维度里，别的玩家做不了，见 {@link PartRules}）；
  * 电视的卡改为插在频道设置界面里、电脑的卡放在它界面的卡槽里（服主 11-14），旧存档插着的卡也在界面里取，这里都不管；</li>
  * <li>烤面包机：里面有面包片、没在烤时，空手潜行左键开始烤（原来是潜行 + 空手右键）；</li>
  * <li>马桶：潜行左键冲水（原来是潜行右键，服主 11-14 改）；</li>
@@ -128,11 +129,14 @@ public class SneakLeftClick
     }
 
     /** 没有界面的电器：插拔能量单元卡（电视、电脑不在其中，它们的卡槽在界面里） */
-    private static Action card(World world, BlockPos pos, TileEntity tileEntity, EntityPlayer player, ItemStack held)
+    static Action card(World world, BlockPos pos, TileEntity tileEntity, EntityPlayer player, ItemStack held)
     {
         if(!(tileEntity instanceof TileEntityCeilingFan || tileEntity instanceof TileEntityToaster))
             return null;
         ApplianceEnergy energy = ((IAppliance) tileEntity).getAppliance();
+        // 只许创造模式改部件的维度（默认主城）里，别的玩家不能插、拔：照常取消这次左键（不会挖坏），做的事换成一条提示
+        if(!PartRules.canChange(player) && (RfToolsCards.isCard(held) || (held.isEmpty() && energy.hasCard())))
+            return (w, p, pl) -> PartRules.notice(pl);
         if(RfToolsCards.isCard(held))
         {
             return (w, p, pl) ->

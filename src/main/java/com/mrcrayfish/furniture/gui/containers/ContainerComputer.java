@@ -5,6 +5,7 @@ import com.mrcrayfish.furniture.gui.inventory.InventoryPeripherals;
 import com.mrcrayfish.furniture.gui.slots.SlotPeripheral;
 import com.mrcrayfish.furniture.gui.slots.SlotPowerCard;
 import com.mrcrayfish.furniture.power.ApplianceContainers;
+import com.mrcrayfish.furniture.power.PartRules;
 import com.mrcrayfish.furniture.tileentity.TileEntityComputer;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.entity.player.EntityPlayerMP;
@@ -78,15 +79,21 @@ public class ContainerComputer extends Container
         return peripheralSlot;
     }
 
-    /** 外设槽：不是操作者（或过不了保护检查）的玩家点它不算；服务端把界面与手上拿着的重新同步给他 */
+    /** 外设槽：不是操作者（或过不了保护检查）的玩家点它、或 Shift 点背包里的外设都不算；服务端把界面与手上拿着的重新同步给他 */
     @Override
     public ItemStack slotClick(int slotId, int dragType, ClickType clickType, EntityPlayer player)
+    {
+        // 先过“只许创造模式改部件”的统一拦截（卡槽、外设槽），再是下面外设槽原有的操作者判断
+        return PartRules.slotClick(this, slotId, dragType, clickType, player, this::operatorClick);
+    }
+
+    private ItemStack operatorClick(int slotId, int dragType, ClickType clickType, EntityPlayer player)
     {
         boolean touchesPeripheral = slotId == peripheralIndex
                 || (clickType == ClickType.QUICK_MOVE && slotId >= 0 && slotId < 36 && ComputerPeripherals.isPeripheral(inventorySlots.get(slotId).getStack()));
         if(touchesPeripheral && !peripheralSlot.canChange(player))
         {
-            if(player instanceof EntityPlayerMP && slotId == peripheralIndex)
+            if(player instanceof EntityPlayerMP)
             {
                 EntityPlayerMP mp = (EntityPlayerMP) player;
                 mp.sendAllContents(this, this.getInventory());
@@ -155,7 +162,7 @@ public class ContainerComputer extends Container
     @Override
     public ItemStack transferStackInSlot(EntityPlayer entityPlayer, int slotNum)
     {
-        ItemStack card = ApplianceContainers.transfer(this, slotNum, cardIndex, 0, 36, this::mergeItemStack);
+        ItemStack card = ApplianceContainers.transfer(this, entityPlayer, slotNum, cardIndex, 0, 36, this::mergeItemStack);
         if(card != null)
             return card;
         ItemStack peripheral = transferPeripheral(entityPlayer, slotNum);

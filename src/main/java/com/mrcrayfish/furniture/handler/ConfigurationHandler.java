@@ -44,6 +44,12 @@ public class ConfigurationHandler
     public static int computerScreenIntervalMs = com.mrcrayfish.furniture.computer.ScreenThumb.DEFAULT_INTERVAL_MS;
     public static String[] computerScreenPalette = com.mrcrayfish.furniture.computer.ScreenThumb.DEFAULT_PALETTE.clone();
 
+    /**
+     * 只许创造模式改家具部件的维度（服务端，服主 11-22）：这些维度里，电器的能量单元卡、电脑的外设只有创造模式的玩家能放、拿
+     * （见 {@link com.mrcrayfish.furniture.power.PartRules}）。判断只在服务端，不同步给客户端。默认主城（YouranMod 的维度 3）
+     */
+    public static int[] partsCreativeOnlyDimensions = {3};
+
     /** 用水家具认的水（Forge 流体注册名，悠然服务器魔改） */
     public static String[] waterFluids = WaterFluids.DEFAULTS.clone();
 
@@ -103,6 +109,7 @@ public class ConfigurationHandler
         computerScreenHeight = config.getInt("computer-screen-thumbnail-height", CATEGORY_SETTINGS, com.mrcrayfish.furniture.computer.ScreenThumb.DEFAULT_HEIGHT, com.mrcrayfish.furniture.computer.ScreenThumb.MIN_HEIGHT, com.mrcrayfish.furniture.computer.ScreenThumb.MAX_HEIGHT, "(Server) Computer screen thumbnail height in pixels (see computer-screen-thumbnail-width).");
         computerScreenIntervalMs = config.getInt("computer-screen-thumbnail-interval-ms", CATEGORY_SETTINGS, com.mrcrayfish.furniture.computer.ScreenThumb.DEFAULT_INTERVAL_MS, com.mrcrayfish.furniture.computer.ScreenThumb.MIN_INTERVAL_MS, com.mrcrayfish.furniture.computer.ScreenThumb.MAX_INTERVAL_MS, "(Server) Each viewer uploads a computer screen thumbnail at most this often, in milliseconds (after the page changes, scrolls or finishes loading images).");
         computerScreenPalette = config.getStringList("computer-screen-thumbnail-palette", CATEGORY_SETTINGS, com.mrcrayfish.furniture.computer.ScreenThumb.DEFAULT_PALETTE, "(Server) Fixed palette of the computer screen thumbnail: 2 to 16 colours written as RRGGBB. Each pixel is shown in the nearest of these colours (4 bits per pixel).");
+        partsCreativeOnlyDimensions = config.get(CATEGORY_SETTINGS, "parts-creative-only-dimensions", new int[]{3}, "(Server) Dimension ids in which only creative-mode players may put in or take out furniture parts: the RFTools power cell card of every appliance (computer, fridge, freezer, microwave, oven, printer, washing machine, dishwasher, TV settings, ceiling fan, toaster) and the computer's peripheral slot. Survival, adventure and spectator players can still open the screens and use the appliances, but cannot insert or remove these parts (shift-click, number keys, drag, double-click and sneak + left click are all refused by the server). Default {3} is the main city dimension of YouranMod. One id per line; an empty list turns the rule off. Only the server reads this and nothing is sent to clients; read when the config is loaded, so a change in the file takes effect after restarting the server.").getIntList();
         tvVideoEnabled = config.getBoolean("tv-video", CATEGORY_SETTINGS, true, "(Server) Whether TV channels may play bilibili videos (BV.../av... channels). When false, TVs only play GIFs and video channels show a notice. Each player's client fetches and decodes the video itself; the server only stores channel, play/pause, position and volume.");
         config.addCustomCategoryComment(CATEGORY_RECIPE_SETTINGS, "Enabled or disable the default recipes");
         config.addCustomCategoryComment(CATEGORY_API, "RecipeAPI Configuration. How to use: http://mrcrayfishs-furniture-mod.wikia.com/wiki/Configuration");
