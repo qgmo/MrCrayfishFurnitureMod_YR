@@ -162,6 +162,28 @@ class BrowserLayoutTest
         }
     }
 
+    /** MineBay 的搜索按钮没有上外边距（.go 的上外边距只给结算区的 div；以前也管到了 .btn.go，搜索按钮比搜索框低 6 像素） */
+    @Test
+    void mineBaySearchButtonHasNoTopMargin() throws Exception
+    {
+        byte[] html = MineBayLayoutSamples.pages().get("list").getBytes(StandardCharsets.UTF_8);
+        PageDocument doc = LayoutSamples.parse(html, "https://minebay.yr/");
+        LayoutProbe p = new LayoutProbe(PageRenderer.VIEW_WIDTH);
+        int[] margin = {-1};
+        PageRenderer.render(doc, new HashMap<>(), 1.0, (r, root) ->
+        {
+            p.inspect(r, root);
+            List<com.openhtmltopdf.render.Box> buttons = new ArrayList<>();
+            find(root, "button", buttons);
+            for(com.openhtmltopdf.render.Box b : buttons)
+            {
+                if(b.getElement().getAttribute("class").equals("btn go") && b.getElement().getTextContent().equals("搜索"))
+                    margin[0] = p.marginTop(b);
+            }
+        }, 0);
+        assertEquals(0, margin[0]);
+    }
+
     /** 文本框的 size：约 N 个字宽；没写的默认 160；网站写了宽度的按网站的 */
     @Test
     void inputSizeAttributeSetsWidth() throws Exception

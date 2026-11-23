@@ -133,6 +133,12 @@ final class LayoutProbe
         walk(root, null, Integer.MAX_VALUE, 0, false);
     }
 
+    /** 上外边距（inspect 之后可用） */
+    int marginTop(Box b)
+    {
+        return (int) b.getMargin(ctx).top();
+    }
+
     /** 盒子的内容区（绝对坐标）：x、y、宽、高 */
     private int[] content(Box b)
     {

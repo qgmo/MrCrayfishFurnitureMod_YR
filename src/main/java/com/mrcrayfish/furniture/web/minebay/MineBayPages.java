@@ -985,7 +985,7 @@ public final class MineBayPages
             + "table.sum { width: 100%; border-collapse: collapse; margin-top: 8px; } table.sum td { vertical-align: top; }\n"
             + "td.note { font-size: 12px; color: #888; padding-right: 10px; line-height: 18px; }\n"
             + "td.tot { width: 200px; text-align: right; background: #fffbea; border: 1px solid #f0c14b; padding: 8px; }\n"
-            + ".totl { color: #666; } .totv { font-size: 15px; color: #e53238; margin: 2px 0; } .totv .cn { color: #555; font-size: 12px; margin-right: 4px; } .go { margin-top: 6px; }\n"
+            + ".totl { color: #666; } .totv { font-size: 15px; color: #e53238; margin: 2px 0; } .totv .cn { color: #555; font-size: 12px; margin-right: 4px; } div.go { margin-top: 6px; }\n"
             + "table.steps { width: 100%; border-collapse: collapse; margin-bottom: 8px; } table.steps td { width: 25%; text-align: center; padding: 4px; background: #eee; color: #999; border: 2px solid #fff; }\n"
             + "table.steps td.done { background: #dbe6fb; color: #2a50c8; } table.steps td.on { background: #2a50c8; color: #fff; font-weight: bold; }\n"
             + ".paybox { margin-top: 10px; } table.pay { width: 100%; border-collapse: collapse; } table.pay th { text-align: left; font-weight: normal; color: #888; padding: 3px 4px; }\n"
