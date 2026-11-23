@@ -29,6 +29,11 @@ minecraft {
     injectedTags.put('VERSION', project.property('mod_version'))
 }
 
+// 开发环境的样例网站 samples.yr（浏览器排版检查，见 web.DevSamples）：gradlew runClient -PbrowserDevSamples=<样例目录>
+if (project.hasProperty('browserDevSamples')) {
+    minecraft.extraRunJvmArguments.add('-Dcfm.browser.devSamples=' + project.property('browserDevSamples'))
+}
+
 tasks.named('injectTags').configure {
     outputClassName.set('com.mrcrayfish.furniture.Tags')
 }
@@ -139,4 +144,20 @@ test {
     javaLauncher.set(javaToolchains.launcherFor {
         languageVersion = JavaLanguageVersion.of(8)
     })
+}
+
+// 浏览器排版检查（工具，不是测试）：把仓库自带的样例页面和样例目录里各网站的页面渲染成 PNG 并检查排版，问题写进出图目录的 report.txt。
+// gradlew browserLayoutShots -PlayoutSamples=<样例目录，- 为只画自带的> -PlayoutShots=<出图目录> [-PlayoutScale=1.5]
+tasks.register('browserLayoutShots', JavaExec) {
+    group = 'verification'
+    description = '把样例页面渲染成 PNG 并做排版检查'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.mrcrayfish.furniture.client.browser.LayoutShots'
+    javaLauncher.set(javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(8)
+    })
+    jvmArgs '-Djava.awt.headless=true', '-Dfile.encoding=UTF-8'
+    doFirst {
+        args = [project.property('layoutSamples'), project.property('layoutShots'), project.findProperty('layoutScale') ?: '1.5']
+    }
 }

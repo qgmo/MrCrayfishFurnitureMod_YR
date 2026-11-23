@@ -83,6 +83,8 @@ public class MrCrayfishFurnitureMod
         com.mrcrayfish.furniture.web.minebay.MineBaySite.register();
         /* 浏览器主页 180.yr 的导航信息 */
         com.mrcrayfish.furniture.web.NavEntries.register();
+        /* 开发环境的样例网站 samples.yr（只认 JVM 参数，正式包里不生效；排版检查用） */
+        com.mrcrayfish.furniture.web.DevSamples.registerIfEnabled();
 
         /* GUI Handler Registering */
         NetworkRegistry.INSTANCE.registerGuiHandler(this, new GuiHandler());
