@@ -89,6 +89,99 @@ class BrowserLayoutTest
         assertTrue(failures.isEmpty(), String.join("\n", failures));
     }
 
+    /**
+     * 格子里断开的长英文词：按游戏里画页面的倍数（电脑屏幕、全屏）画出来也不压到格子右边框。
+     * 内核在倍数 1 下量字宽、在放大的图上画字，字形取整不同时长串字会画得比量的宽（修之前全屏时超出 2–6 CSS 像素）。
+     */
+    @Test
+    void brokenLongWordsAreDrawnInsideTheirCell() throws Exception
+    {
+        byte[] html = ("<?xml version=\"1.0\"?><html xmlns=\"http://www.w3.org/1999/xhtml\"><head><style type=\"text/css\">"
+                + "table { border-collapse: collapse; width: 100%; } th { width: 90px; } td, th { border: 1px solid #000; padding: 2px 6px; font-size: 14px; }"
+                + "</style></head><body><table><tr><th>内容</th><td>附魔钻石剑（锋利 V、耐久 III、经验修补）×1；"
+                + "Supercalifragilisticexpialidocious_Enchanted_Diamond_Sword_of_Doom_Supercalifragilisticexpialidocious_Enchanted ×2</td></tr>"
+                + "<tr><th>网站</th><td><b>averyveryverylongdomainnamewithoutanybreaksaveryveryverylongdomainnamewithoutanybreaks.yr</b></td></tr>"
+                + "</table></body></html>").getBytes(StandardCharsets.UTF_8);
+        byte[] cart = MineBayLayoutSamples.pages().get("cart").getBytes(StandardCharsets.UTF_8);
+        for(double scale : new double[]{1.0, 1.34, 1.5, 2.0, 2.5, 3.0})
+        {
+            LayoutProbe.Result r = check(html, "http://exp.yr/cell", scale);
+            assertTrue(r.problems.isEmpty(), scale + "：" + r.problems);
+            // 购物车：格子里的长商品名、右对齐的价格（修之前全屏时画出界 2–6 像素）
+            LayoutProbe.Result c = check(cart, "https://minebay.yr/cart", scale);
+            assertTrue(c.problems.isEmpty(), scale + "：" + c.problems);
+        }
+    }
+
+    /**
+     * “Silk Touch”与后面的“ I”之间的空格画得出来（修之前画出来的字比排版量的宽，把空格吃掉，看起来是“Silk TouchI”）：
+     * 排版里空格那一段的像素全是白的。
+     */
+    @Test
+    void spaceAfterInlineElementIsVisible() throws Exception
+    {
+        byte[] html = MineBayLayoutSamples.pages().get("item-en").getBytes(StandardCharsets.UTF_8);
+        for(double scale : new double[]{1.34, 2.5})
+        {
+            PageDocument doc = LayoutSamples.parse(html, "https://minebay.yr/item-en");
+            int[] gap = new int[4];
+            RenderedPage page = PageRenderer.render(doc, new HashMap<>(), scale, (r, root) ->
+            {
+                List<com.openhtmltopdf.render.Box> spans = new ArrayList<>();
+                find(root, "span", spans);
+                for(com.openhtmltopdf.render.Box b : spans)
+                {
+                    if(b instanceof com.openhtmltopdf.render.InlineLayoutBox && "Silk Touch".equals(b.getElement().getTextContent()))
+                    {
+                        com.openhtmltopdf.render.InlineLayoutBox span = (com.openhtmltopdf.render.InlineLayoutBox) b;
+                        List<Object[]> texts = new ArrayList<>();
+                        texts(root, texts);
+                        for(Object[] t : texts)
+                        {
+                            com.openhtmltopdf.render.InlineText it = (com.openhtmltopdf.render.InlineText) t[0];
+                            com.openhtmltopdf.render.InlineLayoutBox p = (com.openhtmltopdf.render.InlineLayoutBox) t[1];
+                            if(it.getSubstring().startsWith(" I") && p.getAbsY() == span.getAbsY())
+                            {
+                                // 空格在“ I”这段字的开头：从“Silk Touch”排版的右边起，空格至少 3 像素宽（14px 字的空格约 3.6）
+                                gap[0] = span.getAbsX() + span.getInlineWidth();
+                                gap[1] = p.getAbsX() + it.getX() + 3;
+                                gap[2] = span.getAbsY();
+                                gap[3] = span.getHeight();
+                            }
+                        }
+                    }
+                }
+            });
+            assertTrue(gap[1] > gap[0], "找到了空格");
+            // 空格那一段（左右各让 1 个图像素给抗锯齿）里没有字的笔画
+            for(int x = (int) Math.ceil(gap[0] * scale) + 1; x < (int) (gap[1] * scale) - 1; x++)
+            {
+                for(int y = (int) (gap[2] * scale); y < (int) ((gap[2] + gap[3]) * scale); y++)
+                    assertTrue((page.image.getRGB(x, y) & 0xFF) > 0xC0, scale + "：空格处 (" + x + ", " + y + ") 有笔画");
+            }
+        }
+    }
+
+    /** 文本框的 size：约 N 个字宽；没写的默认 160；网站写了宽度的按网站的 */
+    @Test
+    void inputSizeAttributeSetsWidth() throws Exception
+    {
+        byte[] html = ("<?xml version=\"1.0\"?><html xmlns=\"http://www.w3.org/1999/xhtml\"><head><style type=\"text/css\">input.q { width: 250px; }</style></head><body>"
+                + "<form action=\"/\"><div><input type=\"text\" name=\"a\" size=\"5\" /> <input type=\"text\" name=\"b\" /> <input type=\"password\" name=\"c\" size=\"20\" />"
+                + " <input type=\"text\" class=\"q\" name=\"d\" size=\"5\" /> <input type=\"text\" name=\"e\" size=\"x\" /></div></form></body></html>").getBytes(StandardCharsets.UTF_8);
+        PageDocument doc = LayoutSamples.parse(html, "http://exp.yr/");
+        RenderedPage page = PageRenderer.render(doc, new HashMap<>(), 1.0);
+        Map<String, Integer> w = new HashMap<>();
+        for(PageDocument.Control c : doc.controls)
+            w.put(c.name, page.rects(c.n).get(0).w);
+        // 内容宽 + 左右内边距 3×2 + 边框 1×2；每个字 7.5 像素
+        assertEquals(160 + 8, (int) w.get("b"));
+        assertEquals(38 + 8, (int) w.get("a"), "size=5");
+        assertEquals(150 + 8, (int) w.get("c"), "size=20");
+        assertEquals(250 + 8, (int) w.get("d"), "网站写了宽度的按网站的");
+        assertEquals(160 + 8, (int) w.get("e"), "写错的 size 不算");
+    }
+
     /** 排版检查本身查得出问题：关掉修正时（直接用内核排版）这几页确实有问题 */
     @Test
     void probeFindsProblemsWithoutTheFixes() throws Exception
@@ -222,6 +315,23 @@ class BrowserLayoutTest
             }
         });
         assertTrue(p.problems.isEmpty(), p.problems.toString());
+    }
+
+    /** 盒子树里所有的字段：{InlineText, 所在的 InlineLayoutBox} */
+    private static void texts(com.openhtmltopdf.render.Box b, List<Object[]> out)
+    {
+        if(b instanceof com.openhtmltopdf.render.InlineLayoutBox)
+        {
+            for(Object o : ((com.openhtmltopdf.render.InlineLayoutBox) b).getInlineChildren())
+            {
+                if(o instanceof com.openhtmltopdf.render.InlineText)
+                    out.add(new Object[]{o, b});
+                else if(o instanceof com.openhtmltopdf.render.Box)
+                    texts((com.openhtmltopdf.render.Box) o, out);
+            }
+        }
+        for(com.openhtmltopdf.render.Box c : b.getChildren())
+            texts(c, out);
     }
 
     private static void find(com.openhtmltopdf.render.Box b, String tag, List<com.openhtmltopdf.render.Box> out)

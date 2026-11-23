@@ -339,6 +339,20 @@ public final class PageDocument
                 + "script, style, head, title { display: none; }\n";
     }
 
+    /**
+     * 文本框的 {@code size="N"}：约 N 个字宽（每个字 7.5 像素，约等于真浏览器里表单字号的平均字宽），不写时默认 160 像素。写在默认样式里，
+     * 网站写了更具体的宽度（如 {@code input.q}）照样按网站的。
+     */
+    static String sizeCss(java.util.Collection<Integer> sizes)
+    {
+        StringBuilder b = new StringBuilder();
+        for(int n : sizes)
+        {
+            b.append("input[size=\"").append(n).append("\"] { width: ").append((n * 15 + 1) / 2).append("px; }\n");
+        }
+        return b.toString();
+    }
+
     private static final class Builder
     {
         final Document dom;
@@ -352,6 +366,8 @@ public final class PageDocument
         final Map<Integer, String> links = new HashMap<>();
         final Map<Integer, String> items = new HashMap<>();
         final Set<String> images = new LinkedHashSet<>();
+        /** 文本框写的 size（几个字宽），注入默认样式时按它定宽 */
+        final java.util.TreeSet<Integer> sizes = new java.util.TreeSet<>();
         Refresh refresh;
         boolean refreshSeen;
         int next;
@@ -659,6 +675,12 @@ public final class PageDocument
             {
                 value = e.hasAttribute("value") ? e.getAttribute("value") : (kind == Kind.CHECKBOX || kind == Kind.RADIO ? "on" : "");
             }
+            if((kind == Kind.TEXT || kind == Kind.PASSWORD) && tag.equals("input"))
+            {
+                String size = e.getAttribute("size").trim();
+                if(size.matches("\\d{1,3}") && Integer.parseInt(size) > 0 && sizes.size() < 32)
+                    sizes.add(Integer.parseInt(size));
+            }
             int maxLength = 512;
             String ml = e.getAttribute("maxlength");
             if(ml.matches("\\d{1,4}"))
@@ -706,7 +728,7 @@ public final class PageDocument
             }
             Element ua = dom.createElementNS(XHTML_NS, "style");
             ua.setAttribute("type", "text/css");
-            ua.setTextContent(userAgentCss());
+            ua.setTextContent(userAgentCss() + sizeCss(sizes));
             head.insertBefore(ua, head.getFirstChild());
             // 页面大小由浏览器定（宽固定、高够长，最后按内容裁）：放在最后，网站改不了
             Element page = dom.createElementNS(XHTML_NS, "style");

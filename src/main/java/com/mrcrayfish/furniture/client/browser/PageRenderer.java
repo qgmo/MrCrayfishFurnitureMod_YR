@@ -7,6 +7,11 @@ import com.openhtmltopdf.css.style.CssContext;
 import com.openhtmltopdf.java2d.Java2DFont;
 import com.openhtmltopdf.java2d.Java2DFontResolver;
 import com.openhtmltopdf.java2d.Java2DRenderer;
+import com.openhtmltopdf.java2d.Java2DTextRenderer;
+import com.openhtmltopdf.java2d.Java2DFontContext;
+import com.openhtmltopdf.java2d.Java2DOutputDevice;
+import com.openhtmltopdf.extend.FontContext;
+import com.openhtmltopdf.extend.OutputDevice;
 import com.openhtmltopdf.layout.SharedContext;
 import com.openhtmltopdf.render.FSFont;
 import com.openhtmltopdf.java2d.api.FSPage;
@@ -215,6 +220,7 @@ public final class PageRenderer
             b.useFont(boldFile, family, 700, BaseRendererBuilder.FontStyle.NORMAL, true);
         }
         b.useEnvironmentFonts(false);
+        b.useLayoutGraphics(layoutGraphics());
         b.useFastMode();
         b.toSinglePage(processor);
         b.useUriResolver((base, uri) -> UrlInput.resolve(base, uri));
@@ -274,6 +280,106 @@ public final class PageRenderer
             resolver = r.getFontResolver();
         // 不认识的字体名最后落到这里（内核的兜底是名叫 Serif 的字体）
         resolver.setFontMapping("Serif", baseFont);
+        fractionalMetrics(r);
+    }
+
+    /**
+     * 内核的文字绘制器（{@link Java2DTextRenderer}）量字宽、画字时都把小数字宽（{@code FRACTIONALMETRICS}）强制关掉：排版在倍数 1 下
+     * 按整数字宽量，画在放大的图上时按放大后的整数字宽画，两边取整不同，长串字画出来比量的宽（全屏时一行长英文多出好几个像素，
+     * 压到格子边框、伸出盒子）。换成 {@link FractionalTextRenderer}：量、画都用小数字宽，量出来的宽向上取整（宁可早一点断行，不会画出界）。
+     */
+    private static void fractionalMetrics(Java2DRenderer r)
+    {
+        if(sharedContextField == null)
+            return;
+        try
+        {
+            SharedContext ctx = (SharedContext) sharedContextField.get(r);
+            if(ctx.getTextRenderer() instanceof Java2DTextRenderer)
+                ctx.setTextRenderer(new FractionalTextRenderer());
+        }
+        catch(Exception | LinkageError e)
+        {
+            // 照旧（内核自己的绘制器）
+        }
+    }
+
+    /** 量字宽、画字都用小数字宽的文字绘制器（见 {@link #fractionalMetrics}）；分段换字体的办法同内核：每个字用字体清单里第一个能显示它的 */
+    static final class FractionalTextRenderer extends Java2DTextRenderer
+    {
+        @Override
+        public int getWidth(FontContext fc, FSFont font, String s)
+        {
+            if(s.isEmpty() || !(font instanceof Java2DFont) || !(fc instanceof Java2DFontContext))
+                return super.getWidth(fc, font, s);
+            Graphics2D g = ((Java2DFontContext) fc).getGraphics();
+            Object old = g.getRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS);
+            g.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, RenderingHints.VALUE_FRACTIONALMETRICS_ON);
+            try
+            {
+                java.awt.font.TextLayout tl = new java.awt.font.TextLayout(runs(((Java2DFont) font).getAWTFonts(), s).getIterator(), g.getFontRenderContext());
+                return (int) Math.ceil(tl.getAdvance() - 1e-6);
+            }
+            finally
+            {
+                g.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, old);
+            }
+        }
+
+        @Override
+        public void drawString(OutputDevice od, String s, float x, float y)
+        {
+            if(s.isEmpty() || !(od instanceof Java2DOutputDevice))
+            {
+                super.drawString(od, s, x, y);
+                return;
+            }
+            Java2DOutputDevice out = (Java2DOutputDevice) od;
+            Graphics2D g = out.getGraphics();
+            Object aa = g.getRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING);
+            Object fm = g.getRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS);
+            g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+            g.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, RenderingHints.VALUE_FRACTIONALMETRICS_ON);
+            try
+            {
+                g.drawString(runs(out.getFont().getAWTFonts(), s).getIterator(), x, y);
+            }
+            finally
+            {
+                g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, aa);
+                g.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, fm);
+            }
+        }
+
+        /** 按字体分段：每个字用清单里第一个能显示它的字体，都不能显示时用第一个 */
+        static java.text.AttributedString runs(List<Font> fonts, String s)
+        {
+            java.text.AttributedString as = new java.text.AttributedString(s);
+            int start = 0;
+            Font current = null;
+            for(int i = 0; i < s.length(); )
+            {
+                int cp = s.codePointAt(i);
+                Font f = fonts.get(0);
+                for(Font c : fonts)
+                {
+                    if(c.canDisplay(cp))
+                    {
+                        f = c;
+                        break;
+                    }
+                }
+                if(current != null && f != current)
+                {
+                    as.addAttribute(java.awt.font.TextAttribute.FONT, current, start, i);
+                    start = i;
+                }
+                current = f;
+                i += Character.charCount(cp);
+            }
+            as.addAttribute(java.awt.font.TextAttribute.FONT, current, start, s.length());
+            return as;
+        }
     }
 
     /** 每段文字的字体清单：页面写的 → 自带的 YR Sans → 系统字体（Dialog） */
@@ -333,6 +439,27 @@ public final class PageRenderer
         }
     }
 
+    /**
+     * 画页面用的绘制设置，排版量字宽时也用同一套（{@link #layoutGraphics()}）。字宽用小数（{@code FRACTIONALMETRICS}）：
+     * 内核在倍数 1 下量字宽、在放大的图上画字，按整数取整的字宽在两种大小下取得不一样，长串字画出来会比量的宽，
+     * 压到格子边框、伸出盒子（全屏时一行长英文能多出好几个像素）；用小数字宽后画出来的宽正好是量的宽乘倍数。
+     */
+    static void paintHints(Graphics2D g)
+    {
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+        g.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, RenderingHints.VALUE_FRACTIONALMETRICS_ON);
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+    }
+
+    /** 内核排版时量字宽用的画布（设置同 {@link #paintHints}） */
+    static Graphics2D layoutGraphics()
+    {
+        Graphics2D g = new BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB).createGraphics();
+        paintHints(g);
+        return g;
+    }
+
     /** 只开一张图，高不超过 {@link #MAX_HEIGHT}（超出的部分画到图外面，自然被裁掉） */
     private static final class CappedProcessor implements FSPageProcessor
     {
@@ -357,9 +484,7 @@ public final class PageRenderer
                 g.setColor(Color.WHITE);
                 g.fillRect(0, 0, w, h);
                 g.setClip(0, 0, w, h);
-                g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-                g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-                g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+                paintHints(g);
                 g.scale(scale, scale);
             }
             Graphics2D gg = g;

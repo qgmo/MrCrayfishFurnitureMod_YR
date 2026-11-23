@@ -10,6 +10,7 @@ import com.openhtmltopdf.render.LineBox;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 
+import java.awt.RenderingHints;
 import java.io.IOException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
@@ -21,6 +22,7 @@ import java.util.Map;
  * <ul>
  * <li>{@link Kind#TEXT_OUT_OF_BOX}：一段字伸出了它所在的盒子（内容区）右边或下边；</li>
  * <li>{@link Kind#BOX_OUT_OF_PARENT}：一个块（表格、按钮、图片、定宽的框……）伸出了父盒子的内容区；</li>
+ * <li>{@link Kind#TEXT_OVERLAP}：同一行里一段字画出来盖到了后一段字上（字之间的空格被吃掉，像“Silk TouchI”）；</li>
  * <li>{@link Kind#OUT_OF_PAGE}：字或盒子伸出了页面（宽 {@value PageRenderer#VIEW_WIDTH}）；</li>
  * <li>{@link Kind#CONTROL_HEIGHT}：同一行的按钮、输入框、下拉框高度不一样；</li>
  * <li>{@link Kind#CONTROL_ALIGN}：同一行的按钮、输入框上下没对齐（上边不齐）。</li>
@@ -31,7 +33,7 @@ final class LayoutProbe
 {
     enum Kind
     {
-        TEXT_OUT_OF_BOX, BOX_OUT_OF_PARENT, OUT_OF_PAGE, CONTROL_HEIGHT, CONTROL_ALIGN
+        TEXT_OUT_OF_BOX, TEXT_OVERLAP, BOX_OUT_OF_PARENT, OUT_OF_PAGE, CONTROL_HEIGHT, CONTROL_ALIGN
     }
 
     static final class Problem
@@ -60,15 +62,26 @@ final class LayoutProbe
     private final int pageWidth;
     private LayoutContext ctx;
 
+    /** 画成图的倍数（量“画出来多宽”用；0 为不量） */
+    private final double scale;
+    private java.awt.Graphics2D paint;
+    private Object fractional;
+
     LayoutProbe(int pageWidth)
     {
+        this(pageWidth, 0);
+    }
+
+    LayoutProbe(int pageWidth, double scale)
+    {
         this.pageWidth = pageWidth;
+        this.scale = scale;
     }
 
     /** 渲染一页并检查，返回发现的问题（同时给出渲染好的页面，存图用） */
     static Result check(PageDocument doc, Map<String, byte[]> images, double scale) throws IOException
     {
-        LayoutProbe p = new LayoutProbe(PageRenderer.VIEW_WIDTH);
+        LayoutProbe p = new LayoutProbe(PageRenderer.VIEW_WIDTH, Math.max(1.0, Math.min(3.0, scale)));
         RenderedPage page = PageRenderer.render(doc, images, scale, p::inspect);
         return new Result(page, p.problems);
     }
@@ -92,6 +105,26 @@ final class LayoutProbe
             Method m = Java2DRenderer.class.getDeclaredMethod("newLayoutContext");
             m.setAccessible(true);
             ctx = (LayoutContext) m.invoke(renderer);
+        }
+        catch(ReflectiveOperationException e)
+        {
+            throw new IOException(e);
+        }
+        // 量“画出来多宽”要和内核画字时一样：它的文字绘制器自己定小数字宽开不开
+        fractional = RenderingHints.VALUE_FRACTIONALMETRICS_OFF;
+        try
+        {
+            java.lang.reflect.Field sc = Java2DRenderer.class.getDeclaredField("_sharedContext");
+            sc.setAccessible(true);
+            Object tr = ((com.openhtmltopdf.layout.SharedContext) sc.get(renderer)).getTextRenderer();
+            if(tr instanceof PageRenderer.FractionalTextRenderer)
+                fractional = RenderingHints.VALUE_FRACTIONALMETRICS_ON;
+            else
+            {
+                java.lang.reflect.Field fm = com.openhtmltopdf.java2d.Java2DTextRenderer.class.getDeclaredField("fractionalFontMetricsHint");
+                fm.setAccessible(true);
+                fractional = fm.get(tr);
+            }
         }
         catch(ReflectiveOperationException e)
         {
@@ -141,7 +174,11 @@ final class LayoutProbe
         }
         Box nextCb = blockLike && !(b instanceof LineBox) ? b : cb;
         if(b instanceof LineBox)
+        {
             checkLine((LineBox) b, cb, clip);
+            if(!quiet)
+                checkOverlap((LineBox) b, cb);
+        }
         if(b instanceof InlineLayoutBox)
         {
             for(Object o : ((InlineLayoutBox) b).getInlineChildren())
@@ -186,7 +223,9 @@ final class LayoutProbe
         if(s == null || s.trim().isEmpty() || cb == null)
             return;
         int x1 = parent.getAbsX() + t.getX();
-        int x2 = Math.min(x1 + t.getWidth(), clipRight);
+        // 字实际画出来的宽（按画图的倍数与绘制设置量），比排版量的宽时以画出来的为准
+        int drawn = drawnWidth(s.replaceAll("\\s+$", ""), parent);
+        int x2 = Math.min(x1 + Math.max(t.getWidth(), drawn), clipRight);
         int[] c = content(cb);
         String what = "“" + clip(s.trim()) + "”";
         if(x2 > pageWidth + TOLERANCE)
@@ -198,6 +237,83 @@ final class LayoutProbe
             int bottom = parent.getAbsY() + parent.getHeight();
             if(bottom > c[1] + c[3] + TOLERANCE)
                 problems.add(new Problem(Kind.TEXT_OUT_OF_BOX, path(cb), what + " 下边到 " + bottom + "，定高盒子内容区下边 " + (c[1] + c[3])));
+        }
+    }
+
+    /**
+     * 这段字按画页面时的倍数和绘制设置画出来有多宽（CSS 像素，向上取整）；不量时为 0。
+     * 内核排版时在倍数 1 下量字宽，画的时候在放大后的图上画，两边字形的取整不一样时，长串字画出来会比排版量的宽。
+     */
+    int drawnWidth(String text, InlineLayoutBox parent)
+    {
+        if(scale <= 0 || text.trim().isEmpty())
+            return 0;
+        if(paint == null)
+        {
+            paint = new java.awt.image.BufferedImage(4, 4, java.awt.image.BufferedImage.TYPE_INT_RGB).createGraphics();
+            PageRenderer.paintHints(paint);
+            paint.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, fractional);
+            paint.scale(scale, scale);
+        }
+        com.openhtmltopdf.render.FSFont fs = parent.getStyle().getFSFont(ctx);
+        if(!(fs instanceof com.openhtmltopdf.java2d.Java2DFont))
+            return 0;
+        // 内核画字用按字体分段的 AttributedString（TextLayout），这里用同样的办法量
+        java.text.AttributedString as = PageRenderer.FractionalTextRenderer.runs(((com.openhtmltopdf.java2d.Java2DFont) fs).getAWTFonts(), text);
+        java.awt.font.TextLayout tl = new java.awt.font.TextLayout(as.getIterator(), paint.getFontRenderContext());
+        return (int) Math.ceil(tl.getAdvance());
+    }
+
+    /** 同一行里前后两段字：前一段画出来的右边不超过后一段的左边（字之间的空格没被吃掉） */
+    private void checkOverlap(LineBox line, Box cb)
+    {
+        if(scale <= 0)
+            return;
+        List<int[]> runs = new ArrayList<>();
+        List<String> texts = new ArrayList<>();
+        collectTexts(line, runs, texts, 0);
+        for(int i = 0; i + 1 < runs.size(); i++)
+        {
+            int[] a = runs.get(i), b = runs.get(i + 1);
+            if(b[0] >= a[0] && a[1] > b[0] + TOLERANCE)
+                problems.add(new Problem(Kind.TEXT_OVERLAP, path(cb), "“" + clip(texts.get(i).trim()) + "”画到 " + a[1] + "，后面的“" + clip(texts.get(i + 1).trim())
+                        + "”从 " + b[0] + " 开始"));
+        }
+    }
+
+    /** 一行里的字（按排版顺序）：左边（排版位置，去掉开头的空格）、画出来的右边 */
+    private void collectTexts(Box b, List<int[]> runs, List<String> texts, int depth)
+    {
+        if(depth > 40)
+            return;
+        if(b instanceof InlineLayoutBox)
+        {
+            InlineLayoutBox ib = (InlineLayoutBox) b;
+            for(Object o : ib.getInlineChildren())
+            {
+                if(o instanceof InlineText)
+                {
+                    InlineText t = (InlineText) o;
+                    String s = t.getSubstring();
+                    if(s == null || s.trim().isEmpty())
+                        continue;
+                    String lead = s.substring(0, s.length() - s.replaceAll("^\\s+", "").length());
+                    String body = s.trim();
+                    int x1 = ib.getAbsX() + t.getX();
+                    int start = x1 + (lead.isEmpty() ? 0 : drawnWidth("x" + lead, ib) - drawnWidth("x", ib));
+                    // letter-spacing（如 MineBay 标志的 -2px）：每个字后面加上
+                    int spacing = (int) Math.round(t.getLetterSpacing() * body.codePointCount(0, body.length()));
+                    runs.add(new int[]{start, start + drawnWidth(body, ib) + spacing});
+                    texts.add(s);
+                }
+                else if(o instanceof Box)
+                    collectTexts((Box) o, runs, texts, depth + 1);
+            }
+        }
+        else if(b instanceof LineBox)
+        {
+            for(Box c : b.getChildren())
+                collectTexts(c, runs, texts, depth + 1);
         }
     }
 
