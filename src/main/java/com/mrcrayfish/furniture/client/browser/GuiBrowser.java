@@ -177,6 +177,11 @@ public class GuiBrowser extends GuiContainer
         layout();
     }
 
+    /** 地址栏最窄这么宽；一行放不下时右边的按钮挪到第二行（窗口窄、界面倍数大时） */
+    static final int MIN_ADDRESS_WIDTH = 100;
+    /** 工具栏有几行（1 或 2） */
+    private int toolbarRows = 1;
+
     private void layout()
     {
         int margin = 6;
@@ -186,14 +191,6 @@ public class GuiBrowser extends GuiContainer
         sh = height - margin * 2;
         toolbarY = sy + 4;
         int tbH = 14;
-        vpX = sx + 4;
-        vpY = toolbarY + tbH + 3;
-        vpW = sw - 8 - 5;
-        statusY = sy + sh - 12;
-        vpH = statusY - 2 - vpY;
-        factor = vpW / (double) PageRenderer.VIEW_WIDTH;
-        ScaledResolution sr = new ScaledResolution(mc);
-        deviceScale = Math.max(1.0, Math.min(2.5, factor * sr.getScaleFactor()));
 
         tools.clear();
         int x = sx + 4;
@@ -208,48 +205,48 @@ public class GuiBrowser extends GuiContainer
             tools.add(t);
             x += 15;
         }
-        String powerLabel = I18n.format("cfm.browser.power");
-        String itemsLabel = I18n.format("cfm.browser.items");
-        String cookiesLabel = I18n.format("cfm.browser.cookies");
-        String menuLabel = I18n.format("cfm.browser.menu");
-        int powerW = fontRenderer.getStringWidth(powerLabel) + 8;
-        int itemsW = fontRenderer.getStringWidth(itemsLabel) + 8;
-        int right = sx + sw - 4;
-        ToolButton items = new ToolButton("items", itemsLabel);
-        items.w = itemsW;
-        items.x = right - itemsW;
-        items.y = toolbarY;
-        items.h = tbH;
-        ToolButton power = new ToolButton("power", powerLabel);
-        power.w = powerW;
-        power.x = items.x - 2 - powerW;
-        power.y = toolbarY;
-        power.h = tbH;
-        // 调频旋钮（服主 11-17）：电源开关旁边，写实际频率与 CPU 温度
-        ToolButton clock = new ToolButton("clock", "");
-        clock.w = fontRenderer.getStringWidth("2.60 GHz 100.0 °C") + 18;
-        clock.x = power.x - 2 - clock.w;
-        clock.y = toolbarY;
-        clock.h = tbH;
-        ToolButton cookies = new ToolButton("cookies", cookiesLabel);
-        cookies.w = fontRenderer.getStringWidth(cookiesLabel) + 8;
-        cookies.x = clock.x - 2 - cookies.w;
-        cookies.y = toolbarY;
-        cookies.h = tbH;
-        ToolButton menu = new ToolButton("menu", menuLabel);
-        menu.w = fontRenderer.getStringWidth(menuLabel) + 8;
-        menu.x = cookies.x - 2 - menu.w;
-        menu.y = toolbarY;
-        menu.h = tbH;
-        tools.add(menu);
-        tools.add(cookies);
-        tools.add(clock);
-        tools.add(power);
-        tools.add(items);
         lockX = x + 2;
         lockW = Math.max(14, fontRenderer.getStringWidth(I18n.format("cfm.browser.insecure")) + 6);
         addrX = lockX + lockW + 2;
-        addrW = Math.max(40, menu.x - 3 - addrX);
+        // 右边的按钮（从右往左）：物品、电源、调频旋钮（服主 11-17：电源开关旁边，写实际频率与 CPU 温度）、Cookie、菜单
+        String[][] right = {{"items", I18n.format("cfm.browser.items")}, {"power", I18n.format("cfm.browser.power")}, {"clock", ""},
+                {"cookies", I18n.format("cfm.browser.cookies")}, {"menu", I18n.format("cfm.browser.menu")}};
+        int rightW = 0;
+        int[] widths = new int[right.length];
+        for(int i = 0; i < right.length; i++)
+        {
+            widths[i] = right[i][0].equals("clock") ? fontRenderer.getStringWidth("2.60 GHz 100.0 °C") + 18 : fontRenderer.getStringWidth(right[i][1]) + 8;
+            rightW += widths[i] + (i > 0 ? 2 : 0);
+        }
+        int rightEdge = sx + sw - 4;
+        // 一行放不下（地址栏会比 MIN_ADDRESS_WIDTH 窄、甚至盖住按钮）：右边的按钮放到第二行，地址栏占满第一行
+        toolbarRows = rightEdge - rightW - 3 - addrX < MIN_ADDRESS_WIDTH ? 2 : 1;
+        int rowY = toolbarRows == 2 ? toolbarY + tbH + 2 : toolbarY;
+        int rx = rightEdge;
+        ToolButton leftmost = null;
+        List<ToolButton> rightTools = new ArrayList<>();
+        for(int i = 0; i < right.length; i++)
+        {
+            ToolButton t = new ToolButton(right[i][0], right[i][1]);
+            t.w = widths[i];
+            t.x = rx - t.w;
+            t.y = rowY;
+            t.h = tbH;
+            rx = t.x - 2;
+            rightTools.add(0, t);
+            leftmost = t;
+        }
+        tools.addAll(rightTools);
+        addrW = toolbarRows == 2 ? rightEdge - addrX : Math.max(40, leftmost.x - 3 - addrX);
+
+        vpX = sx + 4;
+        vpY = toolbarY + toolbarRows * (tbH + 2) + 1;
+        vpW = sw - 8 - 5;
+        statusY = sy + sh - 12;
+        vpH = statusY - 2 - vpY;
+        factor = vpW / (double) PageRenderer.VIEW_WIDTH;
+        ScaledResolution sr = new ScaledResolution(mc);
+        deviceScale = Math.max(1.0, Math.min(2.5, factor * sr.getScaleFactor()));
 
         // 物品面板放在右下角（盖在页面上）
         guiLeft = Math.max(0, Math.min(width - xSize, sx + sw - xSize - 6));
@@ -602,6 +599,7 @@ public class GuiBrowser extends GuiContainer
         this.drawDefaultBackground();
         layout();
         hoverText = "";
+        statusOverflow = false;
         // 显示器
         Gui.drawRect(sx, sy, sx + sw, sy + sh, BEZEL);
         boolean on = screenOn();
@@ -617,7 +615,7 @@ public class GuiBrowser extends GuiContainer
         }
         if(on)
         {
-            Gui.drawRect(sx + 2, toolbarY - 2, sx + sw - 2, toolbarY + 16, TOOLBAR);
+            Gui.drawRect(sx + 2, toolbarY - 2, sx + sw - 2, toolbarY + toolbarRows * 16, TOOLBAR);
             Gui.drawRect(vpX, vpY, vpX + vpW + 5, vpY + vpH, 0xFFFFFFFF);
             drawPage(p, mouseX, mouseY);
             if(editor != null && !editorValid())
@@ -658,6 +656,9 @@ public class GuiBrowser extends GuiContainer
             else if(!drawCpuHint(mouseX, mouseY))
                 drawPeripheralHint(mouseX, mouseY);
         }
+        // 状态栏放不下的链接网址、下拉框选项：悬停提示里写全（折行）
+        if(on && statusOverflow && !panel && !homeMenu && cookieMenu == 0 && !info && editor == null)
+            drawHoveringText(fontRenderer.listFormattedStringToWidth(hoverText, Math.max(80, sw / 2)), mouseX, mouseY);
         ToolButton clockTip = clockButton();
         if(clockTip != null && clockTip.visible && clockTip.over(mouseX, mouseY) && !panel && !homeMenu && cookieMenu == 0 && !info)
             drawHoveringText(clockTooltip(), mouseX, mouseY);
@@ -728,7 +729,7 @@ public class GuiBrowser extends GuiContainer
             // 旁观：操作者正在地址栏里打的字（服主 11-14），没有就显示当前页面的网址
             TypingSync.Typed typed = ComputerViews.view(computer.getPos()).typed.get(TypingSync.ADDRESS);
             boolean typing = typed != null && !typed.text.isEmpty() && !typed.text.equals(UrlInput.display(url));
-            String shown = fontRenderer.trimStringToWidth(typing ? typed.text : UrlInput.display(url), addrW - 6);
+            String shown = TextFit.fit(typing ? typed.text : UrlInput.display(url), addrW - 6, fontRenderer::getStringWidth);
             fontRenderer.drawString(shown, addrX + 3, toolbarY + 3, typing ? TEXT : TEXT_DIM);
         }
         if(layout >= 0 && layoutW < addrW - 20)
@@ -834,13 +835,20 @@ public class GuiBrowser extends GuiContainer
         RenderedPage p = page();
         if(left.isEmpty() && p != null && p.truncated())
             left = I18n.format("cfm.browser.truncated", PageRenderer.MAX_HEIGHT);
-        fontRenderer.drawString(fontRenderer.trimStringToWidth(left, sw / 2), sx + 5, statusY + 2, 0xFFBDC1C6);
-        drawRole(mouseX, mouseY);
+        int roleLeft = drawRole(mouseX, mouseY);
+        // 状态栏左边：放到右边“你在操作”等字的左边为止，放不下加省略号；指着的链接、下拉框放不下时另有悬停提示（见 drawScreen）
+        int room = Math.max(0, roleLeft - 8 - (sx + 5));
+        statusOverflow = !hoverText.isEmpty() && left.equals(hoverText) && TextFit.overflows(left, room, fontRenderer::getStringWidth);
+        fontRenderer.drawString(TextFit.fit(left, room, fontRenderer::getStringWidth), sx + 5, statusY + 2, 0xFFBDC1C6);
     }
+
+    /** 状态栏里指着的东西（链接、下拉框的选项）没写全 */
+    private boolean statusOverflow;
 
     private int claimX, claimW;
 
-    private void drawRole(int mouseX, int mouseY)
+    /** @return 角色文字（及“接管”按钮）的左边 */
+    private int drawRole(int mouseX, int mouseY)
     {
         String role;
         claimW = 0;
@@ -861,7 +869,16 @@ public class GuiBrowser extends GuiContainer
             fontRenderer.drawString(claim, claimX + 3, statusY + 2, 0xFFFFFFFF);
             rx = claimX - 4 - fontRenderer.getStringWidth(role);
         }
+        // 操作者名字很长、窗口很窄时：角色文字最多占状态栏的一半
+        int maxRole = Math.max(40, sw / 2);
+        if(fontRenderer.getStringWidth(role) > maxRole)
+        {
+            int right = rx + fontRenderer.getStringWidth(role);
+            role = TextFit.fit(role, maxRole, fontRenderer::getStringWidth);
+            rx = right - fontRenderer.getStringWidth(role);
+        }
         fontRenderer.drawString(role, rx, statusY + 2, 0xFFE8EAED);
+        return rx;
     }
 
     private void drawPage(@Nullable RenderedPage p, int mouseX, int mouseY)
@@ -984,8 +1001,12 @@ public class GuiBrowser extends GuiContainer
                     int sel = forms != null ? forms.selected(c.n) : c.selected;
                     String label = c.optionLabels.isEmpty() ? "" : c.optionLabels.get(Math.min(sel, c.optionLabels.size() - 1));
                     Gui.drawRect(x1 + 1, y1 + 1, x2 - 1, y2 - 1, FIELD);
-                    fontRenderer.drawString(fontRenderer.trimStringToWidth(label, x2 - x1 - 14), x1 + 3, ty, TEXT);
+                    // 选项太长：截断加省略号，指着时状态栏（放不下时悬停提示）里显示全文
+                    fontRenderer.drawString(TextFit.fit(label, x2 - x1 - 14, fontRenderer::getStringWidth), x1 + 3, ty, TEXT);
                     fontRenderer.drawString("▾", x2 - 9, ty, TEXT_DIM);
+                    if(TextFit.overflows(label, x2 - x1 - 14, fontRenderer::getStringWidth) && mouseX >= x1 && mouseX < x2 && mouseY >= y1 && mouseY < y2
+                            && inViewport(mouseX, mouseY))
+                        hoverText = label;
                     break;
                 }
                 default:
