@@ -23,6 +23,7 @@ import java.util.Map;
  * <li>{@link Kind#TEXT_OUT_OF_BOX}：一段字伸出了它所在的盒子（内容区）右边或下边；</li>
  * <li>{@link Kind#BOX_OUT_OF_PARENT}：一个块（表格、按钮、图片、定宽的框……）伸出了父盒子的内容区；</li>
  * <li>{@link Kind#TEXT_OVERLAP}：同一行里一段字画出来盖到了后一段字上（字之间的空格被吃掉，像“Silk TouchI”）；</li>
+ * <li>{@link Kind#TEXT_MEASURE}：排版量的字宽比画出来的宽出一截（后面的字被推开，中间空出一块）；</li>
  * <li>{@link Kind#OUT_OF_PAGE}：字或盒子伸出了页面（宽 {@value PageRenderer#VIEW_WIDTH}）；</li>
  * <li>{@link Kind#CONTROL_HEIGHT}：同一行的按钮、输入框、下拉框高度不一样；</li>
  * <li>{@link Kind#CONTROL_ALIGN}：同一行的按钮、输入框上下没对齐（上边不齐）。</li>
@@ -33,7 +34,7 @@ final class LayoutProbe
 {
     enum Kind
     {
-        TEXT_OUT_OF_BOX, TEXT_OVERLAP, BOX_OUT_OF_PARENT, OUT_OF_PAGE, CONTROL_HEIGHT, CONTROL_ALIGN
+        TEXT_OUT_OF_BOX, TEXT_OVERLAP, TEXT_MEASURE, BOX_OUT_OF_PARENT, OUT_OF_PAGE, CONTROL_HEIGHT, CONTROL_ALIGN
     }
 
     static final class Problem
@@ -66,6 +67,8 @@ final class LayoutProbe
     private final double scale;
     private java.awt.Graphics2D paint;
     private Object fractional;
+    /** 画字时按排版量的字宽摆字（{@link PageRenderer.LayoutMatchedTextRenderer}） */
+    private boolean matched;
 
     LayoutProbe(int pageWidth)
     {
@@ -117,9 +120,8 @@ final class LayoutProbe
             java.lang.reflect.Field sc = Java2DRenderer.class.getDeclaredField("_sharedContext");
             sc.setAccessible(true);
             Object tr = ((com.openhtmltopdf.layout.SharedContext) sc.get(renderer)).getTextRenderer();
-            if(tr instanceof PageRenderer.FractionalTextRenderer)
-                fractional = RenderingHints.VALUE_FRACTIONALMETRICS_ON;
-            else
+            matched = tr instanceof PageRenderer.LayoutMatchedTextRenderer;
+            if(!matched)
             {
                 java.lang.reflect.Field fm = com.openhtmltopdf.java2d.Java2DTextRenderer.class.getDeclaredField("fractionalFontMetricsHint");
                 fm.setAccessible(true);
@@ -231,6 +233,8 @@ final class LayoutProbe
         int x1 = parent.getAbsX() + t.getX();
         // 字实际画出来的宽（按画图的倍数与绘制设置量），比排版量的宽时以画出来的为准
         int drawn = drawnWidth(s.replaceAll("\\s+$", ""), parent);
+        if(drawn > 0 && t.getLetterSpacing() == 0 && t.getWidth() - drawnWidth(s, parent) > Math.max(2, t.getWidth() / 100))
+            problems.add(new Problem(Kind.TEXT_MEASURE, path(cb), "“" + clip(s.trim()) + "”排版量的宽 " + t.getWidth() + "，画出来 " + drawnWidth(s, parent)));
         int x2 = Math.min(x1 + Math.max(t.getWidth(), drawn), clipRight);
         int[] c = content(cb);
         String what = "“" + clip(s.trim()) + "”";
@@ -264,8 +268,18 @@ final class LayoutProbe
         com.openhtmltopdf.render.FSFont fs = parent.getStyle().getFSFont(ctx);
         if(!(fs instanceof com.openhtmltopdf.java2d.Java2DFont))
             return 0;
-        // 内核画字用按字体分段的 AttributedString（TextLayout），这里用同样的办法量
-        java.text.AttributedString as = PageRenderer.FractionalTextRenderer.runs(((com.openhtmltopdf.java2d.Java2DFont) fs).getAWTFonts(), text);
+        java.util.List<java.awt.Font> fonts = ((com.openhtmltopdf.java2d.Java2DFont) fs).getAWTFonts();
+        if(matched)
+            return (int) Math.ceil(PageRenderer.LayoutMatchedTextRenderer.advance(fonts, text) - 1e-3);
+        // 内核自己的绘制器：在放大的图上用按字体分段的 AttributedString（TextLayout）画字，这里用同样的办法量
+        java.text.AttributedString as = new java.text.AttributedString(text);
+        int start = 0;
+        for(Object[] run : PageRenderer.LayoutMatchedTextRenderer.runs(fonts, text))
+        {
+            int end = start + ((String) run[1]).length();
+            as.addAttribute(java.awt.font.TextAttribute.FONT, run[0], start, end);
+            start = end;
+        }
         java.awt.font.TextLayout tl = new java.awt.font.TextLayout(as.getIterator(), paint.getFontRenderContext());
         return (int) Math.ceil(tl.getAdvance());
     }

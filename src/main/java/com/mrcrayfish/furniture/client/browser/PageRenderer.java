@@ -32,6 +32,8 @@ import java.awt.Color;
 import java.awt.Font;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
+import java.awt.font.FontRenderContext;
+import java.awt.font.GlyphVector;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.File;
@@ -280,15 +282,16 @@ public final class PageRenderer
             resolver = r.getFontResolver();
         // 不认识的字体名最后落到这里（内核的兜底是名叫 Serif 的字体）
         resolver.setFontMapping("Serif", baseFont);
-        fractionalMetrics(r);
+        matchLayoutWidths(r);
     }
 
     /**
-     * 内核的文字绘制器（{@link Java2DTextRenderer}）量字宽、画字时都把小数字宽（{@code FRACTIONALMETRICS}）强制关掉：排版在倍数 1 下
-     * 按整数字宽量，画在放大的图上时按放大后的整数字宽画，两边取整不同，长串字画出来比量的宽（全屏时一行长英文多出好几个像素，
-     * 压到格子边框、伸出盒子）。换成 {@link FractionalTextRenderer}：量、画都用小数字宽，量出来的宽向上取整（宁可早一点断行，不会画出界）。
+     * 内核的文字绘制器（{@link Java2DTextRenderer}）排版时在倍数 1 下量字宽（整数字宽），画的时候在放大的图上按放大后的字形重新排字：
+     * 两种大小下字形的取整不一样，长串字画出来比量的宽或窄（全屏时一行长英文多出 2–6 像素，压到格子边框；行内元素后面的空格被
+     * 前面的字盖住，像“Silk TouchI”）。换成 {@link LayoutMatchedTextRenderer}：量字宽照旧（整数字宽，内核按字、按词分段量了
+     * 再加起来也对得上），画字时字形按小数字宽排、整体伸缩到排版量的宽，画出来的宽正好是量的宽乘倍数，字距也匀称。
      */
-    private static void fractionalMetrics(Java2DRenderer r)
+    private static void matchLayoutWidths(Java2DRenderer r)
     {
         if(sharedContextField == null)
             return;
@@ -296,7 +299,7 @@ public final class PageRenderer
         {
             SharedContext ctx = (SharedContext) sharedContextField.get(r);
             if(ctx.getTextRenderer() instanceof Java2DTextRenderer)
-                ctx.setTextRenderer(new FractionalTextRenderer());
+                ctx.setTextRenderer(new LayoutMatchedTextRenderer());
         }
         catch(Exception | LinkageError e)
         {
@@ -304,27 +307,13 @@ public final class PageRenderer
         }
     }
 
-    /** 量字宽、画字都用小数字宽的文字绘制器（见 {@link #fractionalMetrics}）；分段换字体的办法同内核：每个字用字体清单里第一个能显示它的 */
-    static final class FractionalTextRenderer extends Java2DTextRenderer
+    /** 画出来的宽与排版量的宽一致的绘制器（见 {@link #matchLayoutWidths}）；分段换字体的办法同内核 */
+    static final class LayoutMatchedTextRenderer extends Java2DTextRenderer
     {
-        @Override
-        public int getWidth(FontContext fc, FSFont font, String s)
-        {
-            if(s.isEmpty() || !(font instanceof Java2DFont) || !(fc instanceof Java2DFontContext))
-                return super.getWidth(fc, font, s);
-            Graphics2D g = ((Java2DFontContext) fc).getGraphics();
-            Object old = g.getRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS);
-            g.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, RenderingHints.VALUE_FRACTIONALMETRICS_ON);
-            try
-            {
-                java.awt.font.TextLayout tl = new java.awt.font.TextLayout(runs(((Java2DFont) font).getAWTFonts(), s).getIterator(), g.getFontRenderContext());
-                return (int) Math.ceil(tl.getAdvance() - 1e-6);
-            }
-            finally
-            {
-                g.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, old);
-            }
-        }
+        /** 内核量字宽时的字形设置：不缩放、抗锯齿、整数字宽 */
+        static final FontRenderContext LAYOUT_FRC = new FontRenderContext(null, true, false);
+        /** 画字用的字形设置：不缩放、抗锯齿、小数字宽（字距匀称；整体再伸缩到排版量的宽） */
+        static final FontRenderContext DRAW_FRC = new FontRenderContext(null, true, true);
 
         @Override
         public void drawString(OutputDevice od, String s, float x, float y)
@@ -337,24 +326,58 @@ public final class PageRenderer
             Java2DOutputDevice out = (Java2DOutputDevice) od;
             Graphics2D g = out.getGraphics();
             Object aa = g.getRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING);
-            Object fm = g.getRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS);
             g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-            g.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, RenderingHints.VALUE_FRACTIONALMETRICS_ON);
             try
             {
-                g.drawString(runs(out.getFont().getAWTFonts(), s).getIterator(), x, y);
+                List<Font> fonts = out.getFont().getAWTFonts();
+                List<Object[]> runs = runs(fonts, s);
+                // 字形按小数字宽排（字距匀称），整体伸缩到排版量的宽（整数字宽排出来的宽）
+                List<GlyphVector> gvs = new ArrayList<>();
+                float fractional = 0;
+                for(Object[] run : runs)
+                {
+                    GlyphVector gv = ((Font) run[0]).createGlyphVector(DRAW_FRC, (String) run[1]);
+                    gvs.add(gv);
+                    fractional += (float) gv.getGlyphPosition(gv.getNumGlyphs()).getX();
+                }
+                float target = advance(fonts, s);
+                float k = fractional > 0 && target > 0 ? target / fractional : 1;
+                float cx = x;
+                for(GlyphVector gv : gvs)
+                {
+                    int n = gv.getNumGlyphs();
+                    for(int i = 0; i <= n; i++)
+                    {
+                        java.awt.geom.Point2D p = gv.getGlyphPosition(i);
+                        p.setLocation(p.getX() * k, p.getY());
+                        gv.setGlyphPosition(i, p);
+                    }
+                    g.drawGlyphVector(gv, cx, y);
+                    cx += (float) gv.getGlyphPosition(n).getX();
+                }
             }
             finally
             {
                 g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, aa);
-                g.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, fm);
             }
         }
 
-        /** 按字体分段：每个字用清单里第一个能显示它的字体，都不能显示时用第一个 */
-        static java.text.AttributedString runs(List<Font> fonts, String s)
+        /** 按倍数 1、整数字宽排出来的宽（同排版量的；排版检查用） */
+        static float advance(List<Font> fonts, String s)
         {
-            java.text.AttributedString as = new java.text.AttributedString(s);
+            float w = 0;
+            for(Object[] run : runs(fonts, s))
+            {
+                GlyphVector gv = ((Font) run[0]).createGlyphVector(LAYOUT_FRC, (String) run[1]);
+                w += (float) gv.getGlyphPosition(gv.getNumGlyphs()).getX();
+            }
+            return w;
+        }
+
+        /** 按字体分段：每个字用清单里第一个能显示它的字体，都不能显示时用第一个；返回 {字体, 这一段} */
+        static List<Object[]> runs(List<Font> fonts, String s)
+        {
+            List<Object[]> out = new ArrayList<>();
             int start = 0;
             Font current = null;
             for(int i = 0; i < s.length(); )
@@ -371,14 +394,14 @@ public final class PageRenderer
                 }
                 if(current != null && f != current)
                 {
-                    as.addAttribute(java.awt.font.TextAttribute.FONT, current, start, i);
+                    out.add(new Object[]{current, s.substring(start, i)});
                     start = i;
                 }
                 current = f;
                 i += Character.charCount(cp);
             }
-            as.addAttribute(java.awt.font.TextAttribute.FONT, current, start, s.length());
-            return as;
+            out.add(new Object[]{current, s.substring(start)});
+            return out;
         }
     }
 
@@ -439,16 +462,11 @@ public final class PageRenderer
         }
     }
 
-    /**
-     * 画页面用的绘制设置，排版量字宽时也用同一套（{@link #layoutGraphics()}）。字宽用小数（{@code FRACTIONALMETRICS}）：
-     * 内核在倍数 1 下量字宽、在放大的图上画字，按整数取整的字宽在两种大小下取得不一样，长串字画出来会比量的宽，
-     * 压到格子边框、伸出盒子（全屏时一行长英文能多出好几个像素）；用小数字宽后画出来的宽正好是量的宽乘倍数。
-     */
+    /** 画页面用的绘制设置，排版量字宽的画布也用同一套（{@link #layoutGraphics()}；字怎么摆见 {@link LayoutMatchedTextRenderer}） */
     static void paintHints(Graphics2D g)
     {
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-        g.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, RenderingHints.VALUE_FRACTIONALMETRICS_ON);
         g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
     }
 
