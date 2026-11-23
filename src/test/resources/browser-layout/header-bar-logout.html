@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><head><title>深色标题栏里的退出按钮</title>
+<style type="text/css">
+body { margin: 0; font-size: 12px; }
+div.top { background: #1f3f6e; border-bottom: 3px solid #f0a020; padding: 4px 10px; color: #ffffff; }
+div.top table { width: 100%; border-collapse: collapse; }
+span.logo { font-size: 18px; font-weight: bold; }
+td.who { text-align: right; color: #c9d6ea; font-size: 12px; }
+td.who a { color: #ffffff; }
+div.bar input { color: #18489a; font-size: 11px; padding: 0 4px; }
+</style></head><body>
+<div class="top"><table><tr><td><span class="logo">pay.yr</span></td><td class="who">已登录：<b>abcdefghijklmnop</b> | <a href="/account">我的账户</a><form method="post" action="/logout" style="display: inline"><div style="display: inline"><input type="hidden" name="csrf" value="x" /> <input type="submit" value="退出" /></div></form> | <a href="/help">帮助</a></td></tr></table></div>
+<div class="bar"><form method="post" action="/logout"><div><input type="submit" value="退出" /></div></form></div>
+</body></html>

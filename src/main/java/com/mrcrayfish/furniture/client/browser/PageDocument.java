@@ -312,18 +312,30 @@ public final class PageDocument
         return (l == null ? n.getNodeName() : l).toLowerCase(Locale.ROOT);
     }
 
-    /** 注入的默认样式（网站的样式写在后面，能覆盖） */
+    /**
+     * 注入的默认样式（网站的样式写在后面，能覆盖）：
+     * <ul>
+     * <li>长单词、长网址到了行尾就断开（{@code word-wrap: break-word}），{@code <pre>} 也自动换行，
+     * 不会伸出盒子、伸出页面（页面没有横向滚动）；中文本来就按字断。表格里默认不断（内核算列宽时把能断的词当成一个字宽，
+     * 短词也会被挤断），表格被长词撑宽时由排版修正只让有长词的格子断；</li>
+     * <li>输入框、按钮竖直居中对齐（同一行的一样高由排版修正保证，见 {@link LayoutFixes}）；
+     * 按钮的字用黑色（同真浏览器，不随外面的颜色变：深色标题栏里的“退出”按钮不再看不见）；</li>
+     * <li>图片最宽是所在盒子的宽（宽高一起缩，见 {@link PageRenderer} 的排版修正）。</li>
+     * </ul>
+     */
     static String userAgentCss()
     {
-        return "html { font-family: 'YR Sans', sans-serif; font-size: 14px; background: #fff; color: #000; }\n"
+        return "html { font-family: 'YR Sans', sans-serif; font-size: 14px; background: #fff; color: #000; word-wrap: break-word; }\n"
                 + "body { margin: 8px; }\n"
                 + "a { color: #0645ad; text-decoration: underline; }\n"
+                + "pre { white-space: pre-wrap; }\n"
+                + "table { word-wrap: normal; }\n"
                 + "input, textarea, select { display: inline-block; width: 160px; height: 18px; padding: 2px 3px; border: 1px solid #767676; background: #fff; vertical-align: middle; }\n"
                 + "textarea { height: 18px; }\n"
                 + "select { width: 120px; }\n"
-                + "input[type=\"checkbox\"], input[type=\"radio\"] { width: 13px; height: 13px; padding: 0; margin: 0; }\n"
+                + "input[type=\"checkbox\"], input[type=\"radio\"] { width: 13px; height: 13px; padding: 0; margin: 0 3px 0 4px; }\n"
                 + "input[type=\"hidden\"] { display: none; }\n"
-                + "button { display: inline-block; padding: 2px 8px; border: 1px solid #767676; background: #efefef; vertical-align: middle; }\n"
+                + "button { display: inline-block; height: auto; padding: 2px 8px; border: 1px solid #767676; background: #efefef; color: #000; vertical-align: middle; text-align: center; text-decoration: none; }\n"
                 + "script, style, head, title { display: none; }\n";
     }
 
@@ -363,6 +375,7 @@ public final class PageDocument
             if(title.length() > 200)
                 title = title.substring(0, 200);
             walk(root);
+            adaptSiteStyles(root);
             injectStyles(root);
             return new PageDocument(dom, baseUrl, title, forms, controls, links, items, new ArrayList<>(images), refresh);
         }
@@ -394,6 +407,7 @@ public final class PageDocument
                 // 位置字段、画板的标记只由浏览器自己加（页面自己写的不算）
                 c.removeAttribute(LOCATION_ATTR);
                 c.removeAttribute(CANVAS_ATTR);
+                c.removeAttribute(InputSelectors.ATTR);
                 Element locationLabel = null;
                 if(tag.equals("input"))
                 {
@@ -482,6 +496,8 @@ public final class PageDocument
                     b.setAttribute(a.getNodeName(), a.getNodeValue());
             }
             b.setAttribute("type", type.equals("image") ? "submit" : type);
+            // 网站写给 input 的样式（input.go 之类）照样管这个按钮，见 InputSelectors
+            b.setAttribute(InputSelectors.ATTR, type);
             String label = input.getAttribute("value");
             if(label.isEmpty())
                 label = type.equals("reset") ? "重置" : "提交";
@@ -656,6 +672,20 @@ public final class PageDocument
             }
             controls.add(new Control(n, kind, e.getAttribute("name"), value, e.hasAttribute("checked"), values, labels, selected, form, maxLength,
                     e.hasAttribute("disabled"), kind == Kind.HIDDEN && e.hasAttribute(LOCATION_ATTR), cw, ch));
+        }
+
+        /** 网站的样式表：写给 input 的规则也用到改写出来的按钮上（{@link InputSelectors}） */
+        private void adaptSiteStyles(Element root)
+        {
+            NodeList styles = root.getElementsByTagNameNS("*", "style");
+            for(int i = 0; i < styles.getLength(); i++)
+            {
+                Element st = (Element) styles.item(i);
+                String css = st.getTextContent();
+                String adapted = InputSelectors.adapt(css);
+                if(adapted != null && !adapted.equals(css))
+                    st.setTextContent(adapted);
+            }
         }
 
         private void injectStyles(Element root)

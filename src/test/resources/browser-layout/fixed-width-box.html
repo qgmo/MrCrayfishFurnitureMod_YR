@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="zh-CN"><head><title>定宽的框比页面宽</title>
+<style type="text/css">
+body { margin: 0; padding: 32px 16px; background: #eef2f6; font-family: sans-serif; }
+div.box { width: 440px; margin: 0 auto; padding: 16px 20px; background: #ffffff; border: 1px solid #c9d3de; }
+p { font-size: 14px; line-height: 1.5; }
+td { padding: 2px 6px; vertical-align: top; font-size: 13px; }
+</style></head><body>
+<div class="box" style="width: 600px"><h1>接口说明</h1>
+<p>把浏览器跳到 <code>https://id.yr/authorize?response_type=code&amp;client_id=https%3A%2F%2Fshop.yr%2F&amp;redirect_uri=https%3A%2F%2Fshop.yr%2Fcallback&amp;state=abcdefghijklmnopqrstuvwxyz</code>，成功时跳回。</p>
+<table>
+<tr><td><code>confirm</code></td><td>弹窗确认：谁坐在电脑前就问谁，只告诉你同意了没有，不告诉是谁。</td></tr>
+<tr><td><code>verify</code></td><td>验证身份：只有坐在电脑前的正是登录的这个角色本人并同意才算通过；不是本人和拒绝对你一样。</td></tr>
+<tr><td>redirect_uri</td><td>https://averyveryverylongdomainnamewithoutanybreaks.yr/callback/with/a/very/long/path</td></tr>
+</table>
+</div>
+<div class="box"><p>第二个框（宽 440，放得下）。</p></div>
+</body></html>

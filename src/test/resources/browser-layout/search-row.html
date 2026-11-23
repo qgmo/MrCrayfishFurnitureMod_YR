@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><head><title>搜索框与按钮</title>
+<style type="text/css">
+body { font-size: 12px; }
+input.q { width: 250px; height: 20px; border: 2px solid #18489a; }
+input.go { padding: 3px 10px; background: #18489a; border: 1px solid #0f3270; color: #ffffff; font-weight: bold; }
+input[type="submit"].big { font-size: 18px; }
+select.small { font-size: 10px; height: 14px; }
+button.tall { height: 40px; }
+</style></head><body>
+<form method="get" action="/s"><div><input class="q" type="text" name="q" maxlength="40" value="" /> <input class="go" type="submit" value="搜索" /></div></form>
+<form method="get" action="/s"><div><select class="small" name="c"><option>全部</option><option>购物</option></select> <input type="text" name="q2" style="width: 100px" /> <input type="submit" class="big" value="大按钮" /> <button type="submit" name="b">按钮</button> <input type="password" name="p" style="width: 60px" /></div></form>
+<p><button class="tall" type="button">写了高度的按钮</button></p>
+</body></html>

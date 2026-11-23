@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><head><title>表单表格</title>
+<style type="text/css">
+body { font-size: 12px; }
+table.form { border-collapse: collapse; margin-bottom: 8px; }
+table.form th { text-align: right; font-weight: normal; padding: 4px 6px 4px 0; vertical-align: top; width: 70px; }
+table.form td { padding: 4px 0; vertical-align: top; }
+input.go2 { padding: 3px 10px; background: #ee801c; border: 1px solid #b85f10; color: #ffffff; font-weight: bold; }
+</style></head><body>
+<form method="post" action="/buy"><div><input type="hidden" name="csrf" value="x" /></div>
+<table class="form">
+<tr><th>天数</th><td><input type="text" name="days" maxlength="3" style="width: 40px;" value="1" /> <span>1–10</span></td></tr>
+<tr><th>链接</th><td><input type="text" name="link" style="width: 300px;" value="http://averyveryverylongdomainnamewithoutanybreaks.yr/" /></td></tr>
+<tr><th>文字</th><td><input type="text" name="text" style="width: 200px;" value="" /> <span>最多 20 字</span></td></tr>
+<tr><th>宽框</th><td><input type="text" name="wide" style="width: 700px;" value="" /></td></tr>
+<tr><th>选项</th><td><input type="radio" name="r" value="a" checked="checked" /> 不用 <input type="radio" name="r" value="b" /> 全用上 <input type="checkbox" name="c" /> 记住</td></tr>
+<tr><th></th><td><input class="go2" type="submit" value="去付款" /> <input type="reset" value="重填" /></td></tr>
+</table></form>
+</body></html>

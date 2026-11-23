@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><head><title>代码块与长文字</title>
+<style type="text/css">
+pre { background: #f2f5f8; border: 1px solid #d5dde6; padding: 6px; font-size: 12px; }
+p.err { background: #fbeaea; border: 1px solid #e3a5a5; padding: 6px 8px; }
+</style></head><body>
+<pre>OrderInfo o = PayApi.createOrder(new OrderRequest().receiver(AccountRef.virtual("minebay")).price(Amount.yuan(12)).description("附魔钻石剑"));
+PayApi.addListener(AccountRef.virtual("minebay"), new PayListener() { public void onPaid(OrderInfo o) { deliver(o); } });</pre>
+<p class="err">网站 averyveryverylongdomainnamewithoutanybreaks.yr 给的回调网址不对：https://averyveryverylongdomainnamewithoutanybreaks.yr/callback?order=ord_abcdefghijkmnpqr&amp;status=paid</p>
+<p>Supercalifragilisticexpialidocious_Enchanted_Diamond_Sword_of_Doom_Supercalifragilisticexpialidocious_Enchanted_Diamond_Sword</p>
+<p>中文长句中文长句中文长句中文长句中文长句中文长句中文长句中文长句中文长句中文长句中文长句中文长句中文长句中文长句中文长句中文长句</p>
+<ul><li><a href="https://averyveryverylongdomainnamewithoutanybreaks.yr/a/very/long/link/text/without/spaces">https://averyveryverylongdomainnamewithoutanybreaks.yr/a/very/long/link/text/without/spaces</a></li></ul>
+</body></html>

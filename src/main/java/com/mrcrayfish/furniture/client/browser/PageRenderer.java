@@ -3,6 +3,7 @@ package com.mrcrayfish.furniture.client.browser;
 import com.mrcrayfish.furniture.computer.UrlInput;
 import com.openhtmltopdf.extend.FSStream;
 import com.openhtmltopdf.css.constants.IdentValue;
+import com.openhtmltopdf.css.style.CssContext;
 import com.openhtmltopdf.java2d.Java2DFont;
 import com.openhtmltopdf.java2d.Java2DFontResolver;
 import com.openhtmltopdf.java2d.Java2DRenderer;
@@ -19,6 +20,8 @@ import com.openhtmltopdf.render.Box;
 import com.openhtmltopdf.render.InlineLayoutBox;
 import com.openhtmltopdf.util.XRLog;
 import org.w3c.dom.Element;
+
+import javax.annotation.Nullable;
 
 import java.awt.Color;
 import java.awt.Font;
@@ -60,6 +63,8 @@ public final class PageRenderer
     private static Font baseFont;
     private static Field rootField;
     private static Field sharedContextField;
+    @Nullable
+    private static java.lang.reflect.Method newLayoutContext;
 
     private PageRenderer() {}
 
@@ -85,6 +90,16 @@ public final class PageRenderer
             {
                 // 内核版本不同：没有系统字体兜底，照样能用
                 sharedContextField = null;
+            }
+            try
+            {
+                newLayoutContext = Java2DRenderer.class.getDeclaredMethod("newLayoutContext");
+                newLayoutContext.setAccessible(true);
+            }
+            catch(Exception e)
+            {
+                // 内核版本不同：不做排版修正，照样能用
+                newLayoutContext = null;
             }
         }
         catch(Exception e)
@@ -119,9 +134,79 @@ public final class PageRenderer
      */
     public static RenderedPage render(PageDocument doc, Map<String, byte[]> images, double scale) throws IOException
     {
+        return render(doc, images, scale, null);
+    }
+
+    /** 排版之后、画之前看一眼盒子树（单元测试里的排版检查用） */
+    interface Inspector
+    {
+        void inspect(Java2DRenderer renderer, BlockBox root) throws IOException;
+    }
+
+    static RenderedPage render(PageDocument doc, Map<String, byte[]> images, double scale, @Nullable Inspector inspector) throws IOException
+    {
+        return render(doc, images, scale, inspector, FIX_PASSES);
+    }
+
+    /** @param fixPasses 排版修正最多再排几遍（0 为不修，测试里看内核原样的排版用） */
+    static RenderedPage render(PageDocument doc, Map<String, byte[]> images, double scale, @Nullable Inspector inspector, int fixPasses) throws IOException
+    {
         init();
         double s = Math.max(1.0, Math.min(3.0, scale));
-        CappedProcessor processor = new CappedProcessor(s);
+        for(int pass = 0; ; pass++)
+        {
+            CappedProcessor processor = new CappedProcessor(s);
+            try(Java2DRenderer r = builder(doc, images, processor).buildJava2DRenderer())
+            {
+                installFallbackFonts(r);
+                r.layout();
+                BlockBox root;
+                try
+                {
+                    root = (BlockBox) rootField.get(r);
+                }
+                catch(IllegalAccessException e)
+                {
+                    throw new IOException(e);
+                }
+                // 排版修正（LayoutFixes）：改了样式就重新排一遍，最多 FIX_PASSES 遍
+                if(pass < fixPasses && fix(r, root))
+                    continue;
+                int full = root.getHeight();
+                if(inspector != null)
+                    inspector.inspect(r, root);
+                r.writeSinglePage();
+                if(processor.image == null)
+                    throw new IOException("没有画出页面");
+                Map<Integer, List<RenderedPage.Rect>> regions = new HashMap<>();
+                collect(root, regions, 0);
+                int h = Math.min(full, MAX_HEIGHT);
+                return new RenderedPage(doc, processor.image, s, VIEW_WIDTH, Math.max(1, h), full, regions);
+            }
+        }
+    }
+
+    /** 排版修正最多再排几遍（每遍只会修得更少；一般一遍就够，嵌套的定宽盒子要两遍） */
+    static final int FIX_PASSES = 3;
+
+    /** 找出排版毛病、改样式（{@link LayoutFixes}）；拿不到内核的排版上下文时不修 */
+    private static boolean fix(Java2DRenderer r, BlockBox root)
+    {
+        if(newLayoutContext == null)
+            return false;
+        try
+        {
+            CssContext ctx = (CssContext) newLayoutContext.invoke(r);
+            return LayoutFixes.apply(root, ctx, VIEW_WIDTH);
+        }
+        catch(ReflectiveOperationException | RuntimeException e)
+        {
+            return false;
+        }
+    }
+
+    private static Java2DRendererBuilder builder(PageDocument doc, Map<String, byte[]> images, CappedProcessor processor)
+    {
         Java2DRendererBuilder b = new Java2DRendererBuilder();
         b.withW3cDocument(doc.dom, doc.baseUrl.startsWith("http") ? doc.baseUrl : "http://localhost/");
         for(String family : FONT_ALIASES)
@@ -155,28 +240,7 @@ public final class PageRenderer
                 ExternalResourceControlPriority.RUN_AFTER_RESOLVING_URI);
         b.useExternalResourceAccessControl((uri, type) -> type == ExternalResourceType.IMAGE_RASTER, ExternalResourceControlPriority.RUN_BEFORE_RESOLVING_URI);
         b.withDiagnosticConsumer(d -> { });
-        try(Java2DRenderer r = b.buildJava2DRenderer())
-        {
-            installFallbackFonts(r);
-            r.layout();
-            BlockBox root;
-            try
-            {
-                root = (BlockBox) rootField.get(r);
-            }
-            catch(IllegalAccessException e)
-            {
-                throw new IOException(e);
-            }
-            int full = root.getHeight();
-            r.writeSinglePage();
-            if(processor.image == null)
-                throw new IOException("没有画出页面");
-            Map<Integer, List<RenderedPage.Rect>> regions = new HashMap<>();
-            collect(root, regions, 0);
-            int h = Math.min(full, MAX_HEIGHT);
-            return new RenderedPage(doc, processor.image, s, VIEW_WIDTH, Math.max(1, h), full, regions);
-        }
+        return b;
     }
 
     /**
