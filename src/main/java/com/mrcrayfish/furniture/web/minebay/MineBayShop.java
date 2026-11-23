@@ -121,7 +121,7 @@ public final class MineBayShop
         {
             OrderInfo pi = PayApi.order(prev.payId);
             if(pi != null && pi.status == OrderInfo.Status.PAYING)
-                return Opened.fail("上一张单正在 pay.yr 付款，付完或取消后再下新的。");
+                return Opened.fail("上一张订单还在 pay.yr 等付款，付完或取消后再下新的。");
             if(pi != null && pi.status == OrderInfo.Status.PAID)
                 paid(server, data, prev);
             else
@@ -171,7 +171,7 @@ public final class MineBayShop
         catch(PayException e)
         {
             MrCrayfishFurnitureMod.logger().warn("MineBay: pay.yr refused order {} of {}: {} {}", no, buyerName, e.code, e.getMessage());
-            return Opened.fail("pay.yr 开不了单：" + e.getMessage());
+            return Opened.fail("pay.yr 没能发起付款：" + e.getMessage());
         }
         List<Orders.Item> items = new ArrayList<>();
         List<PayOrders.Line> lines = new ArrayList<>();

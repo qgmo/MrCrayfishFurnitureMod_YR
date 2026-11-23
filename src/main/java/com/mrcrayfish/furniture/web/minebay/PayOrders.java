@@ -124,7 +124,7 @@ public final class PayOrders
     public void add(Entry e)
     {
         if(isFull())
-            throw new IllegalStateException("MineBay 未完成的收款单太多了");
+            throw new IllegalStateException("MineBay 未完成的账单太多了");
         byPay.put(e.payId, e);
     }
 

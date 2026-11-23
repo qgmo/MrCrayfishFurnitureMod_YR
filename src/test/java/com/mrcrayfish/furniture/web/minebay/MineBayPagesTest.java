@@ -256,8 +256,8 @@ class MineBayPagesTest
         check(w);
         assertTrue(w.contains("http-equiv=\"refresh\" content=\"2\""));
         assertTrue(w.contains("/verified?g=g_abc"));
-        assertTrue(MineBayPages.help(VIEWER).contains("操作前必须验证身份"));
-        assertTrue(MineBayPages.help(VIEWER).contains("href=\"/account\""), "登录了顶栏有帐号设置");
+        assertTrue(MineBayPages.help(VIEWER).contains("操作前验证身份"));
+        assertTrue(MineBayPages.help(VIEWER).contains("href=\"/account\""), "登录了顶栏有账号设置");
         assertFalse(MineBayPages.help(new MineBayPages.Viewer(null, 0, "t")).contains("href=\"/account\""));
     }
 
@@ -317,6 +317,6 @@ class MineBayPagesTest
         String anon = MineBayPages.support(MineBayPages.Viewer.anonymous("t"), true, Collections.<SupportChat.Message>emptyList(), false, null, "", 20, false);
         check(anon);
         assertTrue(anon.contains("登录后才能联系客服"));
-        assertTrue(MineBayPages.support(VIEWER, true, Collections.<SupportChat.Message>emptyList(), false, null, "", 20, false).contains("请问有什么可以帮您"));
+        assertTrue(MineBayPages.support(VIEWER, true, Collections.<SupportChat.Message>emptyList(), false, null, "", 20, false).contains("想问什么，直接说"));
     }
 }

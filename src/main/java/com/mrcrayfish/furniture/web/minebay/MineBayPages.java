@@ -161,8 +161,8 @@ public final class MineBayPages
             sb.append("</div>\n");
         if(home && p == 1)
         {
-            sb.append("<div class=\"banner\"><div class=\"bt\">欢迎来到 MineBay！</div>");
-            sb.append("<table class=\"perks\"><tr><td><b>pay.yr 付款</b><br/>绿宝石、悠然元都收</td><td><b>购物车随存档</b><br/>换电脑也还在</td><td><b>付款即发货</b><br/>直接进背包</td></tr></table></div>\n");
+            sb.append("<div class=\"banner\"><div class=\"bt\">欢迎来到 MineBay</div>");
+            sb.append("<table class=\"perks\"><tr><td><b>pay.yr 付款</b><br/>绿宝石、悠然元都收</td><td><b>购物车不会丢</b><br/>换电脑也还在</td><td><b>付款就发货</b><br/>直接进背包</td></tr></table></div>\n");
         }
         if(!query.isEmpty() && !shown.isEmpty() && category == null)
         {
@@ -612,14 +612,14 @@ public final class MineBayPages
         sb.append("<li>付款后东西放进背包，满了掉在脚边。</li>");
         sb.append("</ol></div></div>\n");
         sb.append("<div class=\"box\"><div class=\"boxh\">要知道的</div><div class=\"boxb\"><ul>");
-        sb.append("<li>买东西、收货的是登录的角色：他要在线、在电脑 8 格内。电脑要装定位模块。</li>");
+        sb.append("<li>付款和收货的都是登录的角色：要在线，并且在电脑 8 格以内。电脑要装定位模块。</li>");
         sb.append("<li>绿宝石价可以用悠然元付（1 绿宝石 = 2 元），也可以用 pay.yr 余额。</li>");
         sb.append("<li>限量商品全服共用库存，卖完要等补货。</li>");
-        sb.append("<li>登录跟着电脑走，用完请退出。购物车、订单存在服务器上，换电脑也还在。</li>");
+        sb.append("<li>登录是记在电脑上的，用完请退出。购物车、订单存在服务器上，换电脑也还在。</li>");
         sb.append("</ul></div></div>\n");
-        sb.append("<div class=\"box\"><div class=\"boxh\">操作前必须验证身份</div><div class=\"boxb\"><ul>");
-        sb.append("<li>默认关闭：坐在登录着的电脑前的人就能下单（扣登录的帐号的钱）。</li>");
-        sb.append("<li>在“帐号设置”里打开后，下单前游戏会弹出 id.yr 的确认框“确认你是 X”，只有你本人同意才下单；别人同意了也不算，购物车不会丢。</li>");
+        sb.append("<div class=\"box\"><div class=\"boxh\">操作前验证身份</div><div class=\"boxb\"><ul>");
+        sb.append("<li>默认关闭：坐在登录着的电脑前的人就能下单（扣的是登录的账号的钱）。</li>");
+        sb.append("<li>在“账号设置”里打开后，下单前游戏会弹出 id.yr 的确认框“确认你是 X”，只有你本人同意才下单；别人同意了也不算，购物车不会丢。</li>");
         sb.append("<li>打开时 id.yr 弹框问是否允许 MineBay 验证身份，同意就打开；关闭要你本人验证身份。重新登录以后第一次下单会先问一次是否允许。</li>");
         sb.append("<li>没通过时点“重新验证”再弹一次框；框没弹出来时，点 id.yr 页面上的“点这里重新弹出”。</li>");
         sb.append("</ul></div></div>\n");
@@ -631,12 +631,12 @@ public final class MineBayPages
     public static String account(Viewer v, boolean verifyOn, @Nullable Notice notice)
     {
         StringBuilder sb = new StringBuilder(4 * 1024);
-        begin(sb, "帐号设置 - MineBay", v, "", null);
-        sb.append("<div class=\"crumbs\"><a href=\"/\">MineBay</a> &#8250; <b>帐号设置</b></div>\n<h2>帐号设置</h2>\n");
+        begin(sb, "账号设置 - MineBay", v, "", null);
+        sb.append("<div class=\"crumbs\"><a href=\"/\">MineBay</a> &#8250; <b>账号设置</b></div>\n<h2>账号设置</h2>\n");
         notice(sb, notice);
         sb.append("<div class=\"box\"><div class=\"boxh\">安全</div><div class=\"boxb\">");
         sb.append("<form method=\"post\" action=\"/account/security\"><input type=\"hidden\" name=\"t\" value=\"").append(attr(v.token))
-                .append("\"/><input type=\"hidden\" name=\"verify\" value=\"").append(verifyOn ? "0" : "1").append("\"/>操作前必须验证身份：<b>")
+                .append("\"/><input type=\"hidden\" name=\"verify\" value=\"").append(verifyOn ? "0" : "1").append("\"/>操作前验证身份：<b>")
                 .append(verifyOn ? "已打开" : "已关闭").append("</b> <button type=\"submit\" class=\"btn\">").append(verifyOn ? "关闭" : "打开").append("</button></form>");
         sb.append("<div class=\"dim small\">打开后，下单前要 ").append(Html.escape(v.player == null ? "" : v.player))
                 .append(" 本人在确认框里确认。<a href=\"/help\">说明</a></div>");
@@ -650,7 +650,7 @@ public final class MineBayPages
     {
         StringBuilder sb = new StringBuilder(2 * 1024);
         begin(sb, "验证身份 - MineBay", v, "", null, 2);
-        sb.append("<div class=\"empty\"><b>等验证结果</b><br/>要在游戏弹出的确认框里验证身份。<br/><a href=\"/verified?g=").append(attr(gate))
+        sb.append("<div class=\"empty\"><b>等你确认</b><br/>请在游戏弹出的确认框里验证身份。<br/><a href=\"/verified?g=").append(attr(gate))
                 .append("\">刷新</a></div>\n");
         end(sb);
         return sb.toString();
@@ -683,7 +683,7 @@ public final class MineBayPages
         notice(sb, notice);
         if(v.player == null)
         {
-            sb.append("<div class=\"empty\">登录后才能联系客服（对话记录跟着帐号走）。");
+            sb.append("<div class=\"empty\">登录后才能联系客服（聊天记录存在你的账号下）。");
             if(v.loginAvailable)
                 sb.append("<form method=\"get\" action=\"/login\"><input type=\"hidden\" name=\"next\" value=\"/support\"/><button type=\"submit\" class=\"btn buy big\">用游戏角色登录</button></form>");
             sb.append("</div>\n</div></body></html>\n");
@@ -694,7 +694,7 @@ public final class MineBayPages
         if(from > 0)
             sb.append("<div class=\"kfmore\"><a href=\"/support?all=1\">显示全部记录（").append(messages.size()).append(" 条）</a></div>\n");
         if(messages.isEmpty())
-            agent(sb, "亲，您好！我是 MineBay 在线客服" + SupportPrompt.AGENT_NAME + "，请问有什么可以帮您？", -1);
+            agent(sb, "你好，我是 MineBay 的客服" + SupportPrompt.AGENT_NAME + "。想问什么，直接说。", -1);
         for(int i = from; i < messages.size(); i++)
         {
             SupportChat.Message m = messages.get(i);
@@ -887,12 +887,12 @@ public final class MineBayPages
         // 顶栏用表格分左右（浏览器内核里浮动的元素点不了，原来右边的“我的订单”“帮助”点不了）
         sb.append("<table id=\"topbar\"><tr><td>");
         if(v.player != null)
-            sb.append("你好，<b>").append(Html.escape(v.player)).append("</b> <a href=\"/account\">帐号设置</a> <form method=\"post\" action=\"/logout\" class=\"inl\"><input type=\"hidden\" name=\"t\" value=\"")
+            sb.append("你好，<b>").append(Html.escape(v.player)).append("</b> <a href=\"/account\">账号设置</a> <form method=\"post\" action=\"/logout\" class=\"inl\"><input type=\"hidden\" name=\"t\" value=\"")
                     .append(attr(v.token)).append("\"/><button type=\"submit\" class=\"lnk\">退出</button></form>");
         else if(v.loginAvailable)
-            sb.append("你好！<a href=\"/login\">请登录</a>");
+            sb.append("你好，<a href=\"/login\">请登录</a>");
         else
-            sb.append("你好！");
+            sb.append("你好");
         sb.append("</td><td class=\"links\"><a href=\"/orders\">我的订单</a> <span class=\"sep\">|</span> <a href=\"/help\">帮助</a> <span class=\"sep\">|</span> <a href=\"/support\" class=\"kf\">联系客服</a></td></tr></table>\n");
         sb.append("<table id=\"head\"><tr><td class=\"logo\"><a href=\"/\" class=\"logo\"><span class=\"l1\">M</span><span class=\"l2\">i</span><span class=\"l3\">n</span><span class=\"l4\">e</span>")
                 .append("<span class=\"l5\">B</span><span class=\"l6\">a</span><span class=\"l7\">y</span></a><div class=\"tag\">方块世界的网上商城</div></td>");
@@ -913,7 +913,7 @@ public final class MineBayPages
     private static void end(StringBuilder sb)
     {
         sb.append("</div>\n<div id=\"foot\"><div><a href=\"/\">首页</a> <span class=\"sep\">|</span> <a href=\"/cart\">购物车</a> <span class=\"sep\">|</span> <a href=\"/orders\">我的订单</a> <span class=\"sep\">|</span> <a href=\"/help\">帮助</a> <span class=\"sep\">|</span> <a href=\"/support\">联系客服</a></div>");
-        sb.append("<div class=\"dim\">MineBay 是悠然服务器内网上的商城（原是 MrCrayfish 家具模组电脑里的商店）。价格以结算时为准。</div></div>\n");
+        sb.append("<div class=\"dim\">MineBay 是悠然服务器游戏内的网上商城（原是家具模组电脑里的商店）。价格以结算时为准。</div></div>\n");
         sb.append("</body></html>\n");
     }
 

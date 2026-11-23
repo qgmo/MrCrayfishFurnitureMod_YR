@@ -99,7 +99,7 @@ class SupportTest
         assertEquals(SupportChat.Role.AGENT, m.get(1).role);
         assertEquals("亲，您好！", m.get(1).text);
         assertFalse(Support.waiting(ALICE, T0 + 1));
-        assertTrue(d.chat(BOB).messages().isEmpty(), "对话按帐号分开");
+        assertTrue(d.chat(BOB).messages().isEmpty(), "对话按账号分开");
         // 请求体：系统提示在前、问题在后；关思考；密钥不在请求体里
         String body = transport.bodies.get(0);
         assertTrue(body.contains("\"role\":\"system\",\"content\":\"SYS\""), body);
@@ -405,7 +405,7 @@ class SupportTest
     {
         SupportData d = new SupportData(SupportData.NAME);
         for(int i = 0; i < 10; i++)
-            assertNotNull(d.addTicket(ALICE, "Alice", "t" + i, T0), "每个帐号不单独限条数");
+            assertNotNull(d.addTicket(ALICE, "Alice", "t" + i, T0), "每个账号不单独限条数");
         assertEquals(10, d.openTickets(ALICE));
         for(int i = 10; i < SupportData.MAX_TICKETS; i++)
             assertNotNull(d.addTicket(BOB, "Bob", "b" + i, T0));

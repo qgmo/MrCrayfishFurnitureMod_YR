@@ -229,7 +229,7 @@ public final class Support
         int total = orders.size();
         if(open != null)
         {
-            rows.add(row(open.number, open.created, open.items, "待付款（收款单还没付，" + MineBayPages.TIME.format(java.time.Instant.ofEpochMilli(open.expires)) + " 前有效）"));
+            rows.add(row(open.number, open.created, open.items, "待付款（还没付，" + MineBayPages.TIME.format(java.time.Instant.ofEpochMilli(open.expires)) + " 前有效）"));
             total++;
         }
         Map<Long, Boolean> undelivered = new HashMap<>();

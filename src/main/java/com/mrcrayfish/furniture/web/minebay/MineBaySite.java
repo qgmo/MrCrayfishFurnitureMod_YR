@@ -478,21 +478,21 @@ public final class MineBaySite implements WebHandler
         if(l == null || now - l.created > LOGIN_TTL_MS)
             return done(page(400, "Bad Request", MineBayPages.problem(anon, "登录失败", "这次登录过期了，请重新登录。")));
         if(!l.source.equals(r.remoteAddress))
-            return done(page(403, "Forbidden", MineBayPages.problem(anon, "登录失败", "要在发起登录的那台电脑上完成。")));
+            return done(page(403, "Forbidden", MineBayPages.problem(anon, "登录失败", "登录要在点“登录”的那台电脑上完成。")));
         if(!IdLogin.issuerOk(q.get("iss")))
-            return done(page(400, "Bad Request", MineBayPages.problem(anon, "登录失败", "登录服务对不上。")));
+            return done(page(400, "Bad Request", MineBayPages.problem(anon, "登录失败", "登录结果不是 id.yr 给的，没有登录。请重新登录。")));
         if(q.get("error") != null)
             return done(page(400, "Bad Request", MineBayPages.problem(anon, "登录失败", IdLogin.errorText(q.get("error"), q.get("error_description")))));
         String code = q.get("code");
         NetStack stack = context.stack();
         if(code == null || code.isEmpty() || stack == null)
-            return done(page(400, "Bad Request", MineBayPages.problem(anon, "登录失败", "登录服务没给授权码。")));
+            return done(page(400, "Bad Request", MineBayPages.problem(anon, "登录失败", "登录没有完成，请重新登录。")));
         return IdLogin.exchange(stack, context.hasTls(), l.scheme, code, l.verifier).handle((t, e) ->
         {
             if(t == null)
             {
                 MrCrayfishFurnitureMod.logger().warn("MineBay: id.yr exchange failed: {}", cause(e));
-                return page(502, "Bad Gateway", MineBayPages.problem(anon, "登录失败", "向 id.yr 兑换失败，请重新登录。"));
+                return page(502, "Bad Gateway", MineBayPages.problem(anon, "登录失败", "id.yr 没有回应，请重新登录。"));
             }
             if(sessions.size() >= MAX_SESSIONS)
                 return page(503, "Service Unavailable", MineBayPages.problem(anon, "太忙了", "登录的人太多，请稍后再试。"));
@@ -528,12 +528,12 @@ public final class MineBaySite implements WebHandler
         {
             PublicKey key = LocationProofs.publicKey();
             if(key == null)
-                problem = "定位服务现在不可用，暂时不能下单。";
+                problem = "现在查不了电脑的位置，暂时不能下单。";
             else
             {
                 LocationVerifier.Result v = new LocationVerifier(key, PROOF_MAX_AGE_S).verify(loc, DOMAIN, r.remoteAddress, n -> nonces.consume(n, now), now / 1000);
                 proof = v.proof;
-                problem = v.ok() ? null : "电脑的位置证明核对不上（" + v.reason + "），没有下单。请刷新确认页再试。";
+                problem = v.ok() ? null : "这台电脑的位置没核对上（" + v.reason + "），没有下单。请刷新确认页再试。";
             }
         }
         NetStack stack = context.stack();
@@ -570,7 +570,7 @@ public final class MineBaySite implements WebHandler
             return checkoutPostMain(params, s, System.currentTimeMillis());
         }, login, token, scheme))).thenCompose(resp -> resp != NEED_VERIFY ? done(resp)
                 : start(r, context, login, token, scheme, new Gate(randomText(18), login.id, System.currentTimeMillis(), new HashMap<>(params), p, false,
-                "在 MineBay 下单", Collections.singletonList("收货人：" + login.name + "（登录的帐号）"))));
+                "在 MineBay 下单", Collections.singletonList("收货人：" + login.name + "（登录的账号）"))));
     }
 
     // ---------------------------------------------------------------- 操作前必须验证身份（网络线程）
@@ -580,7 +580,7 @@ public final class MineBaySite implements WebHandler
     {
         boolean on = "1".equals(params.get("verify"));
         return start(r, context, login, token, scheme, new Gate(randomText(18), login.id, System.currentTimeMillis(), null, null, on,
-                "关闭操作前验证身份", java.util.Arrays.asList("MineBay 帐号：" + login.name, "关闭后，坐在这台电脑前的人就能下单")));
+                "关闭操作前验证身份", java.util.Arrays.asList("MineBay 账号：" + login.name, "关闭后，坐在这台电脑前的人就能下单")));
     }
 
     /** 记下这个操作，向 id.yr 建请求，把浏览器 303 过去；建不了时回原来的页面说明（可以重新验证） */
@@ -613,7 +613,7 @@ public final class MineBaySite implements WebHandler
             g.confirmId = t.id;
             return WebResponse.seeOther(t.url);
         }).thenCompose(resp -> resp != null ? done(resp)
-                : refused(r, context, login, token, scheme, g, "建不了验证请求（登录可能过期了），请稍后再试或重新登录。", true));
+                : refused(r, context, login, token, scheme, g, "现在验证不了身份（登录可能过期了），请稍后再试或重新登录。", true));
     }
 
     /**
@@ -654,7 +654,7 @@ public final class MineBaySite implements WebHandler
         NetStack stack = context.stack();
         if(g == null || login == null || !g.sessionId.equals(login.id) || stack == null)
             return context.onMainThread(() -> main(r, Route.VERIFIED, s -> page(404, "Not Found", MineBayPages.problem(s.viewer(), "验证已经结束",
-                    "这次验证已经结束或过期了，请回去重新操作。")), login, token, scheme));
+                    "这次验证已经结束或过期，请回去重新操作。")), login, token, scheme));
         String failed = g.failed;
         if(failed != null)
             return refused(r, context, login, token, scheme, g, failed, true);
@@ -671,12 +671,12 @@ public final class MineBaySite implements WebHandler
             if(out.status == IdYrClient.Outcome.Status.PENDING)
                 return "";
             if(!out.approved())
-                return scopeStep ? ("denied".equals(out.reason) ? "在 id.yr 的确认框里没有同意。" : out.text(false)) : out.text(true);
+                return scopeStep ? ("denied".equals(out.reason) ? "你在确认框里没有同意。" : out.text(false)) : out.text(true);
             if(scopeStep)
             {
                 login.swap(out.token);
                 if(!login.scopes.contains(IdYrClient.VERIFY))
-                    return "id.yr 没有给“验证身份”的授权。";
+                    return "id.yr 没有允许验证身份，请再试一次。";
             }
             return null;
         }).thenCompose(why ->
@@ -721,7 +721,7 @@ public final class MineBaySite implements WebHandler
         Gate g = gid == null ? null : gates.get(gid);
         if(g == null || !g.sessionId.equals(login.id) || context.stack() == null)
             return context.onMainThread(() -> main(r, Route.VERIFIED, s -> page(404, "Not Found", MineBayPages.problem(s.viewer(), "验证已经结束",
-                    "这次验证已经结束或过期了，请回去重新操作。")), login, token, scheme));
+                    "这次验证已经结束或过期，请回去重新操作。")), login, token, scheme));
         if(g.failed == null || !g.checking.compareAndSet(false, true))
             return done(WebResponse.seeOther("/verified?g=" + g.id));
         g.failed = null;
@@ -898,8 +898,8 @@ public final class MineBaySite implements WebHandler
         if(!s.ok())
             return loginNeeded(s, "/account");
         String r = params.get("r");
-        MineBayPages.Notice n = "on".equals(r) ? MineBayPages.Notice.ok("已打开“操作前必须验证身份”。")
-                : "off".equals(r) ? MineBayPages.Notice.ok("已关闭“操作前必须验证身份”。") : null;
+        MineBayPages.Notice n = "on".equals(r) ? MineBayPages.Notice.ok("已打开“操作前验证身份”。")
+                : "off".equals(r) ? MineBayPages.Notice.ok("已关闭“操作前验证身份”。") : null;
         return accountPage(200, "OK", s, n);
     }
 
@@ -927,7 +927,7 @@ public final class MineBaySite implements WebHandler
 
     private static WebResponse badRequest(Session s, String text)
     {
-        return page(400, "Bad Request", MineBayPages.problem(s.viewer(), "网址里的参数不对", text));
+        return page(400, "Bad Request", MineBayPages.problem(s.viewer(), "网址不对", text));
     }
 
     private static WebResponse goneItem(Session s)
@@ -1079,7 +1079,7 @@ public final class MineBaySite implements WebHandler
                 return WebResponse.seeOther("/cart?r=updated");
             }
             default:
-                return badRequest(s, "不认识的操作。");
+                return badRequest(s, "这个操作做不了，请回购物车再试。");
         }
     }
 
@@ -1220,7 +1220,7 @@ public final class MineBaySite implements WebHandler
     {
         String id = params.get("order");
         if(id == null || !id.matches("ord_[a-z0-9]{16}"))
-            return badRequest(s, "单号不对。");
+            return badRequest(s, "订单号不对。");
         MinecraftServer server = FMLCommonHandler.instance().getMinecraftServerInstance();
         PayOrders.Entry e = s.data == null ? null : s.data.payOrders().get(id);
         if(e != null && e.state() == PayOrders.State.OPEN && MineBayShop.status(id) == OrderInfo.Status.PAID)
@@ -1235,7 +1235,7 @@ public final class MineBaySite implements WebHandler
             return page(402, "Payment Required", MineBayPages.unpaid(s.viewer(), e.checkoutUrl));
         if(e != null)
             return page(200, "OK", MineBayPages.problem(s.viewer(), "付款成功", "东西会发给 " + e.buyerName + "（不在线时等上线再发）。"));
-        return page(404, "Not Found", MineBayPages.problem(s.viewer(), "找不到这张单", "只能看自己的订单。"));
+        return page(404, "Not Found", MineBayPages.problem(s.viewer(), "找不到这张订单", "只能看自己的订单。"));
     }
 
     /** pay.yr 上点了“返回网站”：取消这张还没付的单（放回库存），购物车原样 */
@@ -1243,7 +1243,7 @@ public final class MineBaySite implements WebHandler
     {
         String id = params.get("order");
         if(id == null || !id.matches("ord_[a-z0-9]{16}"))
-            return badRequest(s, "单号不对。");
+            return badRequest(s, "订单号不对。");
         if(!s.ok())
             return loginNeeded(s, "/cart");
         PayOrders.Entry e = s.data.payOrders().get(id);
@@ -1278,7 +1278,7 @@ public final class MineBaySite implements WebHandler
                 if(o.number == no)
                 {
                     highlight = no;
-                    notice = MineBayPages.Notice.ok("付款成功！订单 " + MineBayPages.number(no) + " 的东西已经发给 " + s.login.name + "（背包满了掉在脚边）。");
+                    notice = MineBayPages.Notice.ok("付款成功。订单 " + MineBayPages.number(no) + " 的东西已经发给 " + s.login.name + "（背包满了掉在脚边）。");
                 }
             }
         }
