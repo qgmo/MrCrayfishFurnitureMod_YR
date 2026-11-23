@@ -694,7 +694,7 @@ public final class MineBayPages
         if(from > 0)
             sb.append("<div class=\"kfmore\"><a href=\"/support?all=1\">显示全部记录（").append(messages.size()).append(" 条）</a></div>\n");
         if(messages.isEmpty())
-            agent(sb, "你好，我是 MineBay 的客服" + SupportPrompt.AGENT_NAME + "。想问什么，直接说。", -1);
+            agent(sb, "亲，您好！我是 MineBay 在线客服" + SupportPrompt.AGENT_NAME + "，请问有什么可以帮您？", -1);
         for(int i = from; i < messages.size(); i++)
         {
             SupportChat.Message m = messages.get(i);

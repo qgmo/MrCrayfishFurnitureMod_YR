@@ -317,6 +317,6 @@ class MineBayPagesTest
         String anon = MineBayPages.support(MineBayPages.Viewer.anonymous("t"), true, Collections.<SupportChat.Message>emptyList(), false, null, "", 20, false);
         check(anon);
         assertTrue(anon.contains("登录后才能联系客服"));
-        assertTrue(MineBayPages.support(VIEWER, true, Collections.<SupportChat.Message>emptyList(), false, null, "", 20, false).contains("想问什么，直接说"));
+        assertTrue(MineBayPages.support(VIEWER, true, Collections.<SupportChat.Message>emptyList(), false, null, "", 20, false).contains("请问有什么可以帮您"));
     }
 }
