@@ -51,6 +51,9 @@ public class PacketHandler
         registerMessage(MessageComputerScreen.class, MessageComputerScreen.class, Side.CLIENT);
         registerMessage(MessageComputerCpu.class, MessageComputerCpu.class, Side.SERVER);
         registerMessage(MessageComputerCpuState.class, MessageComputerCpuState.class, Side.CLIENT);
+        // 浏览器请位置证明、操作者证明（服主 11-27）
+        registerMessage(MessageComputerProof.class, MessageComputerProof.class, Side.SERVER);
+        registerMessage(MessageComputerProofResult.class, MessageComputerProofResult.class, Side.CLIENT);
     }
     
     private static <REQ extends IMessage, REPLY extends IMessage> void registerMessage(Class<? extends IMessageHandler<REQ, REPLY>> messageHandler, Class<REQ> requestMessageType, Side side)

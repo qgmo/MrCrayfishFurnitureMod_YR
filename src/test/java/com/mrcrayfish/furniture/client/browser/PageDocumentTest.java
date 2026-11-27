@@ -413,6 +413,40 @@ class PageDocumentTest
         assertEquals("[loc=youran-location-proof v1\n..., fake=v, q=]", f.fields(d, 0, -1, proof).toString());
     }
 
+    @Test
+    void operatorField() throws Exception
+    {
+        // 一键登录（服主 11-27）：id.yr 的登录页放一个操作者字段，提交时浏览器换成操作者证明
+        String page = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>t</title></head><body>"
+                + "<form action=\"https://id.yr/authorize/proof\" method=\"post\"><p>"
+                + "<input type=\"x-yr-operator\" name=\"proof\" value=\"nonce-12345678\"/>"
+                + "<input type=\"hidden\" name=\"fake\" value=\"v\" data-yr-operator=\"1\"/>"
+                + "<input type=\"x-yr-location\" name=\"loc\" value=\"nonce-87654321\"/>"
+                + "<input type=\"submit\" value=\"go\"/></p></form></body></html>";
+        PageDocument d = parse(page);
+        PageDocument.Control op = null;
+        PageDocument.Control fake = null;
+        PageDocument.Control loc = null;
+        for(PageDocument.Control c : d.controls)
+        {
+            if(c.name.equals("proof"))
+                op = c;
+            if(c.name.equals("fake"))
+                fake = c;
+            if(c.name.equals("loc"))
+                loc = c;
+        }
+        assertNotNull(op);
+        assertEquals(PageDocument.Kind.HIDDEN, op.kind, "画成隐藏字段");
+        assertTrue(op.operator);
+        assertFalse(op.location);
+        assertEquals("nonce-12345678", op.value, "值是网站给的随机数");
+        assertFalse(fake.operator, "页面自己写的标记不算");
+        assertTrue(loc.location);
+        assertFalse(loc.operator, "两种字段分开");
+        assertTrue(d.dom.getDocumentElement().getTextContent().contains("身份模块"), "后面加了一句说明");
+    }
+
     static String withHead(String head, String body)
     {
         return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>t</title>" + head

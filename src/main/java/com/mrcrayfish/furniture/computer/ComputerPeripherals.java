@@ -1,6 +1,5 @@
 package com.mrcrayfish.furniture.computer;
 
-import moe.qingu.youran.api.network.DeviceCapability;
 import moe.qingu.youran.api.peripheral.Peripherals;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
@@ -9,23 +8,19 @@ import net.minecraftforge.common.util.Constants;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.EnumSet;
 import java.util.List;
-import java.util.Set;
 
 /**
- * 电脑的外设槽（悠然服务器魔改，服主 11-15）：插在电脑上的外设物品，现在只有一格。
- * 外设决定设备在 YouranMod 设备表里声明哪些能力（{@link #capabilities()}）；“装没装某种外设”的判断只在这里。
- * 槽里只放一个。存档在方块实体 NBT 的 {@value #TAG} 里。
- * 走 YouranMod 的统一外设接口（{@code api.peripheral}）：什么外设都能插（服主 11-16），但只有定位模块起作用——
- * 能力按外设物品报的能力算，家具电脑只用位置能力（{@code location} → {@link DeviceCapability#LOCATION}）；汉卡、软驱、烧录器等插着没有效果
- * （那个年代系统自带中文，用不着汉卡）。
+ * 电脑的外设槽（悠然服务器魔改，服主 11-15）：插在电脑上的外设物品，两格（服主 11-27 起身份模块和定位模块并列，MineBay 结算两样都要）。
+ * “装没装某种外设”的判断只在这里。存档在方块实体 NBT 的 {@value #TAG} 里。
+ * 走 YouranMod 的统一外设接口（{@code api.peripheral}）：什么外设都能插（服主 11-16），但只有定位模块（能力 {@code location}）、
+ * 身份模块（能力 {@code identity}）起作用；汉卡、软驱、烧录器等插着没有效果（那个年代系统自带中文，用不着汉卡）。
  */
 public final class ComputerPeripherals
 {
     public static final String TAG = "Peripherals";
     /** 外设槽的格数 */
-    public static final int SLOTS = 1;
+    public static final int SLOTS = 2;
 
     private final ItemStack[] slots = new ItemStack[SLOTS];
     private final Runnable changed;
@@ -87,18 +82,23 @@ public final class ComputerPeripherals
         return true;
     }
 
-    /** 装着的外设给设备带来的能力 */
-    public Set<DeviceCapability> capabilities()
-    {
-        EnumSet<DeviceCapability> set = EnumSet.noneOf(DeviceCapability.class);
-        if(Peripherals.hasCapability(Arrays.asList(slots), Peripherals.CAP_LOCATION))
-            set.add(DeviceCapability.LOCATION);
-        return set;
-    }
-
+    /** 装了定位模块：能签位置证明 */
     public boolean hasLocator()
     {
-        return capabilities().contains(DeviceCapability.LOCATION);
+        return Peripherals.hasCapability(Arrays.asList(slots), Peripherals.CAP_LOCATION);
+    }
+
+    /** 装了身份模块：能签操作者证明（一键登录） */
+    public boolean hasIdentity()
+    {
+        return Peripherals.hasCapability(Arrays.asList(slots), Peripherals.CAP_IDENTITY);
+    }
+
+    /** 这个外设在家具电脑上起不起作用（定位模块、身份模块起作用；悬停提示用） */
+    public static boolean isUseful(ItemStack stack)
+    {
+        java.util.List<ItemStack> one = java.util.Collections.singletonList(stack);
+        return Peripherals.hasCapability(one, Peripherals.CAP_LOCATION) || Peripherals.hasCapability(one, Peripherals.CAP_IDENTITY);
     }
 
     public void writeToNBT(NBTTagCompound tag)

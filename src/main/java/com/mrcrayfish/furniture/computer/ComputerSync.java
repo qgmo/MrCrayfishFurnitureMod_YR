@@ -324,6 +324,7 @@ public final class ComputerSync
         {
             UPLOADS.forget(event.player.getUniqueID());
             com.mrcrayfish.furniture.network.message.MessageComputerCpu.forget(event.player.getUniqueID());
+            ComputerProofs.forget(event.player.getUniqueID());
             SCROLL.remove(event.player.getUniqueID());
             ACTIONS.remove(event.player.getUniqueID());
             TYPING.remove(event.player.getUniqueID());

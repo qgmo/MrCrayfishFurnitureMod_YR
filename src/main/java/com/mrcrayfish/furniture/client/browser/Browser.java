@@ -21,9 +21,7 @@ import com.mrcrayfish.furniture.network.message.MessageComputerHistory;
 import com.mrcrayfish.furniture.network.message.MessageComputerPage;
 import com.mrcrayfish.furniture.network.message.MessageComputerScroll;
 import com.mrcrayfish.furniture.network.message.MessageComputerTyping;
-import moe.qingu.youran.api.network.ClientNic;
-import moe.qingu.youran.api.network.location.ClientLocation;
-import moe.qingu.youran.api.network.location.LocationResult;
+import moe.qingu.youran.api.network.ClientHost;
 import moe.qingu.youran.api.network.stack.HttpClient;
 import moe.qingu.youran.api.network.stack.NetworkException;
 import net.minecraft.client.Minecraft;
@@ -505,9 +503,10 @@ public final class Browser
 
     /**
      * 提交表单（{@code submitter} 是按下的按钮编号；回车提交时为第一个提交按钮或 -1）。
-     * 表单里有位置字段（{@code <input type="x-yr-location">}）时，先请服务器给这台电脑签位置（服务器先弹系统确认框问操作者），
-     * 把证明全文填进那个字段（拿不到时填 {@code error:代号}，如 {@code error:no_locator}、{@code error:denied}），再提交。
-     * 位置签给表单要提交到的那个网站（action 的主机）。
+     * 表单里有位置字段（{@code <input type="x-yr-location">}）、操作者字段（{@code x-yr-operator}，服主 11-27）时，先请服务器给这台电脑签证明
+     * （服务器核对装了对应的模块，YouranMod 先弹系统确认框问操作者），把证明全文填进那个字段（拿不到时填 {@code error:代号}，
+     * 如 {@code error:no_locator}、{@code error:no_identity}、{@code error:denied}），再提交。证明签给表单要提交到的那个网站（action 的主机）。
+     * 等结果的时候表单里填的东西不动；结果回来时已经换了页面就不提交。
      */
     public void submitForm(int form, int submitter)
     {
@@ -522,13 +521,17 @@ public final class Browser
             showError("", BuiltinPages.Error.UNSUPPORTED_SCHEME, "", false);
             return;
         }
-        List<PageDocument.Control> location = new ArrayList<>();
+        List<PageDocument.Control> proofs = new ArrayList<>();
+        boolean operator = false;
         for(PageDocument.Control c : page.document.controls)
         {
-            if(c.form == form && c.location && !c.disabled && !c.name.isEmpty())
-                location.add(c);
+            if(c.form == form && (c.location || c.operator) && !c.disabled && !c.name.isEmpty())
+            {
+                proofs.add(c);
+                operator |= c.operator;
+            }
         }
-        if(location.isEmpty())
+        if(proofs.isEmpty())
         {
             doSubmit(e, page, info, form, submitter, Collections.<Integer, String>emptyMap());
             return;
@@ -536,20 +539,20 @@ public final class Browser
         String site = UrlInput.hostOf(info.action);
         int gen = ++generation;
         waiting = null;
-        setStatus(Status.LOADING, ComputerViews.TR.t("cfm.browser.status.location"));
-        Map<Integer, CompletableFuture<LocationResult>> asks = new LinkedHashMap<>();
-        for(PageDocument.Control c : location)
-            asks.put(c.n, ClientLocation.request(site == null ? "" : site, c.value));
+        setStatus(Status.LOADING, ComputerViews.TR.t(operator ? "cfm.browser.status.operator" : "cfm.browser.status.location"));
+        Map<Integer, CompletableFuture<String>> asks = new LinkedHashMap<>();
+        for(PageDocument.Control c : proofs)
+        {
+            int kind = c.operator ? com.mrcrayfish.furniture.computer.ComputerProofs.OPERATOR : com.mrcrayfish.furniture.computer.ComputerProofs.LOCATION;
+            asks.put(c.n, ClientProofs.request(pos, kind, site == null ? "" : site, c.value));
+        }
         CompletableFuture.allOf(asks.values().toArray(new CompletableFuture<?>[0])).whenComplete((v, err) -> Minecraft.getMinecraft().addScheduledTask(() ->
         {
             if(gen != generation || current() != e || rendered() != page)
                 return;
             Map<Integer, String> values = new HashMap<>();
-            for(Map.Entry<Integer, CompletableFuture<LocationResult>> a : asks.entrySet())
-            {
-                LocationResult r = a.getValue().getNow(LocationResult.of(LocationResult.Status.UNAVAILABLE));
-                values.put(a.getKey(), r.ok() ? r.proof : "error:" + r.status.code);
-            }
+            for(Map.Entry<Integer, CompletableFuture<String>> a : asks.entrySet())
+                values.put(a.getKey(), a.getValue().getNow("error:unavailable"));
             setStatus(Status.IDLE, "");
             doSubmit(e, page, info, form, submitter, values);
         }));
@@ -606,8 +609,8 @@ public final class Browser
             showBuiltin(UrlInput.HOME, BuiltinPages.home(ComputerViews.TR), true);
             return;
         }
-        ClientNic.Session s = ClientNic.current();
-        if(s == null || s.isClosed())
+        ClientHost.Port s = ClientHost.relayPort();
+        if(s == null || s.isRemoved())
         {
             waiting = req;
             waitingSince = System.currentTimeMillis();
@@ -620,6 +623,7 @@ public final class Browser
     /** 每帧调：等网络的请求，接上了就发，等太久就报错；把正在打的字同步给旁观者；到时间就自动刷新；排版完了就显示 */
     public void tick()
     {
+        ClientProofs.sweep(System.currentTimeMillis());
         finishLayout(System.currentTimeMillis());
         flushScroll(System.currentTimeMillis());
         syncTyping();
@@ -628,8 +632,8 @@ public final class Browser
         autoRefresh(System.currentTimeMillis());
         if(waiting != null)
         {
-            ClientNic.Session s = ClientNic.current();
-            if(s != null && !s.isClosed())
+            ClientHost.Port s = ClientHost.relayPort();
+            if(s != null && !s.isRemoved())
             {
                 Request r = waiting;
                 waiting = null;
@@ -669,7 +673,8 @@ public final class Browser
         navigate(new Request(r.url, "GET", null, null, -1, initiatorOf(e), false), e);
     }
 
-    private void fetch(ClientNic.Session s, Request req, int redirects, int gen)
+    /** 取页面：套接字绑在电脑那个网口上（服主 11-27：一个协议栈、多个网口） */
+    private void fetch(ClientHost.Port s, Request req, int redirects, int gen)
     {
         HttpClient.Url u = HttpClient.Url.parse(req.url);
         if(u == null)
@@ -685,7 +690,7 @@ public final class Browser
         String cookie = cookieHeader(req.url, new CookieJar.Context(true, req.method.equals("GET") || req.method.equals("HEAD"), req.isCrossSite()));
         if(cookie != null)
             headers.put("Cookie", cookie);
-        CompletableFuture<HttpClient.Response> f = HttpClient.send(s.stack(), s.dns(), u, req.method, headers, req.body, PAGE_TIMEOUT_MS, null);
+        CompletableFuture<HttpClient.Response> f = HttpClient.send(s.stack(), s.iface(), s.dns(), u, req.method, headers, req.body, PAGE_TIMEOUT_MS, null);
         f.whenComplete((resp, err) -> Minecraft.getMinecraft().addScheduledTask(() ->
         {
             if(gen != generation)
@@ -699,7 +704,7 @@ public final class Browser
         }));
     }
 
-    private void onResponse(ClientNic.Session s, Request req, HttpClient.Response resp, int redirects, int gen)
+    private void onResponse(ClientHost.Port s, Request req, HttpClient.Response resp, int redirects, int gen)
     {
         // 响应里的新 Cookie（顶层导航的响应都收，含跳转的每一站）
         receiveCookies(req.url, resp.headerValues("set-cookie"));

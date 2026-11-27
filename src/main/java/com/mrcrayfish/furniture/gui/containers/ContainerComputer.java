@@ -20,7 +20,7 @@ import net.minecraft.network.play.server.SPacketSetSlot;
 import javax.annotation.Nullable;
 
 /**
- * 电脑的界面（悠然服务器魔改）：浏览器本身全在客户端，服务端这边只有能量单元卡槽、外设槽（什么外设都能插，只有定位模块起作用）和玩家背包（界面上的“物品”面板），
+ * 电脑的界面（悠然服务器魔改）：浏览器本身全在客户端，服务端这边只有能量单元卡槽、两格外设槽（什么外设都能插，只有定位模块、身份模块起作用）和玩家背包（界面上的“物品”面板），
  * 并把缓存电量、工作状态同步给界面。原来 MineBay 的交易槽去掉了（MineBay 改成了网站）。
  * 外设槽只有操作者、且过保护检查（同接管电脑）的玩家能放、拿（服主 11-15）；旁观者点了服务端不认，并把界面重新同步给他。
  */
@@ -31,14 +31,17 @@ public class ContainerComputer extends Container
     public static final int CPU_Y = 31;
     static final int INVENTORY_Y = 44;
     public static final int CARD_X = 8, CARD_Y = 8;
-    /** 外设槽的位置（右上角，标签画在它右边） */
-    public static final int PERIPHERAL_X = 104, PERIPHERAL_Y = 8;
+    /** 第一格外设槽的位置（右上角，往右一格一格排，标签画在最后一格右边） */
+    public static final int PERIPHERAL_X = 86, PERIPHERAL_Y = 8;
+    /** 外设槽的标签从哪里画起 */
+    public static final int PERIPHERAL_LABEL_X = PERIPHERAL_X + 18 * ComputerPeripherals.SLOTS + 2;
 
     private final TileEntityComputer computer;
     @Nullable
     private final SlotPowerCard cardSlot;
     private final int cardIndex;
-    private final SlotPeripheral peripheralSlot;
+    private final SlotPeripheral[] peripheralSlots = new SlotPeripheral[ComputerPeripherals.SLOTS];
+    /** 第一格外设槽的编号（各格连着） */
     private final int peripheralIndex;
     private final ApplianceContainers.Sync sync = new ApplianceContainers.Sync();
 
@@ -69,14 +72,33 @@ public class ContainerComputer extends Container
         }
         // 外设槽：加在所有槽位之后（原有槽位编号不变）；两端都加
         InventoryPeripherals peripherals = new InventoryPeripherals(computer.getPeripherals(), computer::markDirty, computer::isUsableByPlayer);
-        this.peripheralSlot = new SlotPeripheral(peripherals, 0, PERIPHERAL_X, PERIPHERAL_Y, computer::canChangePeripherals);
         this.peripheralIndex = this.inventorySlots.size();
-        this.addSlotToContainer(peripheralSlot);
+        for(int i = 0; i < ComputerPeripherals.SLOTS; i++)
+        {
+            peripheralSlots[i] = new SlotPeripheral(peripherals, i, PERIPHERAL_X + 18 * i, PERIPHERAL_Y, computer::canChangePeripherals);
+            this.addSlotToContainer(peripheralSlots[i]);
+        }
     }
 
-    public SlotPeripheral getPeripheralSlot()
+    /** 第 {@code i} 格外设槽 */
+    public SlotPeripheral getPeripheralSlot(int i)
     {
-        return peripheralSlot;
+        return peripheralSlots[i];
+    }
+
+    public boolean isPeripheralSlot(@Nullable Slot slot)
+    {
+        for(SlotPeripheral s : peripheralSlots)
+        {
+            if(s == slot)
+                return true;
+        }
+        return false;
+    }
+
+    private boolean isPeripheralIndex(int slotId)
+    {
+        return slotId >= peripheralIndex && slotId < peripheralIndex + ComputerPeripherals.SLOTS;
     }
 
     /** 外设槽：不是操作者（或过不了保护检查）的玩家点它、或 Shift 点背包里的外设都不算；服务端把界面与手上拿着的重新同步给他 */
@@ -89,9 +111,9 @@ public class ContainerComputer extends Container
 
     private ItemStack operatorClick(int slotId, int dragType, ClickType clickType, EntityPlayer player)
     {
-        boolean touchesPeripheral = slotId == peripheralIndex
+        boolean touchesPeripheral = isPeripheralIndex(slotId)
                 || (clickType == ClickType.QUICK_MOVE && slotId >= 0 && slotId < 36 && ComputerPeripherals.isPeripheral(inventorySlots.get(slotId).getStack()));
-        if(touchesPeripheral && !peripheralSlot.canChange(player))
+        if(touchesPeripheral && !peripheralSlots[0].canChange(player))
         {
             if(player instanceof EntityPlayerMP)
             {
@@ -99,7 +121,7 @@ public class ContainerComputer extends Container
                 mp.sendAllContents(this, this.getInventory());
                 mp.connection.sendPacket(new SPacketSetSlot(-1, -1, mp.inventory.getItemStack()));
             }
-            if(slotId == peripheralIndex)
+            if(isPeripheralIndex(slotId))
                 return ItemStack.EMPTY;
         }
         return super.slotClick(slotId, dragType, clickType, player);
@@ -109,7 +131,7 @@ public class ContainerComputer extends Container
     public boolean canDragIntoSlot(Slot slot)
     {
         // 拖动分发不进外设槽（只能单独点）
-        return slot != peripheralSlot && super.canDragIntoSlot(slot);
+        return !isPeripheralSlot(slot) && super.canDragIntoSlot(slot);
     }
 
     public TileEntityComputer getComputer()
@@ -201,9 +223,9 @@ public class ContainerComputer extends Container
         if(slot == null || !slot.getHasStack())
             return null;
         ItemStack stack = slot.getStack();
-        if(slotNum == peripheralIndex)
+        if(isPeripheralIndex(slotNum))
         {
-            if(!peripheralSlot.canChange(player))
+            if(!peripheralSlots[0].canChange(player))
                 return ItemStack.EMPTY;
             ItemStack copy = stack.copy();
             if(!this.mergeItemStack(stack, 0, 36, true))
@@ -211,11 +233,20 @@ public class ContainerComputer extends Container
             slot.putStack(stack.isEmpty() ? ItemStack.EMPTY : stack);
             return copy;
         }
-        if(slotNum < 36 && ComputerPeripherals.isPeripheral(stack) && !peripheralSlot.getHasStack() && peripheralSlot.isItemValid(stack))
+        SlotPeripheral free = null;
+        for(SlotPeripheral s : peripheralSlots)
         {
-            if(!peripheralSlot.canChange(player))
+            if(!s.getHasStack() && s.isItemValid(stack))
+            {
+                free = s;
+                break;
+            }
+        }
+        if(slotNum < 36 && ComputerPeripherals.isPeripheral(stack) && free != null)
+        {
+            if(!free.canChange(player))
                 return ItemStack.EMPTY;
-            peripheralSlot.putStack(stack.splitStack(1));
+            free.putStack(stack.splitStack(1));
             if(stack.isEmpty())
                 slot.putStack(ItemStack.EMPTY);
             else

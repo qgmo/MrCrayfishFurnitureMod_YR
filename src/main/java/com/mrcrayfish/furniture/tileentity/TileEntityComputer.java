@@ -4,7 +4,7 @@ import com.mrcrayfish.furniture.compat.RegionUse;
 import com.mrcrayfish.furniture.computer.BrowserHistory;
 import com.mrcrayfish.furniture.computer.ComputerCookies;
 import com.mrcrayfish.furniture.computer.ComputerCpu;
-import com.mrcrayfish.furniture.computer.ComputerNetwork;
+import com.mrcrayfish.furniture.computer.ComputerNic;
 import com.mrcrayfish.furniture.computer.ComputerPeripherals;
 import com.mrcrayfish.furniture.power.PartRules;
 import com.mrcrayfish.furniture.computer.ComputerSync;
@@ -22,8 +22,6 @@ import com.mrcrayfish.furniture.power.ApplianceFaces;
 import com.mrcrayfish.furniture.power.IAppliance;
 import com.mrcrayfish.furniture.util.AppliancePower;
 import com.mrcrayfish.furniture.util.TileEntityUtil;
-import moe.qingu.youran.api.network.DeviceCapability;
-import moe.qingu.youran.api.network.DeviceHandle;
 import moe.qingu.youran.api.network.Ipv6Address;
 import net.minecraft.entity.item.EntityItem;
 import net.minecraft.entity.player.EntityPlayer;
@@ -100,8 +98,8 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
     /** 排版的基准（服务端配置，随方块更新发给客户端；客户端收到前用默认值） */
     private int layoutBaseMs = ComputerCpu.DEFAULT_LAYOUT_BASE_MS;
     private int layoutPerKbMs = ComputerCpu.DEFAULT_LAYOUT_PER_KB_MS;
-    @Nullable
-    private DeviceHandle device;
+    /** 电脑的网卡（服务端；服主 11-27：方块加载时插、卸载或拆掉时拔，有电有人操作时接到操作者的客户端） */
+    private final ComputerNic nic = new ComputerNic();
     /** 当前页面（压缩的 {@code PageSnapshot}）；没有为 null */
     @Nullable
     private byte[] page;
@@ -163,8 +161,13 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
     @Nullable
     public Ipv6Address deviceAddress()
     {
-        DeviceHandle d = device;
-        return d == null || d.isRemoved() ? null : d.address();
+        return nic.address();
+    }
+
+    /** 电脑的网卡（服务端用；签位置、操作者证明时要它） */
+    public ComputerNic getNic()
+    {
+        return nic;
     }
 
     @Nullable
@@ -380,9 +383,6 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
         if(world != null && !world.isRemote)
         {
             markDirty();
-            DeviceHandle d = device;
-            if(d != null && !d.isRemoved())
-                d.setCapability(DeviceCapability.LOCATION, peripherals.hasLocator());
             TileEntityUtil.markBlockForUpdate(world, pos);
         }
     }
@@ -678,9 +678,9 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
             // Cookie 只交给操作者（协议栈在他的客户端上），旁观者拿不到（服主 11-15）
             ComputerSync.sendCookies(player, this);
         }
-        if(device != null && !device.isRemoved() && player == null && device.attachedPlayer() != null)
+        if(player == null && nic.connectedPlayer() != null)
         {
-            device.detach();
+            nic.disconnect();
         }
         TileEntityUtil.markBlockForUpdate(world, pos);
     }
@@ -716,35 +716,26 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
             ComputerSync.refreshSpectators(this, ticks % 1200 == 0);
     }
 
-    /** 设备表：登记（网络开服后才有，失败时每秒再试）、通电、网卡接到操作者 */
+    /** 网卡：插到这一格（网络开服后才插得上，失败时每秒再试）、有没有电、接到操作者的客户端 */
     private void updateDevice(boolean running)
     {
-        if(device == null || device.isRemoved())
+        nic.setRunning(running);
+        if(!nic.isPlugged())
         {
-            device = null;
             if(--retryTicks > 0)
                 return;
             retryTicks = 20;
-            device = ComputerNetwork.register(this);
-            if(device == null)
+            if(moe.qingu.youran.api.network.YouranNetworkApi.plug(nic, world.provider.getDimension(), pos.getX(), pos.getY(), pos.getZ()) == null)
                 return;
         }
-        if(device.isPowered() != running)
-            device.setPowered(running);
-        // 网卡附带一键登录能力（服主 11-15）；装了定位模块时有位置能力
-        if(!device.hasCapability(DeviceCapability.ONE_CLICK_LOGIN))
-            device.setCapability(DeviceCapability.ONE_CLICK_LOGIN, true);
-        boolean locator = peripherals.hasLocator();
-        if(device.hasCapability(DeviceCapability.LOCATION) != locator)
-            device.setCapability(DeviceCapability.LOCATION, locator);
         EntityPlayerMP want = running ? getOperatorPlayer() : null;
-        EntityPlayerMP now = device.attachedPlayer();
+        EntityPlayerMP now = nic.connectedPlayer();
         if(want != now)
         {
             if(want == null)
-                device.detach();
+                nic.disconnect();
             else
-                device.attachPlayer(want);
+                nic.connect(want);
         }
     }
 
@@ -783,8 +774,9 @@ public class TileEntityComputer extends TileEntityFurniture implements ITickable
     {
         if(world != null && !world.isRemote)
         {
-            ComputerNetwork.unregister(device);
-            device = null;
+            nic.disconnect();
+            moe.qingu.youran.api.network.YouranNetworkApi.unplug(nic);
+            retryTicks = 0;
             ComputerSync.ungrantAll(this);
         }
     }

@@ -12,7 +12,7 @@ import com.mrcrayfish.furniture.network.message.MessageComputerAction;
 import com.mrcrayfish.furniture.network.message.MessageComputerCpu;
 import com.mrcrayfish.furniture.tileentity.TileEntityComputer;
 import moe.qingu.youran.api.network.tls.CertificateInfo;
-import moe.qingu.youran.api.network.ClientNic;
+import moe.qingu.youran.api.network.ClientHost;
 import net.minecraft.client.gui.Gui;
 import net.minecraft.client.gui.ScaledResolution;
 import net.minecraft.client.gui.inventory.GuiContainer;
@@ -502,9 +502,10 @@ public class GuiBrowser extends GuiContainer
     /** 旁观者用自己的玩家临时地址取页面里的图（服务器只放行这一页图片所在的主机），规则同操作者（{@link ImageFetcher}） */
     private void loadSpectatorImages(int req, List<String> urls)
     {
-        ClientNic.Session s = ClientNic.player();
+        // 绑在玩家自己的网口上（服主 11-27：一个协议栈、多个网口）
+        ClientHost.Port s = ClientHost.playerPort();
         PageSnapshot snap = spectatorSnapshot;
-        if(s == null || s.isClosed() || snap == null)
+        if(s == null || s.isRemoved() || snap == null)
             return;
         // 旁观者没有 Cookie（服主 11-15）
         ImageFetcher.fetch(s, urls, () -> req == spectatorRender && mc.currentScreen == this, null, got ->
@@ -1863,7 +1864,7 @@ public class GuiBrowser extends GuiContainer
     protected void drawGuiContainerForegroundLayer(int mouseX, int mouseY)
     {
         fontRenderer.drawString(I18n.format("cfm.browser.panel.card"), ContainerComputer.CARD_X + 30, ContainerComputer.CARD_Y + 5, 0xFF404040);
-        fontRenderer.drawString(I18n.format("cfm.browser.panel.peripheral"), ContainerComputer.PERIPHERAL_X + 20, ContainerComputer.PERIPHERAL_Y + 5, 0xFF404040);
+        fontRenderer.drawString(I18n.format("cfm.browser.panel.peripheral"), ContainerComputer.PERIPHERAL_LABEL_X, ContainerComputer.PERIPHERAL_Y + 5, 0xFF404040);
         // 这台电脑的 CPU（服主 11-16）
         fontRenderer.drawString(fontRenderer.trimStringToWidth(com.mrcrayfish.furniture.blocks.BlockComputer.cpuLine(computer.getBoard(), true, computer.getCpu().clockKHz), xSize - 16),
                 8, ContainerComputer.CPU_Y, 0xFF404040);
@@ -1879,13 +1880,12 @@ public class GuiBrowser extends GuiContainer
         return true;
     }
 
-    /** 外设槽里插着用不上的外设（家具电脑只用得上定位模块）：提示里说一句 */
+    /** 外设槽里插着用不上的外设（家具电脑只用得上定位模块、身份模块）：提示里说一句 */
     @Override
     public List<String> getItemToolTip(ItemStack stack)
     {
         List<String> lines = super.getItemToolTip(stack);
-        if(getSlotUnderMouse() == container.getPeripheralSlot() && !moe.qingu.youran.api.peripheral.Peripherals.hasCapability(
-                java.util.Collections.singletonList(stack), moe.qingu.youran.api.peripheral.Peripherals.CAP_LOCATION))
+        if(container.isPeripheralSlot(getSlotUnderMouse()) && !com.mrcrayfish.furniture.computer.ComputerPeripherals.isUseful(stack))
             lines.add(net.minecraft.util.text.TextFormatting.GRAY + I18n.format("cfm.browser.panel.peripheral.unused"));
         return lines;
     }
@@ -1893,8 +1893,8 @@ public class GuiBrowser extends GuiContainer
     /** 指着空的外设槽：说明放什么、谁能放 */
     private void drawPeripheralHint(int mouseX, int mouseY)
     {
-        int x = guiLeft + ContainerComputer.PERIPHERAL_X - 1, y = guiTop + ContainerComputer.PERIPHERAL_Y - 1;
-        if(container.getPeripheralSlot().getHasStack() || mouseX < x || mouseX >= x + 18 || mouseY < y || mouseY >= y + 18)
+        Slot over = getSlotUnderMouse();
+        if(!container.isPeripheralSlot(over) || over.getHasStack())
             return;
         List<String> lines = new ArrayList<>();
         lines.add(I18n.format("cfm.browser.panel.peripheral.hint"));

@@ -1,6 +1,6 @@
 package com.mrcrayfish.furniture.client.browser;
 
-import moe.qingu.youran.api.network.ClientNic;
+import moe.qingu.youran.api.network.ClientHost;
 import moe.qingu.youran.api.network.stack.HttpClient;
 import net.minecraft.client.Minecraft;
 
@@ -36,17 +36,17 @@ final class ImageFetcher
      * @param wanted  还要不要（页面换了、界面关了时返回 false，剩下的不取了）
      * @param done    取完（或不要了以后不调用）：网址 → 检查过的 PNG
      */
-    static void fetch(ClientNic.Session s, List<String> urls, BooleanSupplier wanted, @Nullable Cookies cookies, Consumer<Map<String, byte[]>> done)
+    static void fetch(ClientHost.Port s, List<String> urls, BooleanSupplier wanted, @Nullable Cookies cookies, Consumer<Map<String, byte[]>> done)
     {
         next(s, urls, 0, new HashMap<>(), wanted, cookies, done);
     }
 
-    private static void next(ClientNic.Session s, List<String> urls, int i, Map<String, byte[]> out, BooleanSupplier wanted, @Nullable Cookies cookies,
+    private static void next(ClientHost.Port s, List<String> urls, int i, Map<String, byte[]> out, BooleanSupplier wanted, @Nullable Cookies cookies,
                              Consumer<Map<String, byte[]>> done)
     {
         if(!wanted.getAsBoolean())
             return;
-        if(i >= urls.size() || i >= PageDocument.MAX_IMAGES || s.isClosed())
+        if(i >= urls.size() || i >= PageDocument.MAX_IMAGES || s.isRemoved())
         {
             done.accept(out);
             return;
@@ -62,7 +62,7 @@ final class ImageFetcher
         String cookie = cookies == null ? null : cookies.header(urls.get(i));
         if(cookie != null)
             headers.put("Cookie", cookie);
-        HttpClient.send(s.stack(), s.dns(), u, "GET", headers, null, Browser.IMAGE_TIMEOUT_MS, null)
+        HttpClient.send(s.stack(), s.iface(), s.dns(), u, "GET", headers, null, Browser.IMAGE_TIMEOUT_MS, null)
                 .whenComplete((resp, err) -> Minecraft.getMinecraft().addScheduledTask(() ->
                 {
                     if(!wanted.getAsBoolean())

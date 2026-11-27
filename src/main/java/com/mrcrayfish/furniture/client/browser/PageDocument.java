@@ -171,6 +171,8 @@ public final class PageDocument
         public final boolean disabled;
         /** 位置字段（隐藏字段；{@link #value} 是网站给的随机数，提交时换成位置证明） */
         public final boolean location;
+        /** 操作者字段（隐藏字段；{@link #value} 是网站给的随机数，提交时换成操作者证明，服主 11-27） */
+        public final boolean operator;
         /** 画板的宽、高（像素）；不是画板为 0 */
         public final int canvasWidth;
         public final int canvasHeight;
@@ -182,14 +184,15 @@ public final class PageDocument
 
         Control(int n, Kind kind, String name, String value, boolean checked, List<String> optionValues, List<String> optionLabels, int selected, int form, int maxLength, boolean disabled, boolean location)
         {
-            this(n, kind, name, value, checked, optionValues, optionLabels, selected, form, maxLength, disabled, location, 0, 0);
+            this(n, kind, name, value, checked, optionValues, optionLabels, selected, form, maxLength, disabled, location, false, 0, 0);
         }
 
-        Control(int n, Kind kind, String name, String value, boolean checked, List<String> optionValues, List<String> optionLabels, int selected, int form, int maxLength, boolean disabled, boolean location, int canvasWidth, int canvasHeight)
+        Control(int n, Kind kind, String name, String value, boolean checked, List<String> optionValues, List<String> optionLabels, int selected, int form, int maxLength, boolean disabled, boolean location, boolean operator, int canvasWidth, int canvasHeight)
         {
             this.canvasWidth = canvasWidth;
             this.canvasHeight = canvasHeight;
             this.location = location;
+            this.operator = operator;
             this.n = n;
             this.kind = kind;
             this.name = name;
@@ -299,6 +302,12 @@ public final class PageDocument
     /** 位置字段的类型（悠然服务器的约定，见 {@code Browser#submitForm}） */
     public static final String LOCATION_TYPE = "x-yr-location";
     static final String LOCATION_ATTR = "data-yr-location";
+    /**
+     * 操作者字段的类型（悠然服务器的约定，服主 11-27，一键登录用）：{@code <input type="x-yr-operator" name="…" value="网站给的随机数" />}。
+     * 提交时浏览器先请服务器签操作者证明（要装身份模块，先在确认框里同意），把证明或 {@code error:代号} 填进去。见 {@code Browser#submitForm}
+     */
+    public static final String OPERATOR_TYPE = "x-yr-operator";
+    static final String OPERATOR_ATTR = "data-yr-operator";
     /**
      * 画板的类型（悠然服务器的约定，服主 11-15）：{@code <input type="x-yr-canvas" name="…" width="宽" height="高" [value="data:image/png;base64,…"] />}。
      * 浏览器显示成像素画板，提交时字段值是 PNG 的 data URL（见 {@code computer.PixelCanvas}）。
@@ -422,6 +431,7 @@ public final class PageDocument
                 Element el = c;
                 // 位置字段、画板的标记只由浏览器自己加（页面自己写的不算）
                 c.removeAttribute(LOCATION_ATTR);
+                c.removeAttribute(OPERATOR_ATTR);
                 c.removeAttribute(CANVAS_ATTR);
                 c.removeAttribute(InputSelectors.ATTR);
                 Element locationLabel = null;
@@ -431,7 +441,9 @@ public final class PageDocument
                     if(type.equals("submit") || type.equals("reset") || type.equals("button") || type.equals("image"))
                         el = toButton(c, type);
                     else if(type.equals(LOCATION_TYPE))
-                        locationLabel = toLocationField(c);
+                        locationLabel = toProofField(c, LOCATION_ATTR, "cfm.browser.location.field", "[提交时附上这台电脑的位置（要先在确认框里同意）]");
+                    else if(type.equals(OPERATOR_TYPE))
+                        locationLabel = toProofField(c, OPERATOR_ATTR, "cfm.browser.operator.field", "[提交时附上“现在是你在操作这台电脑”的证明（要装身份模块，先在确认框里同意）]");
                     else if(type.equals(CANVAS_TYPE))
                         el = toCanvas(c);
                 }
@@ -443,17 +455,17 @@ public final class PageDocument
         }
 
         /**
-         * 位置字段（{@code <input type="x-yr-location" name="…" value="网站给的随机数" />}，悠然服务器的约定）：
-         * 改成隐藏字段（提交时浏览器先请服务器签位置，再把证明或 {@code error:代号} 填进去），后面加一句说明给人看。
+         * 位置字段（{@code <input type="x-yr-location" name="…" value="网站给的随机数" />}）、操作者字段（{@code x-yr-operator}），悠然服务器的约定：
+         * 改成隐藏字段（提交时浏览器先请服务器签名，再把证明或 {@code error:代号} 填进去），后面加一句说明给人看。
          */
-        private Element toLocationField(Element input)
+        private Element toProofField(Element input, String attr, String labelKey, String fallback)
         {
             input.setAttribute("type", "hidden");
-            input.setAttribute(LOCATION_ATTR, "1");
+            input.setAttribute(attr, "1");
             Element label = dom.createElementNS(XHTML_NS, "span");
             label.setAttribute("style", "color: #2b4f81;");
-            String text = lang.apply("cfm.browser.location.field");
-            label.appendChild(dom.createTextNode(text != null ? text : "[提交时附上这台电脑的位置（要先在确认框里同意）]"));
+            String text = lang.apply(labelKey);
+            label.appendChild(dom.createTextNode(text != null ? text : fallback));
             Node next = input.getNextSibling();
             if(next == null)
                 input.getParentNode().appendChild(label);
@@ -693,7 +705,7 @@ public final class PageDocument
                 ch = Integer.parseInt(wh[1]);
             }
             controls.add(new Control(n, kind, e.getAttribute("name"), value, e.hasAttribute("checked"), values, labels, selected, form, maxLength,
-                    e.hasAttribute("disabled"), kind == Kind.HIDDEN && e.hasAttribute(LOCATION_ATTR), cw, ch));
+                    e.hasAttribute("disabled"), kind == Kind.HIDDEN && e.hasAttribute(LOCATION_ATTR), kind == Kind.HIDDEN && e.hasAttribute(OPERATOR_ATTR), cw, ch));
         }
 
         /** 网站的样式表：写给 input 的规则也用到改写出来的按钮上（{@link InputSelectors}） */
