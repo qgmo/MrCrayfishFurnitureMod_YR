@@ -99,6 +99,10 @@ public class GuiBrowser extends GuiContainer
     @Nullable
     private PageSnapshot spectatorSnapshot;
     private int spectatorRender;
+    /** 玩家网口还没有地址（进服后 DHCPv6 还没走完）时先记下要取的图，有了地址再取 */
+    @Nullable
+    private List<String> spectatorImagesPending;
+    private int spectatorImagesPendingReq;
     private double spectatorScroll;
     /** 屏幕缩略图：把看到的页面画小了传给服务端（服主 11-16） */
     @Nullable
@@ -407,6 +411,13 @@ public class GuiBrowser extends GuiContainer
     public void updateScreen()
     {
         super.updateScreen();
+        if(spectatorImagesPending != null)
+        {
+            List<String> urls = spectatorImagesPending;
+            spectatorImagesPending = null;
+            if(spectatorImagesPendingReq == spectatorRender)
+                loadSpectatorImages(spectatorImagesPendingReq, urls);
+        }
         Browser b = browser();
         boolean on = screenOn();
         if(b != null && on && !wasOn)
@@ -505,8 +516,15 @@ public class GuiBrowser extends GuiContainer
         // 绑在玩家自己的网口上（服主 11-27：一个协议栈、多个网口）
         ClientHost.Port s = ClientHost.playerPort();
         PageSnapshot snap = spectatorSnapshot;
-        if(s == null || s.isRemoved() || snap == null)
+        if(snap == null)
             return;
+        if(s == null || s.isRemoved() || s.address() == null)
+        {
+            // 进服后头几秒玩家网口还没经 DHCPv6 拿到地址（或还没加上）：记下来，每 tick 再看一次
+            spectatorImagesPending = urls;
+            spectatorImagesPendingReq = req;
+            return;
+        }
         // 旁观者没有 Cookie（服主 11-15）
         ImageFetcher.fetch(s, urls, () -> req == spectatorRender && mc.currentScreen == this, null, got ->
         {
